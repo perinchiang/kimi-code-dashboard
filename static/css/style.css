@@ -342,12 +342,14 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 .quota-reset { font-size: 0.72rem; color: var(--text-tertiary); margin-top: 0.2rem; font-family: var(--mono); }
 
 /* Compact quota grid */
-.quota-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.6rem; }
+.quota-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.6rem; justify-items: center; }
 .quota-section.compact { margin-bottom: 0; }
 .quota-section.compact .quota-nums { font-size: 0.72rem; color: var(--text-secondary); margin-top: 0.2rem; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
 /* Kimi Usage compact meta */
 .kimi-meta-row { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.5rem; font-size: 0.78rem; color: var(--text-secondary); flex-wrap: wrap; }
+#section-kimi { display: flex; flex-direction: column; }
+#kimiUsageInfo { margin-top: auto; margin-bottom: auto; width: 100%; }
 .kimi-meta-row .sep { color: var(--border); }
 .console-link-inline { color: var(--accent); text-decoration: none; font-weight: 500; }
 .console-link-inline:hover { text-decoration: underline; }
