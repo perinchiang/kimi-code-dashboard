@@ -465,7 +465,7 @@ function renderMemoryEmptyMessage(offline) {
     if (offline) {
         return 'Memory Gateway 未连接（127.0.0.1:8420）。<br>如需长期向量记忆，可搭配 ' + link + ' 使用；不需要可在<a href="#/settings" style="color:var(--accent);text-decoration:underline;">设置</a>中关闭 Memory Status 卡片。';
     }
-    return '目前还没有任何记忆数据。<br>系统会在多轮对话后自动提取 L0–L3 记忆；也可搭配 ' + link + ' 手动管理。不需要可在<a href="#/settings" style="color:var(--accent);text-decoration:underline;">设置</a>中关闭。';
+    return 'Gateway 在线，但目前没有任何记忆数据。<br>系统会在多轮对话后自动提取 L0–L3 记忆；如果长时间未生成，请检查向量模型和 LLM API 配置是否正常。不需要可在<a href="#/settings" style="color:var(--accent);text-decoration:underline;">设置</a>中关闭。';
 }
 
 async function loadMemory() {
