@@ -592,8 +592,8 @@ function renderVersionCheck(r) {
         return;
     }
     if (r && r.current) {
-        setUpdateSlot('<span class="vc-tag vc-tag-ok" style="font-size:0.72rem;padding:0.12rem 0.45rem">\u2713 已是最新</span>');
-        box.innerHTML = '<div class="vc-row"><span class="vc-tag vc-tag-ok">当前 <strong>' + r.current + '</strong> 已是最新版本</span><button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">重新检查</button></div>';
+        setUpdateSlot('<span class="vc-tag vc-tag-ok" style="font-size:0.72rem;padding:0.12rem 0.45rem;cursor:pointer" onclick="checkKimiUpdate()" title="点击重新检查">\u2713 已是最新</span>');
+        box.innerHTML = '<div class="vc-row"><span class="vc-tag vc-tag-ok">当前 <strong>' + r.current + '</strong> 已是最新版本</span></div>';
         return;
     }
     // 默认/初始状态：手动检查按钮放在 Console 右侧 slot 里
