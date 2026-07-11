@@ -349,10 +349,46 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 /* Kimi Usage compact meta */
 .kimi-meta-row { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.5rem; font-size: 0.78rem; color: var(--text-secondary); flex-wrap: wrap; }
 #section-kimi { display: flex; flex-direction: column; }
-#kimiUsageInfo { margin-top: auto; margin-bottom: auto; width: 100%; }
+#kimiUsageInfo { width: 100%; }
 .kimi-meta-row .sep { color: var(--border); }
 .console-link-inline { color: var(--accent); text-decoration: none; font-weight: 500; }
 .console-link-inline:hover { text-decoration: underline; }
+
+/* === Console-style quota cards (Kimi Code console look) === */
+.quota-console-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; margin-top: 0.75rem; }
+.quota-console-card {
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    transition: border-color 0.2s, transform 0.2s;
+}
+.quota-console-card:hover { border-color: rgba(88,166,255,0.25); }
+.quota-console-header { display: flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; color: var(--text-secondary); font-weight: 500; }
+.quota-console-header svg { width: 14px; height: 14px; stroke: var(--text-tertiary); }
+.quota-console-body { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+.quota-console-pct { font-size: 1.9rem; font-weight: 700; color: var(--text); font-family: var(--mono); font-variant-numeric: tabular-nums; line-height: 1; }
+.quota-console-reset { font-size: 0.78rem; color: var(--text-tertiary); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.quota-console-bar { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; position: relative; }
+.quota-console-fill { height: 100%; border-radius: 4px; background: var(--text); position: relative; transition: width 0.6s ease; }
+.quota-console-fill::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: -2px;
+    bottom: -2px;
+    width: 2px;
+    background: var(--text);
+    border-radius: 1px;
+}
+.quota-console-meta { display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-tertiary); font-family: var(--mono); margin-top: -0.25rem; }
+
+@media (max-width: 600px) {
+    .quota-console-grid { grid-template-columns: 1fr; }
+}
 
 .lb-section { margin-top: 1rem; }
 .lb-section:first-of-type { margin-top: 0.5rem; }

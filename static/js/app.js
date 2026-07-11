@@ -536,18 +536,27 @@ async function loadKimi() {
         } else if (quota.error) {
             quotaHtml = '<div class="error">额度查询失败: ' + quota.error + '</div>';
         } else {
-            var renderTierCompact = function(tier, name) {
+            var infoIconSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+            var renderTierConsole = function(tier, title, tip) {
                 if (!tier) return '';
                 var pct = tier.limit > 0 ? Math.round((tier.used / tier.limit) * 100) : 0;
-                var remaining = formatRemaining(tier.resetTime);
-                var remainingHtml = remaining ? '<span class="quota-remaining"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' + remaining + '</span>' : '';
-                return '<div class="quota-section compact">' +
-                    '<div class="quota-header"><span class="label">' + name + '</span><span class="pct">' + pct + '%</span>' + remainingHtml + '</div>' +
-                    '<div class="quota-bar-track"><div class="quota-bar-fill" style="width:' + pct + '%"></div></div>' +
-                    '<div class="quota-nums">' + (tier.used !== null ? formatTokens(tier.used) : '-') + ' / ' + (tier.limit !== null ? formatTokens(tier.limit) : '-') + '</div>' +
+                var resetText = formatRemaining(tier.resetTime) || '-';
+                var usedText = tier.used !== null ? formatTokens(tier.used) : '-';
+                var limitText = tier.limit !== null ? formatTokens(tier.limit) : '-';
+                return '<div class="quota-console-card" title="' + escapeHtml(tip) + '">' +
+                    '<div class="quota-console-header">' + escapeHtml(title) + infoIconSvg + '</div>' +
+                    '<div class="quota-console-body">' +
+                        '<span class="quota-console-pct">' + pct + '%</span>' +
+                        '<span class="quota-console-reset">' + escapeHtml(resetText) + ' 后重置</span>' +
+                    '</div>' +
+                    '<div class="quota-console-bar"><div class="quota-console-fill" style="width:' + pct + '%"></div></div>' +
+                    '<div class="quota-console-meta"><span>已用 ' + usedText + '</span><span>上限 ' + limitText + '</span></div>' +
                 '</div>';
             };
-            quotaHtml = '<div class="quota-grid">' + renderTierCompact(quota.fiveHour, '5h') + renderTierCompact(quota.weekly, '7d') + '</div>';
+            quotaHtml = '<div class="quota-console-grid">' +
+                renderTierConsole(quota.weekly, '本周用量', '最近 7 天累计用量') +
+                renderTierConsole(quota.fiveHour, '频限明细', '最近 5 小时滑动窗口') +
+            '</div>';
         }
         document.getElementById('kimiUsageInfo').innerHTML = quotaHtml;
     } catch (e) { setError('kimiSummary', '加载失败: ' + e.message); }
