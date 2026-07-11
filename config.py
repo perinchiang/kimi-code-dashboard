@@ -23,7 +23,7 @@ GATEWAY_BASE = "http://127.0.0.1:8420"
 TASKS_CONFIG = APP_DIR / "tasks.json"
 
 # --- Dashboard metadata ---
-DASHBOARD_VERSION = "1.0.7"
+DASHBOARD_VERSION = "1.0.8"
 LAUNCHD_PLIST_PATH = HOME / "Library" / "LaunchAgents" / "com.perinchiang.kimi-code-dashboard.plist"
 
 # --- Kimi binary ---

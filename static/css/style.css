@@ -342,7 +342,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 .quota-reset { font-size: 0.72rem; color: var(--text-tertiary); margin-top: 0.2rem; font-family: var(--mono); }
 
 /* Compact quota grid */
-.quota-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.6rem; justify-items: center; }
+.quota-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.6rem; }
 .quota-section.compact { margin-bottom: 0; }
 .quota-section.compact .quota-nums { font-size: 0.72rem; color: var(--text-secondary); margin-top: 0.2rem; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
