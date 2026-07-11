@@ -55,7 +55,7 @@ var SETTINGS_GROUPS = [
         desc: '外观偏好',
         icon: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
         items: [
-            { key: 'follow_system_theme', label: '跟随系统主题', desc: '开启后随系统切换日间/夜间；关闭后用顶部按钮手动切换' },
+            { key: 'follow_system_theme', label: '跟随系统主题', desc: '开启后随系统切换日间/夜间；关闭后用顶部按钮手动切换', row: true },
         ]
     },
     {
@@ -63,14 +63,14 @@ var SETTINGS_GROUPS = [
         desc: '控制首页各模块的显示',
         icon: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
         items: [
-            { key: 'show_trends', label: 'Token 用量趋势', desc: '首页顶部的用量趋势图表' },
-            { key: 'show_minicards', label: '快捷入口卡片', desc: 'Skills / MCP / 定时任务 / 第三方模型' },
-            { key: 'show_kimi_usage', label: 'Kimi Usage', desc: '登录状态、版本检查、额度信息' },
-            { key: 'show_memory', label: 'Memory Status', desc: 'TencentDB 记忆统计与 Gateway 健康' },
-            { key: 'show_tool_model_usage', label: '工具调用 & 模型用量', desc: '工具/Skill/模型调用排行榜' },
-            { key: 'show_tasks', label: '定时任务看板', desc: '快捷入口中的定时任务卡片' },
-            { key: 'show_kimi_web_btn', label: '启动 Kimi Web 按钮', desc: '右上角启动 Kimi Web 的按钮' },
-            { key: 'show_status_bar', label: '顶部状态栏', desc: 'Skills / MCP / Gateway 等状态 pill' },
+            { key: 'show_trends', label: 'Token 用量趋势', desc: '首页顶部的用量趋势图表', row: true },
+            { key: 'show_minicards', label: '快捷入口卡片', desc: 'Skills / MCP / 定时任务 / 第三方模型', row: true },
+            { key: 'show_kimi_usage', label: 'Kimi Usage', desc: '登录状态、版本检查、额度信息', row: true },
+            { key: 'show_memory', label: 'Memory Status', desc: 'TencentDB 记忆统计与 Gateway 健康', row: true },
+            { key: 'show_tool_model_usage', label: '工具调用 & 模型用量', desc: '工具/Skill/模型调用排行榜', row: true },
+            { key: 'show_tasks', label: '定时任务看板', desc: '快捷入口中的定时任务卡片', row: true },
+            { key: 'show_kimi_web_btn', label: '启动 Kimi Web 按钮', desc: '右上角启动 Kimi Web 的按钮', row: true },
+            { key: 'show_status_bar', label: '顶部状态栏', desc: 'Skills / MCP / Gateway 等状态 pill', row: true },
         ]
     }
 ];
@@ -550,7 +550,7 @@ async function loadKimi() {
         }
         document.getElementById('kimiUsageInfo').innerHTML = quotaHtml;
     } catch (e) { setError('kimiSummary', '加载失败: ' + e.message); }
-    checkKimiUpdate();
+    renderVersionCheck();
 }
 
 // === Kimi Version Check & One-click Update ===
@@ -567,23 +567,26 @@ async function checkKimiUpdate() {
 function renderVersionCheck(r) {
     var box = document.getElementById('kimiVersionCheck');
     if (!box) return;
-    if (r.error) {
-        box.innerHTML = '<div class="vc-row"><span class="vc-tag">当前 <strong>' + (r.current || '?') + '</strong></span><span class="vc-error">最新版查询失败: ' + (r.message || r.error) + '</span><button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">重试</button></div>';
+    if (r && r.error) {
+        box.innerHTML = '<div class="vc-row"><span class="vc-error">最新版查询失败: ' + (r.message || r.error) + '</span><button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">重试</button></div>';
         return;
     }
-    var notes = (r.releaseNotes || '').replace(/"/g, '&quot;').replace(/\n/g, ' ');
-    var html = '<div class="vc-row"><span class="vc-tag">当前 <strong>' + r.current + '</strong></span>';
-    if (r.updateAvailable) {
-        html += '<span class="vc-tag vc-tag-warn">\u2192 最新 <strong>' + r.latest + '</strong></span>';
-        html += '<button class="vc-btn" onclick="runKimiUpdate()">\u2b07 一键更新</button>';
+    if (r && r.updateAvailable) {
+        var notes = (r.releaseNotes || '').replace(/"/g, '&quot;').replace(/\n/g, ' ');
+        var html = '<div class="vc-row"><span class="vc-tag">当前 <strong>' + r.current + '</strong></span><span class="vc-tag vc-tag-warn">\u2192 最新 <strong>' + r.latest + '</strong></span>';
+        html += '<button class="vc-btn" onclick="runKimiUpdate()">\u2b07 更新</button>';
         if (notes) html += '<a class="vc-link" href="' + r.releaseUrl + '" target="_blank" rel="noopener" title="' + notes + '">更新内容</a>';
         else if (r.releaseUrl) html += '<a class="vc-link" href="' + r.releaseUrl + '" target="_blank" rel="noopener">Release</a>';
-    } else {
-        html += '<span class="vc-tag vc-tag-ok">\u2713 已是最新版本</span>';
-        html += '<button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">重新检查</button>';
+        html += '</div>';
+        box.innerHTML = html;
+        return;
     }
-    html += '</div>';
-    box.innerHTML = html;
+    if (r && r.current) {
+        box.innerHTML = '<div class="vc-row"><span class="vc-tag vc-tag-ok">当前 <strong>' + r.current + '</strong> 已是最新版本</span><button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">重新检查</button></div>';
+        return;
+    }
+    // 默认/初始状态：单个手动检查按钮
+    box.innerHTML = '<div class="vc-row"><button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">检查 Kimi Code 更新</button></div>';
 }
 
 async function runKimiUpdate() {
