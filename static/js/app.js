@@ -563,9 +563,9 @@ function setUpdateSlot(html) {
 }
 
 async function checkKimiUpdate() {
-    setUpdateSlot('<span style="font-size:0.72rem;color:var(--text-secondary)">检查中…</span>');
     var box = document.getElementById('kimiVersionCheck');
-    if (box) box.innerHTML = '<div class="vc-row"><span class="vc-spinner"></span><span style="font-size:0.78rem;color:var(--text-secondary)">检查更新中…</span></div>';
+    setUpdateSlot('<span class="vc-spinner" style="vertical-align:middle"></span><span style="font-size:0.72rem;color:var(--text-secondary);margin-left:0.3rem">检查中…</span>');
+    if (box) box.innerHTML = '';
     try { var r = await fetchJSON('/api/kimi-update'); renderVersionCheck(r); }
     catch (e) {
         setUpdateSlot('<button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">检查更新</button>');
