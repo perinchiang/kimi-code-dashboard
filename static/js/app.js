@@ -557,26 +557,33 @@ async function loadKimi() {
 // === Kimi Version Check & One-click Update ===
 var updatePollTimer = null;
 
+function setUpdateSlot(html) {
+    var slot = document.getElementById('kimiUpdateBtnSlot');
+    if (slot) slot.innerHTML = html;
+}
+
 async function checkKimiUpdate() {
+    setUpdateSlot('<span style="font-size:0.72rem;color:var(--text-secondary)">检查中…</span>');
     var box = document.getElementById('kimiVersionCheck');
-    if (!box) return;
-    box.innerHTML = '<div class="vc-row"><span class="vc-spinner"></span><span style="font-size:0.78rem;color:var(--text-secondary)">检查更新中…</span></div>';
+    if (box) box.innerHTML = '<div class="vc-row"><span class="vc-spinner"></span><span style="font-size:0.78rem;color:var(--text-secondary)">检查更新中…</span></div>';
     try { var r = await fetchJSON('/api/kimi-update'); renderVersionCheck(r); }
-    catch (e) { box.innerHTML = '<div class="vc-row vc-error">版本检查失败: ' + e.message + '</div>'; }
+    catch (e) {
+        setUpdateSlot('<button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">检查更新</button>');
+        if (box) box.innerHTML = '<div class="vc-row vc-error">版本检查失败: ' + e.message + '</div>';
+    }
 }
 
 function renderVersionCheck(r) {
     var box = document.getElementById('kimiVersionCheck');
-    var slot = document.getElementById('kimiUpdateBtnSlot');
-    if (slot) slot.innerHTML = '';
     if (!box) return;
     if (r && r.error) {
-        box.innerHTML = '<div class="vc-row"><span class="vc-error">最新版查询失败: ' + (r.message || r.error) + '</span><button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">重试</button></div>';
+        setUpdateSlot('<button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">重试</button>');
+        box.innerHTML = '<div class="vc-row"><span class="vc-error">最新版查询失败: ' + (r.message || r.error) + '</span></div>';
         return;
     }
     if (r && r.updateAvailable) {
         var notes = (r.releaseNotes || '').replace(/"/g, '&quot;').replace(/\n/g, ' ');
-        if (slot) slot.innerHTML = '<button class="vc-btn vc-btn-sm" onclick="runKimiUpdate()">\u2b07 更新 Kimi Code</button>';
+        setUpdateSlot('<button class="vc-btn vc-btn-sm" onclick="runKimiUpdate()">\u2b07 更新 Kimi Code</button>');
         var html = '<div class="vc-row"><span class="vc-tag">当前 <strong>' + r.current + '</strong></span><span class="vc-tag vc-tag-warn">\u2192 最新 <strong>' + r.latest + '</strong></span>';
         if (notes) html += '<a class="vc-link" href="' + r.releaseUrl + '" target="_blank" rel="noopener" title="' + notes + '">更新内容</a>';
         else if (r.releaseUrl) html += '<a class="vc-link" href="' + r.releaseUrl + '" target="_blank" rel="noopener">Release</a>';
@@ -585,11 +592,13 @@ function renderVersionCheck(r) {
         return;
     }
     if (r && r.current) {
+        setUpdateSlot('<span class="vc-tag vc-tag-ok" style="font-size:0.72rem;padding:0.12rem 0.45rem">\u2713 已是最新</span>');
         box.innerHTML = '<div class="vc-row"><span class="vc-tag vc-tag-ok">当前 <strong>' + r.current + '</strong> 已是最新版本</span><button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">重新检查</button></div>';
         return;
     }
-    // 默认/初始状态：单个手动检查按钮
-    box.innerHTML = '<div class="vc-row"><button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">检查 Kimi Code 更新</button></div>';
+    // 默认/初始状态：手动检查按钮放在 Console 右侧 slot 里
+    setUpdateSlot('<button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">检查更新</button>');
+    box.innerHTML = '';
 }
 
 async function runKimiUpdate() {
