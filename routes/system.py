@@ -10,7 +10,7 @@ import urllib.parse
 
 from flask import Blueprint, jsonify, render_template, request
 
-from config import KIMI_BIN, KIMI_CODE_DIR, log
+from config import DASHBOARD_VERSION, KIMI_BIN, KIMI_CODE_DIR, LAUNCHD_PLIST_PATH, log
 from services.helpers import no_window_kwargs, tcp_open
 
 bp = Blueprint("system", __name__)
@@ -254,6 +254,57 @@ def api_launch_kimi_web():
     except Exception as e:
         log.error("Failed to launch kimi web: %s", e)
         return jsonify({"status": "error", "error": str(e)})
+
+
+def _startup_service_supported() -> bool:
+    """Startup service management only works on macOS with an existing plist."""
+    return os.uname().sysname == "Darwin" and LAUNCHD_PLIST_PATH.exists()
+
+
+@bp.route("/api/startup-service-status")
+def api_startup_service_status():
+    """Check whether the dashboard launchd startup service is enabled."""
+    if not _startup_service_supported():
+        return jsonify({"supported": False, "enabled": False, "error": "不支持或未配置启动服务"})
+
+    try:
+        result = subprocess.run(
+            ["launchctl", "list"],
+            capture_output=True, text=True, timeout=10,
+            **no_window_kwargs(),
+        )
+        enabled = bool(result.returncode == 0 and "com.perinchiang.kimi-code-dashboard" in result.stdout)
+        return jsonify({"supported": True, "enabled": enabled})
+    except Exception as e:
+        log.warning("Failed to query startup service status: %s", e)
+        return jsonify({"supported": True, "enabled": False, "error": str(e)})
+
+
+@bp.route("/api/startup-service-toggle", methods=["POST"])
+def api_startup_service_toggle():
+    """Enable or disable the dashboard launchd startup service."""
+    if not _startup_service_supported():
+        return jsonify({"success": False, "error": "不支持或未配置启动服务"})
+
+    body = request.get_json(silent=True) or {}
+    enable = bool(body.get("enable"))
+    cmd = ["launchctl", "load", "-w", str(LAUNCHD_PLIST_PATH)] if enable else ["launchctl", "unload", "-w", str(LAUNCHD_PLIST_PATH)]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, **no_window_kwargs())
+        if result.returncode != 0:
+            log.warning("launchctl %s failed: %s", "load" if enable else "unload", result.stderr)
+            return jsonify({"success": False, "error": result.stderr or "launchctl 失败"})
+        return jsonify({"success": True, "enabled": enable})
+    except Exception as e:
+        log.error("Failed to toggle startup service: %s", e)
+        return jsonify({"success": False, "error": str(e)})
+
+
+@bp.route("/api/dashboard-version")
+def api_dashboard_version():
+    """Return dashboard version."""
+    return jsonify({"version": DASHBOARD_VERSION})
 
 
 @bp.route("/")

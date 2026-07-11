@@ -22,6 +22,10 @@ SESSIONS_DIR = KIMI_CODE_DIR / "sessions"
 GATEWAY_BASE = "http://127.0.0.1:8420"
 TASKS_CONFIG = APP_DIR / "tasks.json"
 
+# --- Dashboard metadata ---
+DASHBOARD_VERSION = "1.0.0"
+LAUNCHD_PLIST_PATH = HOME / "Library" / "LaunchAgents" / "com.perinchiang.kimi-code-dashboard.plist"
+
 # --- Kimi binary ---
 KIMI_BIN = KIMI_CODE_DIR / "bin" / ("kimi.exe" if os.name == "nt" else "kimi")
 KIMI_GITHUB_LATEST = "https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest"

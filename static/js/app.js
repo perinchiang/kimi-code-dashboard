@@ -5,6 +5,7 @@ var trendData = null;
 var currentTrendUnit = 'daily';
 var pageLoadTime = Date.now();
 var statusData = {};
+var startupServiceState = { supported: false, enabled: false, loaded: false };
 
 // === Settings ===
 var SETTINGS_KEY = 'kimi_dashboard_settings_v1';
@@ -39,6 +40,14 @@ var SETTINGS_GROUPS = [
             { key: 'kw_port', label: '端口', desc: '默认 5494', type: 'number', row: true },
             { key: 'kw_bypass_auth', label: '关闭密码认证', desc: '无需密码直接访问', row: true },
             { key: 'kw_public_url', label: '自定义访问 URL', desc: '域名会自动加入信任列表', type: 'text', row: true, wide: true },
+        ]
+    },
+    {
+        title: '开机启动',
+        desc: '登录时自动启动 Dashboard',
+        icon: '<path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6v6l4 2"/>',
+        items: [
+            { key: '__startup_service', label: '开机自启', desc: '将 Dashboard 加入 macOS 登录启动项', type: 'startup_toggle', row: true },
         ]
     },
     {
@@ -506,12 +515,14 @@ async function loadKimi() {
         ]);
         var data = results[0], quota = results[1];
         statusData.kimi = data;
+
         var deviceLabel = data.deviceLabel || '本地';
+        var dashboardVer = (window.dashboardVersion || '1.0.0');
         document.getElementById('kimiSummary').innerHTML =
             '<div class="metric">' + data.sessionCount + '</div>' +
-            '<div class="metric-label">本地 Sessions &middot; ' + escapeHtml(deviceLabel) + '</div>' +
+            '<div class="metric-label">本地会话数量 &middot; ' + escapeHtml(deviceLabel) + '</div>' +
             '<div class="kimi-meta-row">' +
-                '<span>启动 ' + data.startCount + '</span>' +
+                '<span>Dashboard v' + escapeHtml(dashboardVer) + '</span>' +
                 '<span class="sep">·</span>' +
                 '<span>' + (data.loggedIn ? '已登录' : '未登录') + '</span>' +
                 '<span class="sep">·</span>' +
@@ -1163,6 +1174,19 @@ function renderSettings() {
             var val = settings[item.key] || 0;
             return '<input type="number" class="search-box" style="width:100px" value="' + escapeHtml(String(val)) + '" oninput="setSetting(\'' + item.key + '\', parseInt(this.value,10)||5494)">';
         }
+        if (item.type === 'startup_toggle') {
+            if (!startupServiceState.loaded) {
+                return '<span style="color:var(--text-tertiary);font-size:0.8rem">检测中...</span>';
+            }
+            if (!startupServiceState.supported) {
+                return '<span style="color:var(--text-tertiary);font-size:0.8rem">仅 macOS 可用</span>';
+            }
+            var checked = startupServiceState.enabled ? ' checked' : '';
+            return '<label class="toggle-switch">' +
+                '<input type="checkbox" onchange="toggleStartupService(this.checked)"' + checked + '>' +
+                '<span class="toggle-slider"></span>' +
+            '</label>';
+        }
         // toggle
         var checked = settings[item.key] ? ' checked' : '';
         return '<label class="toggle-switch">' +
@@ -1347,6 +1371,43 @@ function toggleTaskLog(taskId, btn) {
     if (log) { var showing = log.classList.toggle('show'); btn.textContent = showing ? '隐藏日志' : '查看日志'; }
 }
 
+// === Dashboard version ===
+async function loadDashboardVersion() {
+    try {
+        var data = await fetchJSON('/api/dashboard-version');
+        window.dashboardVersion = data.version || '1.0.0';
+    } catch (e) {
+        window.dashboardVersion = '1.0.0';
+    }
+}
+
+// === Startup service (macOS launchd) ===
+async function loadStartupServiceStatus() {
+    try {
+        var data = await fetchJSON('/api/startup-service-status');
+        startupServiceState = { supported: data.supported, enabled: data.enabled, loaded: true };
+    } catch (e) {
+        startupServiceState = { supported: false, enabled: false, loaded: true };
+    }
+    if (location.hash === '#/settings') renderSettings();
+}
+
+async function toggleStartupService(enable) {
+    try {
+        var data = await postJSON('/api/startup-service-toggle', { enable: enable });
+        if (data.success) {
+            startupServiceState.enabled = enable;
+            showToast('开机启动已' + (enable ? '开启' : '关闭'), 3000);
+        } else {
+            showToast('设置失败: ' + (data.error || '未知错误'), 5000);
+            renderSettings();
+        }
+    } catch (e) {
+        showToast('设置失败: ' + e.message, 5000);
+        renderSettings();
+    }
+}
+
 // === Load all ===
 async function loadAll() {
     var btn = document.getElementById('refreshBtn');
@@ -1362,7 +1423,7 @@ async function loadAll() {
 }
 
 // === Init ===
-loadAll();
+Promise.all([loadDashboardVersion(), loadStartupServiceStatus()]).then(loadAll);
 checkKimiWebStatus();
 setInterval(checkKimiWebStatus, 10000);
 window.addEventListener('hashchange', handleRoute);
