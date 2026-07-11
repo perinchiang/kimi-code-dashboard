@@ -20,7 +20,7 @@ from config import (
     VERSION_CACHE_TTL_OK,
     log,
 )
-from services.helpers import safe_json_load
+from services.helpers import no_window_kwargs, safe_json_load
 from services.wire_parser import get_model_usage, get_trends, get_tool_usage
 
 bp = Blueprint("kimi", __name__)
@@ -187,6 +187,7 @@ def _get_kimi_version_cli() -> str:
         result = subprocess.run(
             [str(KIMI_BIN), "--version"],
             capture_output=True, text=True, timeout=10,
+            **no_window_kwargs(),
         )
         if result.returncode == 0:
             return result.stdout.strip().splitlines()[0].strip()
@@ -224,6 +225,7 @@ def _fetch_latest_release() -> dict | None:
                 ["gh", "release", "view", "--repo", "MoonshotAI/kimi-code",
                  "--json", "tagName,name,publishedAt,url,body"],
                 capture_output=True, text=True, timeout=15,
+                **no_window_kwargs(),
             )
             if result.returncode == 0 and result.stdout.strip():
                 gh_body = json.loads(result.stdout.strip())
@@ -340,8 +342,7 @@ def api_kimi_update_run():
             "stderr": subprocess.STDOUT,
             "cwd": str(KIMI_BIN.parent.parent),
         }
-        if hasattr(subprocess, "CREATE_NO_WINDOW"):
-            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        kwargs.update(no_window_kwargs())
         proc = subprocess.Popen([str(KIMI_BIN), "upgrade"], **kwargs)
     except Exception as e:
         log.error("Failed to start kimi upgrade: %s", e)

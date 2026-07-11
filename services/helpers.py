@@ -2,12 +2,31 @@
 
 import json
 import socket
+import subprocess
 import urllib.request
 from pathlib import Path
 
 import yaml
 
 from config import log
+
+
+def no_window_kwargs() -> dict:
+    """Return subprocess kwargs that hide console windows on Windows.
+
+    Uses STARTUPINFO(SW_HIDE) + CREATE_NO_WINDOW so that neither the direct
+    child nor any grandchild (e.g. node.exe spawned by kimi.exe) flashes a
+    black console window.
+    """
+    kwargs: dict = {}
+    if hasattr(subprocess, "STARTUPINFO"):
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        kwargs["startupinfo"] = si
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    return kwargs
 
 
 def safe_json_load(path: Path) -> dict | None:

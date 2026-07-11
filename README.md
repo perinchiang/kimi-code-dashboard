@@ -1,6 +1,35 @@
 # Kimi Code Dashboard
 
-Kimi Code CLI 的本地可视化面板，展示 Skill、MCP、记忆状态、Kimi 用量概览、模型分布和定时任务。
+Kimi Code CLI 的本地可视化面板，展示 Skill、MCP、记忆状态、Kimi 用量概览、模型分布和定时任务，并提供 Kimi Web 服务的可视化启动配置。
+
+![Dashboard 主面板](docs/images/dashboard-overview.png)
+
+## 功能
+
+### 数据可视化
+
+- **Token 用量趋势**：日 / 周 / 月 / 年（热力图）四档粒度，支持悬停查看详情
+- **Skills 详情**：读取本地 `~/.agents/skills/`，展示已安装 Skills 与描述
+- **MCP Servers**：读取 `~/.kimi-code/mcp.json`，检测各 server 运行状态与 TencentDB Gateway 健康
+- **Memory Status**：调用本地 TencentDB Gateway，以甜甜圈图展示 L0–L3 四级记忆分布
+- **Kimi Usage**：本地 sessions 统计、登录状态、版本检查与一键更新
+- **额度查询**：可选接入 API Key，展示 5 小时 / 7 天窗口的 Token 额度与重置时间
+- **工具 & 模型用量排行榜**：从 `wire.jsonl` 解析 `tool.call` / `usage.record` 事件，统计调用次数与各模型 Token 占比
+- **定时任务看板**：聚合多个来源（Kimi Code / wiki-sync 等）的定时任务状态
+
+### Kimi Web 服务配置
+
+面板右上角「启动 Kimi Web」按钮可直接拉起本地 Kimi Web 服务，所有启动参数都可在「面板设置」页中可视化配置：
+
+![Kimi Web 服务设置](docs/images/settings-kimi-web.png)
+
+- **绑定地址**：`127.0.0.1`（仅本机）或 `0.0.0.0`（外网可访问），切换时自动重启服务
+- **端口**：默认 5494，可自定义
+- **密码认证**：开启时无需密码直接访问；关闭时自动从进程 stdout 捕获 bearer token 并拼接到访问 URL
+- **自定义访问 URL**：外网模式下可填入反代域名，会自动提取主机名加入 `--allowed-host` 信任列表
+- **主题切换**：跟随系统日间 / 夜间主题，或手动切换 dark / light
+
+启动后按钮会变成「打开 Kimi Web」，点击直接跳转到对应 URL（需要认证时附带 token）。
 
 ## 启动
 
@@ -35,7 +64,7 @@ dashboard/
 │   ├── css/style.css   # 样式（从 HTML 分离）
 │   └── js/
 │       ├── charts.js   # SVG 图表渲染（折线图/热力图/甜甜圈/模型条形图）
-│       └── app.js      # 主逻辑（数据加载、路由、事件）
+│       └── app.js      # 主逻辑（数据加载、路由、事件、设置）
 └── templates/
     └── index.html      # 纯 HTML 结构
 ```

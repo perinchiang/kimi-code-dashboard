@@ -45,7 +45,6 @@ function renderLineChart(data) {
         var y = yForRate(r);
         return '<text x="' + (width - pad.right + 5) + '" y="' + (y + 3) + '" font-size="9" fill="var(--success)" font-family="var(--mono)">' + r + '%</text>';
     }).join('');
-    var rateAxisTitle = '<text x="' + (width - 10) + '" y="' + (pad.top - 5) + '" font-size="9" fill="var(--success)" font-family="var(--mono)" text-anchor="end">缓存命中</text>';
 
     var crosshair = '<line id="crosshair" x1="0" y1="' + pad.top + '" x2="0" y2="' + (pad.top + chartH) + '" stroke="var(--text-secondary)" stroke-width="1" stroke-dasharray="3,3" opacity="0" pointer-events="none"/>';
     var overlay = '<rect id="chartOverlay" x="0" y="0" width="' + width + '" height="' + height + '" fill="transparent" style="cursor:crosshair"/>';
@@ -60,7 +59,7 @@ function renderLineChart(data) {
         '<path d="' + outputPath + outputClose + '" fill="url(#outputGrad)"/>' +
         '<path d="' + linePath + '" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>' +
         '<path d="' + ratePath + '" fill="none" stroke="var(--success)" stroke-width="2" stroke-dasharray="6,4" stroke-linecap="round" stroke-linejoin="round"/>' +
-        rateDots + dots + rateLabels + rateAxisTitle + crosshair + labels + overlay +
+        rateDots + dots + rateLabels + crosshair + labels + overlay +
     '</svg>';
 }
 

@@ -17,16 +17,53 @@ var SETTINGS_DEFAULTS = {
     show_tasks: true,
     show_kimi_web_btn: true,
     show_status_bar: true,
+    follow_system_theme: true,  // 跟随系统主题开关
+    manual_theme: 'dark',       // 手动模式下选中的主题: light / dark
+    kw_bind: '0.0.0.0',          // Kimi Web 绑定地址
+    kw_port: 5494,               // Kimi Web 端口
+    kw_bypass_auth: true,        // 关闭密码认证 (true=无需密码)
+    kw_allowed_hosts: '',         // 允许的域名 (逗号分隔)
+    kw_public_url: '',           // 自定义访问URL (留空自动生成)
 };
-var SETTINGS_ITEMS = [
-    { key: 'show_trends', label: 'Token 用量趋势', desc: '首页顶部的用量趋势图表' },
-    { key: 'show_minicards', label: '快捷入口卡片', desc: 'Skills / MCP / 定时任务 / 第三方模型' },
-    { key: 'show_kimi_usage', label: 'Kimi Usage', desc: '登录状态、版本检查、额度信息' },
-    { key: 'show_memory', label: 'Memory Status', desc: 'TencentDB 记忆统计与 Gateway 健康' },
-    { key: 'show_tool_model_usage', label: '工具调用 & 模型用量', desc: '工具/Skill/模型调用排行榜' },
-    { key: 'show_tasks', label: '定时任务看板', desc: '快捷入口中的定时任务卡片' },
-    { key: 'show_kimi_web_btn', label: '启动 Kimi Web 按钮', desc: '右上角启动 Kimi Web 的按钮' },
-    { key: 'show_status_bar', label: '顶部状态栏', desc: 'Skills / MCP / Gateway 等状态 pill' },
+// 分组定义：icon 用 SVG path data (24x24 viewBox)
+var SETTINGS_GROUPS = [
+    {
+        title: 'Kimi Web 服务',
+        desc: '启动配置',
+        icon: '<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>',
+        items: [
+            { key: 'kw_bind', label: '绑定地址', desc: '切换会自动重启服务', type: 'select', row: true, options: [
+                { v: '127.0.0.1', t: '仅本机' },
+                { v: '0.0.0.0',   t: '外网可访问' }
+            ]},
+            { key: 'kw_port', label: '端口', desc: '默认 5494', type: 'number', row: true },
+            { key: 'kw_bypass_auth', label: '关闭密码认证', desc: '无需密码直接访问', row: true },
+            { key: 'kw_public_url', label: '自定义访问 URL', desc: '域名会自动加入信任列表', type: 'text', row: true, wide: true },
+        ]
+    },
+    {
+        title: '主题',
+        desc: '外观偏好',
+        icon: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
+        items: [
+            { key: 'follow_system_theme', label: '跟随系统主题', desc: '开启后随系统切换日间/夜间；关闭后用顶部按钮手动切换' },
+        ]
+    },
+    {
+        title: '界面显示',
+        desc: '控制首页各模块的显示',
+        icon: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+        items: [
+            { key: 'show_trends', label: 'Token 用量趋势', desc: '首页顶部的用量趋势图表' },
+            { key: 'show_minicards', label: '快捷入口卡片', desc: 'Skills / MCP / 定时任务 / 第三方模型' },
+            { key: 'show_kimi_usage', label: 'Kimi Usage', desc: '登录状态、版本检查、额度信息' },
+            { key: 'show_memory', label: 'Memory Status', desc: 'TencentDB 记忆统计与 Gateway 健康' },
+            { key: 'show_tool_model_usage', label: '工具调用 & 模型用量', desc: '工具/Skill/模型调用排行榜' },
+            { key: 'show_tasks', label: '定时任务看板', desc: '快捷入口中的定时任务卡片' },
+            { key: 'show_kimi_web_btn', label: '启动 Kimi Web 按钮', desc: '右上角启动 Kimi Web 的按钮' },
+            { key: 'show_status_bar', label: '顶部状态栏', desc: 'Skills / MCP / Gateway 等状态 pill' },
+        ]
+    }
 ];
 
 function loadSettings() {
@@ -63,12 +100,14 @@ function applySettings() {
     if (kimiWebBtn) kimiWebBtn.style.display = s.show_kimi_web_btn ? '' : 'none';
     var statusBar = document.getElementById('statusBar');
     if (statusBar) statusBar.style.display = s.show_status_bar ? '' : 'none';
+    applyTheme();
 }
 
 function setSetting(key, value) {
     settings[key] = value;
     saveSettings(settings);
     applySettings();
+    if (key === 'kw_bind') renderSettings();
 }
 
 function resetSettings() {
@@ -77,6 +116,52 @@ function resetSettings() {
     renderSettings();
     applySettings();
 }
+
+// === Theme ===
+// 返回当前实际生效的主题
+function getEffectiveTheme() {
+    if (settings.follow_system_theme) {
+        return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+    }
+    return settings.manual_theme || 'dark';
+}
+
+// 应用主题到 <html data-theme=...>，并切换顶部图标显示
+function applyTheme() {
+    var effective = getEffectiveTheme();
+    document.documentElement.setAttribute('data-theme', effective);
+    // 同步 meta theme-color
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (!meta) { meta = document.createElement('meta'); meta.name = 'theme-color'; document.head.appendChild(meta); }
+    meta.content = effective === 'light' ? '#ffffff' : '#0d1117';
+    // 顶部按钮始终可见：显示当前生效主题的反色图标（暗→显太阳提示可切亮，亮→显月亮提示可切暗）
+    var iconSun  = document.getElementById('themeIconSun');
+    var iconMoon = document.getElementById('themeIconMoon');
+    if (iconSun)  iconSun.style.display  = (effective === 'dark')  ? '' : 'none';
+    if (iconMoon) iconMoon.style.display = (effective === 'light') ? '' : 'none';
+}
+
+// 顶部按钮点击：切换 dark <-> light
+// 若当前处于跟随系统模式，先关闭它，恢复手动模式
+function cycleThemeMode() {
+    var target = (getEffectiveTheme() === 'dark') ? 'light' : 'dark';
+    if (settings.follow_system_theme) {
+        settings.follow_system_theme = false;
+        saveSettings(settings);
+        renderSettings();
+    }
+    setSetting('manual_theme', target);
+}
+
+// 系统主题变化时，若处于跟随系统模式则实时跟随
+if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function () {
+        if (settings.follow_system_theme) applyTheme();
+    });
+}
+
+// 页面加载时立即应用一次
+applyTheme();
 
 // === Skill / MCP descriptions ===
 var SKILL_DESC = {
@@ -152,8 +237,13 @@ async function fetchJSON(url, options) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return res.json();
 }
-function postJSON(url) {
-    return fetchJSON(url, { method: 'POST' });
+function postJSON(url, body) {
+    var opts = { method: 'POST' };
+    if (body !== undefined) {
+        opts.headers = { 'Content-Type': 'application/json' };
+        opts.body = JSON.stringify(body);
+    }
+    return fetchJSON(url, opts);
 }
 function setError(id, msg) {
     document.getElementById(id).innerHTML = '<div class="error">' + msg + '</div>';
@@ -162,8 +252,8 @@ function setError(id, msg) {
 // === Launch Kimi Web ===
 async function checkKimiWebStatus() {
     try {
-        var resp = await fetch('/api/kimi-web-status');
-        var data = await resp.json();
+        var cfg = { port: parseInt(settings.kw_port, 10) || 5494 };
+        var data = await postJSON('/api/kimi-web-status', cfg);
         statusData.kimiWeb = data;
         var btn = document.getElementById('kimiWebBtn');
         var text = document.getElementById('kimiWebBtnText');
@@ -175,23 +265,50 @@ async function checkKimiWebStatus() {
 async function launchKimiWeb() {
     var btn = document.getElementById('kimiWebBtn');
     var text = document.getElementById('kimiWebBtnText');
+    // 如果没填自定义 URL，提示用户
+    if (!settings.kw_public_url) {
+        if (!confirm('未配置自定义访问 URL，将使用本地地址 http://127.0.0.1:' + (settings.kw_port || 5494) + '\n\n是否继续？\n（点击「取消」去设置页填写自定义 URL）')) {
+            window.location.hash = '#/settings';
+            return;
+        }
+    }
     btn.disabled = true;
     text.textContent = '启动中...';
+    var popup = window.open('about:blank', '_blank');
+    var wasRunning = btn.classList.contains('running');
+    if (wasRunning) text.textContent = '重启中...';
     try {
-        // POST instead of GET (security fix)
-        var data = await postJSON('/api/launch-kimi-web');
+        var cfg = {
+            bind: settings.kw_bind || '0.0.0.0',
+            port: parseInt(settings.kw_port, 10) || 5494,
+            bypass_auth: settings.kw_bypass_auth !== false,
+            public_url: settings.kw_public_url || ''
+        };
+        console.log('[launchKimiWeb] sending cfg:', JSON.stringify(cfg));
+        var data = await postJSON('/api/launch-kimi-web', cfg);
+        console.log('[launchKimiWeb] response:', JSON.stringify(data));
         if (data.status === 'launched' || data.status === 'already_running') {
             btn.classList.add('running');
             text.textContent = '已启动 \u2713';
             setTimeout(function() { text.textContent = 'Kimi Web 运行中'; btn.disabled = false; }, 1500);
-            window.open(data.url, '_blank');
+            // 在已打开的窗口中导航到目标 URL
+            if (popup && !popup.closed) {
+                popup.location.href = data.url;
+            } else {
+                // 如果弹窗被拦截了，回退到直接打开
+                window.open(data.url, '_blank');
+            }
         } else {
             text.textContent = '启动失败';
             setTimeout(function() { text.textContent = '启动 Kimi Web'; btn.disabled = false; }, 2000);
+            if (popup && !popup.closed) popup.close();
+            alert('启动失败: ' + (data.error || data.status || '未知错误'));
         }
     } catch (e) {
         text.textContent = '启动失败';
         setTimeout(function() { text.textContent = '启动 Kimi Web'; btn.disabled = false; }, 2000);
+        if (popup && !popup.closed) popup.close();
+        alert('启动失败: ' + e.message);
     }
 }
 
@@ -199,15 +316,6 @@ async function launchKimiWeb() {
 function updateClock() {
     var now = new Date();
     document.getElementById('clock').textContent = now.toLocaleTimeString('zh-CN', { hour12: false });
-    var up = Math.floor((Date.now() - pageLoadTime) / 1000);
-    var h = Math.floor(up / 3600);
-    var m = Math.floor((up % 3600) / 60);
-    var s = up % 60;
-    var str = '';
-    if (h > 0) str += h + 'h ';
-    if (m > 0 || h > 0) str += m + 'm ';
-    str += s + 's';
-    document.getElementById('uptime').textContent = '运行 ' + str;
 }
 setInterval(updateClock, 1000);
 updateClock();
@@ -473,6 +581,17 @@ function renderTrend(unit) {
     var total = data.reduce(function(a, b) { return a + b.value; }, 0);
     document.getElementById('trendTotal').textContent = formatTokens(total);
     document.querySelectorAll('.trend-tab').forEach(function(btn) { btn.classList.toggle('active', btn.dataset.unit === unit); });
+    // Update legend bar
+    var legendEl = document.getElementById('trendLegend');
+    if (legendEl && unit !== 'yearly') {
+        legendEl.style.display = 'flex';
+        legendEl.innerHTML =
+            '<div class="trend-legend-item"><span class="trend-legend-swatch" style="background:var(--accent)"></span>输出</div>' +
+            '<div class="trend-legend-item"><span class="trend-legend-swatch" style="background:var(--purple)"></span>输入</div>' +
+            '<div class="trend-legend-item"><span class="trend-legend-swatch" style="background:var(--success)"></span>缓存命中</div>';
+    } else if (legendEl) {
+        legendEl.style.display = 'none';
+    }
 }
 
 async function loadTrends() {
@@ -985,21 +1104,76 @@ async function setDefaultModel(id) {
 
 // === Settings ===
 function renderSettings() {
-    var html = SETTINGS_ITEMS.map(function(item) {
+    var isLocal = settings.kw_bind === '127.0.0.1';
+
+    function buildControl(item) {
+        if (item.type === 'select') {
+            var cur = settings[item.key];
+            var opts = item.options.map(function(o) {
+                var sel = (o.v === cur) ? ' selected' : '';
+                return '<option value="' + escapeHtml(o.v) + '"' + sel + '>' + escapeHtml(o.t) + '</option>';
+            }).join('');
+            return '<select class="search-box" onchange="setSetting(\'' + item.key + '\', this.value)">' + opts + '</select>';
+        }
+        if (item.type === 'text') {
+            var val = settings[item.key] || '';
+            return '<input type="text" class="search-box" value="' + escapeHtml(val) + '" oninput="setSetting(\'' + item.key + '\', this.value)" placeholder="https://your-domain.com:port">';
+        }
+        if (item.type === 'number') {
+            var val = settings[item.key] || 0;
+            return '<input type="number" class="search-box" style="width:100px" value="' + escapeHtml(String(val)) + '" oninput="setSetting(\'' + item.key + '\', parseInt(this.value,10)||5494)">';
+        }
+        // toggle
         var checked = settings[item.key] ? ' checked' : '';
-        return '<div class="config-item settings-item">' +
+        return '<label class="toggle-switch">' +
+            '<input type="checkbox" onchange="setSetting(\'' + item.key + '\', this.checked)"' + checked + '>' +
+            '<span class="toggle-slider"></span>' +
+        '</label>';
+    }
+
+    function renderItem(item) {
+        // 本机模式下隐藏外网专属设置
+        if (isLocal && item.key === 'kw_public_url') return '';
+
+        var infoHtml = '<div class="settings-info">' +
+            '<div class="config-item-title">' + escapeHtml(item.label) + '</div>' +
+            '<div class="config-item-meta">' + escapeHtml(item.desc) + '</div>' +
+        '</div>';
+
+        // 水平布局：标签在左，控件在右
+        if (item.row) {
+            var wideCls = item.wide ? ' wide' : '';
+            return '<div class="settings-item settings-item-row' + wideCls + '">' +
+                infoHtml +
+                '<div class="settings-control">' + buildControl(item) + '</div>' +
+            '</div>';
+        }
+
+        // 默认布局：开关在左，标签在右
+        return '<div class="settings-item">' +
             '<div class="settings-toggle">' +
                 '<label class="toggle-switch">' +
-                    '<input type="checkbox" onchange="setSetting(\'' + item.key + '\', this.checked)"' + checked + '>' +
+                    '<input type="checkbox" onchange="setSetting(\'' + item.key + '\', this.checked)"' + (settings[item.key] ? ' checked' : '') + '>' +
                     '<span class="toggle-slider"></span>' +
                 '</label>' +
             '</div>' +
-            '<div class="settings-info">' +
-                '<div class="config-item-title">' + escapeHtml(item.label) + '</div>' +
-                '<div class="config-item-meta">' + escapeHtml(item.desc) + '</div>' +
+            infoHtml +
+        '</div>';
+    }
+
+    var html = SETTINGS_GROUPS.map(function(group) {
+        var itemsHtml = group.items.map(renderItem).join('');
+        if (!itemsHtml) return '';  // 整组为空则跳过
+        return '<div class="settings-group">' +
+            '<div class="settings-group-header">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + group.icon + '</svg>' +
+                '<span class="settings-group-title">' + escapeHtml(group.title) + '</span>' +
+                '<span class="settings-group-desc">' + escapeHtml(group.desc) + '</span>' +
             '</div>' +
+            '<div class="settings-group-body">' + itemsHtml + '</div>' +
         '</div>';
     }).join('');
+
     html += '<div class="config-form-actions" style="margin-top:1rem">' +
         '<button class="btn-task" onclick="resetSettings()">恢复默认</button>' +
     '</div>';

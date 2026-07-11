@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Blueprint, jsonify
 
 from config import TASKS_CONFIG, log
-from services.helpers import ps_escape_single_quote, safe_json_load
+from services.helpers import no_window_kwargs, ps_escape_single_quote, safe_json_load
 
 bp = Blueprint("tasks", __name__)
 
@@ -61,6 +61,7 @@ def _query_task_status(task_name: str) -> dict:
         result = subprocess.run(
             ["powershell", "-NoProfile", "-Command", cmd],
             capture_output=True, text=True, timeout=10,
+            **no_window_kwargs(),
         )
         if result.returncode == 0 and result.stdout.strip():
             parts = result.stdout.strip().split("|")
@@ -138,6 +139,7 @@ def api_task_run(task_id: str):
                     result = subprocess.run(
                         ["powershell", "-NoProfile", "-Command", cmd],
                         capture_output=True, text=True, timeout=10,
+                        **no_window_kwargs(),
                     )
                     if result.returncode == 0 and result.stdout.strip() == "started":
                         return jsonify({"status": "launched", "taskName": task_name})
@@ -154,8 +156,7 @@ def api_task_run(task_id: str):
                     "stderr": subprocess.DEVNULL,
                     "cwd": str(Path(scripts_dir)),
                 }
-                if hasattr(subprocess, "CREATE_NO_WINDOW"):
-                    kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+                kwargs.update(no_window_kwargs())
                 subprocess.Popen([sys.executable, str(script_path)], **kwargs)
                 return jsonify({"status": "launched", "script": t.get("script", ""), "note": "direct"})
             except Exception as e:
