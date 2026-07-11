@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kimi Code Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="header-inner">
+            <div class="brand">
+                <svg class="kimi-robot" viewBox="0 0 32 22" width="40" height="28">
+                    <defs>
+                        <linearGradient id="robotGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stop-color="#79b8ff"/>
+                            <stop offset="100%" stop-color="#58a6ff"/>
+                        </linearGradient>
+                    </defs>
+                    <rect x="0" y="0" width="32" height="22" rx="7" fill="url(#robotGrad)"/>
+                    <g class="ch-look">
+                        <rect class="ch-eye ch-eye-l" x="8.5" y="6" width="3.2" height="10" rx="1.6" fill="#0d1117"/>
+                        <rect class="ch-eye ch-eye-r" x="20.3" y="6" width="3.2" height="10" rx="1.6" fill="#0d1117"/>
+                    </g>
+                </svg>
+                <div>
+                    <h1>Kimi Code Dashboard</h1>
+                    <div class="subtitle">本地状态可视化面板</div>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="clock">
+                    <div class="clock-time" id="clock">--:--:--</div>
+                    <div class="clock-uptime" id="uptime">运行 0s</div>
+                </div>
+                <span id="lastUpdated">-</span>
+                <button id="kimiWebBtn" class="btn-launch" onclick="launchKimiWeb()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+                    <span id="kimiWebBtnText">启动 Kimi Web</span>
+                </button>
+                <button id="settingsBtn" onclick="location.hash='#/settings'" title="设置">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+                    设置
+                </button>
+                <button id="refreshBtn" onclick="loadAll()">
+                    <svg id="refreshIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>
+                    </svg>
+                    刷新
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="status-bar" id="statusBar">
+        <div class="status-pill loading"><span class="dot"></span>加载中...</div>
+    </div>
+
+    <main id="view-home">
+        <div class="grid">
+            <!-- Token Trends -->
+            <section id="section-trends" class="card" style="grid-column: 1 / -1; animation-delay: 0s;">
+                <h2>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+                    Token 用量趋势
+                </h2>
+                <div class="trend-summary">
+                    <div class="trend-summary-item">
+                        <div class="metric" id="trendTotal">-</div>
+                        <div class="metric-label">当前周期 Token 总量</div>
+                    </div>
+                    <div class="trend-summary-item">
+                        <div class="metric" id="trendGrandTotal">-</div>
+                        <div class="metric-label">全周期 Token 总量</div>
+                    </div>
+                </div>
+                <div class="trend-tabs">
+                    <button class="trend-tab active" data-unit="daily" onclick="renderTrend('daily')">日 (24小时)</button>
+                    <button class="trend-tab" data-unit="weekly" onclick="renderTrend('weekly')">周 (7天)</button>
+                    <button class="trend-tab" data-unit="monthly" onclick="renderTrend('monthly')">月 (30天)</button>
+                    <button class="trend-tab" data-unit="yearly" onclick="renderTrend('yearly')">年 (热力图)</button>
+                </div>
+                <div id="trendChart" class="trend-chart">
+                    <div class="skeleton sk-chart"></div>
+                </div>
+                <div id="chartTooltip" class="chart-tooltip"></div>
+            </section>
+
+            <!-- Skills + MCP + Tasks mini cards -->
+            <div id="section-minicards" class="stats-row" style="grid-column: 1 / -1; animation-delay: 0.08s;">
+                <a href="#/skills" class="mini-card">
+                    <div class="mini-card-header">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                        Skills
+                    </div>
+                    <div class="mini-card-right">
+                        <span class="metric" id="skillsMiniMetric"><div class="skeleton sk-metric"></div></span>
+                        <span class="metric-label" id="skillsMiniLabel">已安装</span>
+                    </div>
+                </a>
+                <a href="#/mcp" class="mini-card">
+                    <div class="mini-card-header">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>
+                        MCP Servers
+                    </div>
+                    <div class="mini-card-right">
+                        <span class="metric" id="mcpMiniMetric"><div class="skeleton sk-metric"></div></span>
+                        <span class="metric-label" id="mcpMiniLabel">可用</span>
+                    </div>
+                </a>
+                <a href="#/tasks" class="mini-card" id="tasksMiniCard">
+                    <div class="mini-card-header">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        定时任务
+                    </div>
+                    <div class="mini-card-right">
+                        <span class="metric" id="tasksMiniMetric">-</span>
+                        <span class="metric-label" id="tasksMiniLabel">已注册任务</span>
+                    </div>
+                    <div id="tasksMiniStatus" class="tasks-mini-status"></div>
+                </a>
+                <a href="#/models" class="mini-card">
+                    <div class="mini-card-header">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                        第三方模型
+                    </div>
+                    <div class="mini-card-right">
+                        <span class="metric" id="modelConfigMetric">-</span>
+                        <span class="metric-label" id="modelConfigLabel">Providers / Models</span>
+                    </div>
+                </a>
+            </div>
+
+            <!-- Kimi Usage -->
+            <section id="section-kimi" class="card" style="animation-delay: 0.16s;">
+                <h2>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
+                    Kimi Usage
+                </h2>
+                <div id="kimiSummary"><div class="skeleton sk-metric"></div><div class="skeleton sk-line" style="width:40%"></div></div>
+                <div id="kimiVersionCheck" class="version-check"></div>
+                <div id="kimiUsageInfo"></div>
+            </section>
+
+            <!-- Memory Status -->
+            <section id="section-memory" class="card" style="animation-delay: 0.24s;">
+                <h2>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+                    Memory Status
+                </h2>
+                <div id="memorySummary"><div class="skeleton sk-metric"></div><div class="skeleton sk-line" style="width:40%"></div></div>
+                <div id="memoryChart"></div>
+                <div id="memoryTooltip" class="chart-tooltip"></div>
+            </section>
+
+            <!-- Tool + Model Usage -->
+            <section id="section-tool-model" class="card" style="grid-column: 1 / -1; animation-delay: 0.4s;">
+                <h2>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                    工具调用 & 模型用量
+                </h2>
+                <div class="lb-section">
+                    <div class="lb-subheader">
+                        <span class="lb-title">工具调用 (MCP)</span>
+                        <span class="lb-total" id="toolCallTotal">-</span>
+                        <button class="lb-sort-btn" id="sortToolBtn" onclick="toggleSort('tool')" title="切换排序">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
+                        </button>
+                    </div>
+                    <div id="toolUsageList" class="leaderboard"></div>
+                </div>
+                <div class="lb-section">
+                    <div class="lb-subheader">
+                        <span class="lb-title lb-title-skill">Skill 调用</span>
+                        <span class="lb-total lb-total-skill" id="skillCallTotal">-</span>
+                        <button class="lb-sort-btn" id="sortSkillBtn" onclick="toggleSort('skill')" title="切换排序">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
+                        </button>
+                    </div>
+                    <div id="skillUsageList" class="leaderboard"></div>
+                </div>
+                <div class="lb-section">
+                    <div class="lb-subheader">
+                        <span class="lb-title lb-title-model">模型用量</span>
+                        <span class="lb-total lb-total-model" id="modelTotalCalls">-</span>
+                        <button class="lb-sort-btn" id="sortModelBtn" onclick="toggleSort('model')" title="切换排序">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
+                        </button>
+                    </div>
+                    <div id="modelChart"></div>
+                    <div id="modelTooltip" class="chart-tooltip"></div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- Detail Pages (SPA hash routes) -->
+    <div id="view-skills" class="detail-page" style="display:none">
+        <div class="detail-header">
+            <a href="#/" class="back-btn">&larr; 返回</a>
+            <h2>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                Skills 详情
+            </h2>
+            <input type="text" class="search-box detail-search" id="skillSearchDetail" placeholder="搜索 skill 名称、描述或 ID..." oninput="filterSkillsDetail(this.value)">
+        </div>
+        <div class="detail-stats" id="skillsDetailStats"></div>
+        <div id="skillsDetailList" class="detail-list"></div>
+    </div>
+
+    <div id="view-mcp" class="detail-page" style="display:none">
+        <div class="detail-header">
+            <a href="#/" class="back-btn">&larr; 返回</a>
+            <h2>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>
+                MCP Servers 详情
+            </h2>
+        </div>
+        <div class="detail-stats" id="mcpDetailStats"></div>
+        <div id="mcpDetailList" class="detail-list"></div>
+    </div>
+
+    <div id="view-models" class="detail-page" style="display:none">
+        <div class="detail-header">
+            <a href="#/" class="back-btn">&larr; 返回</a>
+            <h2>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                第三方模型配置
+            </h2>
+            <div class="default-model-bar">
+                <label for="defaultModelSelect">默认模型</label>
+                <select id="defaultModelSelect" onchange="setDefaultModel(this.value)">
+                    <option>加载中...</option>
+                </select>
+            </div>
+        </div>
+        <div class="config-layout">
+            <section class="config-section card">
+                <div class="config-section-header">
+                    <h3>Providers</h3>
+                    <button class="btn-task" onclick="editProvider()">+ 添加 Provider</button>
+                </div>
+                <div id="providersList" class="config-list"></div>
+            </section>
+            <section class="config-section card">
+                <div class="config-section-header">
+                    <h3>Models</h3>
+                    <div class="model-filter-bar">
+                        <select id="modelProviderFilter" onchange="renderModelConfigDetail()">
+                            <option value="">全部 provider</option>
+                        </select>
+                        <button class="btn-task" onclick="editModel()">+ 添加 Model</button>
+                    </div>
+                </div>
+                <div id="modelsList" class="config-list"></div>
+            </section>
+        </div>
+    </div>
+
+    <div id="view-settings" class="detail-page" style="display:none">
+        <div class="detail-header">
+            <a href="#/" class="back-btn">&larr; 返回</a>
+            <h2>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+                面板设置
+            </h2>
+        </div>
+        <div id="settingsList" class="config-list settings-list"></div>
+    </div>
+
+    <div id="view-tasks" class="detail-page" style="display:none">
+        <div class="detail-header">
+            <a href="#/" class="back-btn">&larr; 返回</a>
+            <h2>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                定时任务看板
+            </h2>
+        </div>
+        <div class="detail-stats" id="tasksDetailStats"></div>
+        <div id="tasksDetailGrid" class="tasks-grid"></div>
+    </div>
+
+    <script src="/static/js/charts.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

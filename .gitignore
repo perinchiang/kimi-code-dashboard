@@ -1,0 +1,18 @@
+# Environment
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Logs
+dashboard.log
+*.log
+
+# Temp
+*.tmp
+
+# User-specific
+tasks.json
+*.bak

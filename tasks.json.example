@@ -1,0 +1,15 @@
+{
+  "scriptsDir": "~/scripts",
+  "tasks": [
+    {
+      "id": "example-task",
+      "name": "Example Task",
+      "description": "Replace with your own scheduled task",
+      "script": "example.py",
+      "schedule": "daily 08:00",
+      "logFile": "example.log",
+      "sources": [],
+      "taskName": "ExampleTask"
+    }
+  ]
+}
