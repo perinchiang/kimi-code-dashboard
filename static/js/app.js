@@ -82,6 +82,28 @@ function saveSettings(settings) {
     } catch (e) { /* ignore */ }
 }
 
+function normalizePublicUrl(url) {
+    url = String(url || '').trim();
+    if (!url) return '';
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    return url;
+}
+
+function showToast(message, duration) {
+    duration = duration || 5000;
+    var existing = document.getElementById('kimiToast');
+    if (existing) existing.remove();
+    var el = document.createElement('div');
+    el.id = 'kimiToast';
+    el.style.cssText = 'position:fixed;bottom:20px;right:20px;max-width:420px;background:var(--card-bg);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:14px 18px;box-shadow:0 6px 20px rgba(0,0,0,0.35);z-index:10000;font-size:14px;line-height:1.55;transition:opacity .3s;cursor:default;';
+    el.innerHTML = message;
+    document.body.appendChild(el);
+    setTimeout(function() {
+        el.style.opacity = '0';
+        setTimeout(function() { el.remove(); }, 300);
+    }, duration);
+}
+
 var settings = loadSettings();
 
 function applySettings() {
@@ -265,8 +287,10 @@ async function checkKimiWebStatus() {
 async function launchKimiWeb() {
     var btn = document.getElementById('kimiWebBtn');
     var text = document.getElementById('kimiWebBtnText');
+    var publicUrl = normalizePublicUrl(settings.kw_public_url);
+
     // 如果没填自定义 URL，提示用户
-    if (!settings.kw_public_url) {
+    if (!publicUrl) {
         if (!confirm('未配置自定义访问 URL，将使用本地地址 http://127.0.0.1:' + (settings.kw_port || 5494) + '\n\n是否继续？\n（点击「取消」去设置页填写自定义 URL）')) {
             window.location.hash = '#/settings';
             return;
@@ -274,7 +298,6 @@ async function launchKimiWeb() {
     }
     btn.disabled = true;
     text.textContent = '启动中...';
-    var popup = window.open('about:blank', '_blank');
     var wasRunning = btn.classList.contains('running');
     if (wasRunning) text.textContent = '重启中...';
     try {
@@ -282,7 +305,7 @@ async function launchKimiWeb() {
             bind: settings.kw_bind || '0.0.0.0',
             port: parseInt(settings.kw_port, 10) || 5494,
             bypass_auth: settings.kw_bypass_auth !== false,
-            public_url: settings.kw_public_url || ''
+            public_url: publicUrl
         };
         console.log('[launchKimiWeb] sending cfg:', JSON.stringify(cfg));
         var data = await postJSON('/api/launch-kimi-web', cfg);
@@ -291,23 +314,24 @@ async function launchKimiWeb() {
             btn.classList.add('running');
             text.textContent = '已启动 \u2713';
             setTimeout(function() { text.textContent = 'Kimi Web 运行中'; btn.disabled = false; }, 1500);
-            // 在已打开的窗口中导航到目标 URL
-            if (popup && !popup.closed) {
-                popup.location.href = data.url;
-            } else {
-                // 如果弹窗被拦截了，回退到直接打开
-                window.open(data.url, '_blank');
+
+            var url = data.url || '';
+            if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
+
+            // 同步尝试打开，避免 about:blank 在 macOS/Safari 上无法导航的问题
+            var popup = null;
+            try { popup = window.open(url, '_blank'); } catch (e) { /* ignore */ }
+            if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+                showToast('浏览器拦截了新窗口，请<a href="' + escapeHtml(url) + '" target="_blank" style="color:var(--accent);text-decoration:underline;font-weight:600;">点击这里</a>打开 Kimi Web', 8000);
             }
         } else {
             text.textContent = '启动失败';
             setTimeout(function() { text.textContent = '启动 Kimi Web'; btn.disabled = false; }, 2000);
-            if (popup && !popup.closed) popup.close();
             alert('启动失败: ' + (data.error || data.status || '未知错误'));
         }
     } catch (e) {
         text.textContent = '启动失败';
         setTimeout(function() { text.textContent = '启动 Kimi Web'; btn.disabled = false; }, 2000);
-        if (popup && !popup.closed) popup.close();
         alert('启动失败: ' + e.message);
     }
 }
@@ -1117,7 +1141,7 @@ function renderSettings() {
         }
         if (item.type === 'text') {
             var val = settings[item.key] || '';
-            return '<input type="text" class="search-box" value="' + escapeHtml(val) + '" oninput="setSetting(\'' + item.key + '\', this.value)" placeholder="https://your-domain.com:port">';
+            return '<input type="text" class="search-box" value="' + escapeHtml(val) + '" oninput="setSetting(\'' + item.key + '\', this.value)" onblur="setSetting(\'' + item.key + '\', normalizePublicUrl(this.value))" placeholder="https://your-domain.com:port">';
         }
         if (item.type === 'number') {
             var val = settings[item.key] || 0;

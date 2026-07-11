@@ -11,6 +11,7 @@ from flask import Blueprint, jsonify
 
 from config import (
     KIMI_BIN,
+    KIMI_CODE_DIR,
     KIMI_CREDENTIALS,
     KIMI_GITHUB_LATEST,
     KIMI_LOG,
@@ -22,6 +23,11 @@ from config import (
 )
 from services.helpers import no_window_kwargs, safe_json_load
 from services.wire_parser import get_model_usage, get_trends, get_tool_usage
+
+try:
+    import tomllib  # Python 3.11+
+except ImportError:
+    tomllib = None
 
 bp = Blueprint("kimi", __name__)
 
@@ -99,16 +105,55 @@ def api_model_usage():
     return jsonify(get_model_usage())
 
 
+def _get_kimi_api_key() -> str:
+    """Read the Kimi provider API key from Kimi Code config.toml.
+
+    Falls back to KIMI_API_KEY env var for backward compatibility.
+    """
+    # 1. Prefer the key configured in Kimi Code "第三方模型 - kimi".
+    config_path = KIMI_CODE_DIR / "config.toml"
+    if tomllib and config_path.exists():
+        try:
+            with open(config_path, "rb") as f:
+                cfg = tomllib.load(f)
+            providers = cfg.get("providers", {})
+            for key, value in providers.items():
+                if isinstance(value, dict) and value.get("type") == "kimi":
+                    candidate = value.get("api_key", "")
+                    if candidate:
+                        return candidate
+        except Exception as e:
+            log.debug("Failed to read Kimi provider key from config.toml: %s", e)
+
+    # 2. Backward compatibility: explicit env key.
+    env_key = os.getenv("KIMI_API_KEY", "")
+    if env_key:
+        return env_key
+
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Quota
 # ---------------------------------------------------------------------------
 @bp.route("/api/kimi-quota")
 def api_kimi_quota():
-    api_key = os.getenv("KIMI_API_KEY", "")
+    api_key = _get_kimi_api_key()
     if not api_key:
         return jsonify({
             "configured": False,
-            "error": "KIMI_API_KEY not set",
+            "error": "请前往第三方模型中 Kimi 配置好 key",
+            "fiveHour": None,
+            "weekly": None,
+        })
+
+    # API keys must be ASCII to be sent in HTTP headers.
+    try:
+        api_key.encode("ascii")
+    except UnicodeEncodeError:
+        return jsonify({
+            "configured": True,
+            "error": "请前往第三方模型中 Kimi 配置好 key",
             "fiveHour": None,
             "weekly": None,
         })
@@ -126,9 +171,20 @@ def api_kimi_quota():
         with urllib.request.urlopen(req, timeout=15) as resp:
             body = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
+        error_msg = f"HTTP {e.code}"
+        if e.code == 401:
+            error_msg = "请前往第三方模型中 Kimi 配置好 key"
         return jsonify({
             "configured": True,
-            "error": f"HTTP {e.code}",
+            "error": error_msg,
+            "fiveHour": None,
+            "weekly": None,
+        })
+    except (UnicodeEncodeError, UnicodeDecodeError) as e:
+        log.warning("Kimi quota query failed (encoding): %s", e)
+        return jsonify({
+            "configured": True,
+            "error": "请前往第三方模型中 Kimi 配置好 key",
             "fiveHour": None,
             "weekly": None,
         })

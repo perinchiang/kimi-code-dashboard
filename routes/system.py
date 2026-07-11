@@ -55,7 +55,10 @@ def _build_url(cfg):
     if bind == "0.0.0.0":
         pub = (cfg.get("public_url") or "").strip()
         if pub:
-            return pub.rstrip("/")
+            pub = pub.rstrip("/")
+            if not pub.startswith(("http://", "https://")):
+                pub = "https://" + pub
+            return pub
         return f"http://127.0.0.1:{port}"
     # 本机模式固定用 127.0.0.1
     return f"http://127.0.0.1:{port}"
