@@ -68,6 +68,7 @@ def _get_device_label() -> str:
             result = subprocess.run(
                 ["wmic", "computersystem", "get", "model", "/value"],
                 capture_output=True, text=True, timeout=10,
+                **no_window_kwargs(),
             )
             for line in result.stdout.splitlines():
                 if line.startswith("Model="):
