@@ -142,7 +142,7 @@ def _parse_file(path: Path, offset: int, result: ParseResult) -> int:
                     ts = obj.get("time")
                     if not isinstance(ts, (int, float)):
                         continue
-                    dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
+                    dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).astimezone()
                     model = obj.get("model", "unknown")
                     usage = obj.get("usage", {})
 
@@ -263,7 +263,7 @@ def _aggregate_usage(records: list[UsageRecord], unit: str, count: int) -> list[
         cache_counts[key] += rec.cache_read
 
     result: list[dict] = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now().astimezone()
     for i in range(count - 1, -1, -1):
         if unit == "hour":
             d = now - timedelta(hours=i)
