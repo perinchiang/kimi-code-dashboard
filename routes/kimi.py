@@ -1,11 +1,14 @@
 """Kimi usage, trends, quota, version check, and model distribution API blueprint."""
 
+import getpass
 import json
 import os
+import platform
 import re
 import subprocess
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 
 from flask import Blueprint, jsonify
 
@@ -30,6 +33,97 @@ except ImportError:
     tomllib = None
 
 bp = Blueprint("kimi", __name__)
+
+
+def _get_device_label() -> str:
+    """Return a friendly device label like 'Patrickchiang's MacBook Air'.
+
+    Falls back to username + OS name if model detection fails.
+    """
+    username = getpass.getuser() or os.getenv("USER") or os.getenv("USERNAME") or "本地"
+    system = platform.system()
+    model = ""
+
+    try:
+        if system == "Darwin":
+            # system_profiler is slow; try sysctl hw.model first, then map common IDs.
+            result = subprocess.run(
+                ["sysctl", "-n", "hw.model"],
+                capture_output=True, text=True, timeout=5,
+            )
+            hw_model = result.stdout.strip()
+            model = _map_mac_model(hw_model) if hw_model else ""
+            if not model:
+                # Fallback to system_profiler for a human-readable name.
+                result = subprocess.run(
+                    ["system_profiler", "SPHardwareDataType", "-json"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if result.returncode == 0:
+                    sp = json.loads(result.stdout)
+                    items = sp.get("SPHardwareDataType", [])
+                    if items:
+                        model = items[0].get("machine_model", "")
+        elif system == "Windows":
+            result = subprocess.run(
+                ["wmic", "computersystem", "get", "model", "/value"],
+                capture_output=True, text=True, timeout=10,
+            )
+            for line in result.stdout.splitlines():
+                if line.startswith("Model="):
+                    model = line.split("=", 1)[1].strip()
+                    break
+        elif system == "Linux":
+            product_path = Path("/sys/class/dmi/id/product_name")
+            if product_path.exists():
+                model = product_path.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        log.debug("Device model detection failed: %s", e)
+
+    if not model:
+        model = system or "Computer"
+
+    # Capitalize first letter of username for nicer display.
+    display_user = username[:1].upper() + username[1:] if username else "本地"
+    return f"{display_user}'s {model}"
+
+
+def _map_mac_model(hw_model: str) -> str:
+    """Map common Mac hw.model identifiers to human-readable names."""
+    # Mapping is intentionally conservative; unknown IDs fall back to system_profiler.
+    mappings = {
+        "MacBookAir10,1": "MacBook Air M1",
+        "MacBookAir10,2": "MacBook Air M1",
+        "Mac14,2": "MacBook Air M2",
+        "Mac14,15": "MacBook Air M2",
+        "Mac15,12": "MacBook Air M3",
+        "Mac15,13": "MacBook Air M3",
+        "MacBookPro18,1": "MacBook Pro 14-inch M1 Pro",
+        "MacBookPro18,2": "MacBook Pro 16-inch M1 Pro",
+        "Mac14,9": "MacBook Pro 14-inch M2 Pro",
+        "Mac14,10": "MacBook Pro 16-inch M2 Pro",
+        "Mac15,3": "MacBook Pro 14-inch M3",
+        "Mac15,6": "MacBook Pro 14-inch M3 Pro",
+        "Mac15,7": "MacBook Pro 16-inch M3 Pro",
+        "Mac15,8": "MacBook Pro 14-inch M3 Max",
+        "Mac15,9": "MacBook Pro 16-inch M3 Max",
+        "Mac13,1": "Mac Studio M1 Max",
+        "Mac13,2": "Mac Studio M1 Ultra",
+        "Mac14,13": "Mac Studio M2 Max",
+        "Mac14,14": "Mac Studio M2 Ultra",
+        "Mac15,5": "Mac Studio M3 Ultra",
+        "Mac13,2": "Mac Studio M1 Ultra",
+        "Macmini9,1": "Mac mini M1",
+        "Mac14,3": "Mac mini M2",
+        "Mac14,12": "Mac mini M2 Pro",
+        "Mac15,4": "Mac mini M3",
+        "Mac15,5": "Mac mini M3 Pro",
+        "iMac21,1": "iMac 24-inch M1",
+        "iMac21,2": "iMac 24-inch M1",
+        "iMac23,1": "iMac 24-inch M3",
+        "iMac23,2": "iMac 24-inch M3",
+    }
+    return mappings.get(hw_model, "")
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +172,7 @@ def api_kimi():
         "sessionCount": session_count,
         "loggedIn": logged_in,
         "consoleUrl": "https://www.kimi.com/code/console?from=kfc_overview_topbar",
+        "deviceLabel": _get_device_label(),
     })
 
 

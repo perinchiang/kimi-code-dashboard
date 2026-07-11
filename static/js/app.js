@@ -506,9 +506,10 @@ async function loadKimi() {
         ]);
         var data = results[0], quota = results[1];
         statusData.kimi = data;
+        var deviceLabel = data.deviceLabel || '本地';
         document.getElementById('kimiSummary').innerHTML =
             '<div class="metric">' + data.sessionCount + '</div>' +
-            '<div class="metric-label">本地 Sessions &middot; 版本 ' + data.version + '</div>' +
+            '<div class="metric-label">本地 Sessions &middot; ' + escapeHtml(deviceLabel) + '</div>' +
             '<div class="kimi-meta-row">' +
                 '<span>启动 ' + data.startCount + '</span>' +
                 '<span class="sep">·</span>' +
