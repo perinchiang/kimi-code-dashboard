@@ -458,12 +458,22 @@ function renderMcpDetail() {
 }
 
 // === Memory ===
+var MEMORY_MCP_REPO = 'https://github.com/perinchiang/kimi-code-memory-mcp';
+
+function renderMemoryEmptyMessage(offline) {
+    var link = '<a href="' + MEMORY_MCP_REPO + '" target="_blank" style="color:var(--accent);text-decoration:underline;font-weight:600;">kimi-code-memory-mcp</a>';
+    if (offline) {
+        return 'Memory Gateway 未连接（127.0.0.1:8420）。<br>如需长期向量记忆，可搭配 ' + link + ' 使用；不需要可在<a href="#/settings" style="color:var(--accent);text-decoration:underline;">设置</a>中关闭 Memory Status 卡片。';
+    }
+    return '目前还没有任何记忆数据。<br>系统会在多轮对话后自动提取 L0–L3 记忆；也可搭配 ' + link + ' 手动管理。不需要可在<a href="#/settings" style="color:var(--accent);text-decoration:underline;">设置</a>中关闭。';
+}
+
 async function loadMemory() {
     try {
         var data = await fetchJSON('/api/memory');
         statusData.memory = data;
         if (!data.gatewayReachable) {
-            setError('memorySummary', 'Gateway 不可达，请检查 127.0.0.1:8420');
+            document.getElementById('memorySummary').innerHTML = '<div class="memory-empty">' + renderMemoryEmptyMessage(true) + '</div>';
             document.getElementById('memoryChart').innerHTML = '';
             return;
         }
@@ -474,6 +484,11 @@ async function loadMemory() {
             { label: 'L3 人格画像', value: data.l3 },
         ];
         var total = data.l0 + data.l1 + data.l2 + data.l3;
+        if (total === 0) {
+            document.getElementById('memorySummary').innerHTML = '<div class="memory-empty">' + renderMemoryEmptyMessage(false) + '</div>';
+            document.getElementById('memoryChart').innerHTML = '';
+            return;
+        }
         var gwStatus = data.gatewayReachable ? 'Gateway 在线' : 'Gateway 离线';
         var layerStatus = (data.l0 >= 0 && data.l1 >= 0 && data.l2 >= 0 && data.l3 >= 0) ? '四级记忆正常' : '部分记忆层异常';
         document.getElementById('memorySummary').innerHTML = '<div class="memory-subtitle">共 ' + total + ' 条记忆</div><div class="memory-breakdown">' + gwStatus + ' · ' + layerStatus + '</div>';

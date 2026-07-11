@@ -2,6 +2,8 @@
 
 Kimi Code CLI 的本地可视化面板，展示 Skill、MCP、记忆状态、Kimi 用量概览、模型分布和定时任务，并提供 Kimi Web 服务的可视化启动配置。
 
+> 💡 **推荐搭配**：如需长期向量记忆，建议同时安装 [kimi-code-memory-mcp](https://github.com/perinchiang/kimi-code-memory-mcp)。
+
 ![Dashboard 主面板](docs/images/dashboard-overview.png)
 
 ## 功能
@@ -11,7 +13,7 @@ Kimi Code CLI 的本地可视化面板，展示 Skill、MCP、记忆状态、Kim
 - **Token 用量趋势**：日 / 周 / 月 / 年（热力图）四档粒度，支持悬停查看详情
 - **Skills 详情**：读取本地 `~/.agents/skills/`，展示已安装 Skills 与描述
 - **MCP Servers**：读取 `~/.kimi-code/mcp.json`，检测各 server 运行状态与 TencentDB Gateway 健康
-- **Memory Status**：调用本地 TencentDB Gateway，以甜甜圈图展示 L0–L3 四级记忆分布
+- **Memory Status**：调用本地 TencentDB Gateway，以甜甜圈图展示 L0–L3 四级记忆分布（需配合 [kimi-code-memory-mcp](https://github.com/perinchiang/kimi-code-memory-mcp)）
 - **Kimi Usage**：本地 sessions 统计、登录状态、版本检查与一键更新
 - **额度查询**：可选接入 API Key，展示 5 小时 / 7 天窗口的 Token 额度与重置时间
 - **工具 & 模型用量排行榜**：从 `wire.jsonl` 解析 `tool.call` / `usage.record` 事件，统计调用次数与各模型 Token 占比
