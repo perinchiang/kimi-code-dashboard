@@ -35,10 +35,17 @@ Kimi Code CLI 的本地可视化面板，展示 Skill、MCP、记忆状态、Kim
 
 ```bash
 cd ~/.kimi-code/dashboard
+
+# Windows
 .venv/Scripts/python.exe app.py
+
+# macOS / Linux
+.venv/bin/python app.py
 ```
 
 然后浏览器打开：http://127.0.0.1:8080
+
+> **注意**：定时任务看板功能依赖 Windows PowerShell（`powershell` 命令），在 macOS / Linux 上不可用。其他功能（数据可视化、Kimi Web 服务配置、主题切换等）均跨平台可用。
 
 ## 项目结构
 
