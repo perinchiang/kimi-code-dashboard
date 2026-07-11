@@ -527,6 +527,7 @@ async function loadKimi() {
                 '<span>' + (data.loggedIn ? '已登录' : '未登录') + '</span>' +
                 '<span class="sep">·</span>' +
                 '<a class="console-link-inline" href="' + data.consoleUrl + '" target="_blank" rel="noopener">Console</a>' +
+                '<span id="kimiUpdateBtnSlot" style="margin-left:0.4rem"></span>' +
             '</div>';
 
         var quotaHtml = '';
@@ -566,6 +567,8 @@ async function checkKimiUpdate() {
 
 function renderVersionCheck(r) {
     var box = document.getElementById('kimiVersionCheck');
+    var slot = document.getElementById('kimiUpdateBtnSlot');
+    if (slot) slot.innerHTML = '';
     if (!box) return;
     if (r && r.error) {
         box.innerHTML = '<div class="vc-row"><span class="vc-error">最新版查询失败: ' + (r.message || r.error) + '</span><button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">重试</button></div>';
@@ -573,8 +576,8 @@ function renderVersionCheck(r) {
     }
     if (r && r.updateAvailable) {
         var notes = (r.releaseNotes || '').replace(/"/g, '&quot;').replace(/\n/g, ' ');
+        if (slot) slot.innerHTML = '<button class="vc-btn vc-btn-sm" onclick="runKimiUpdate()">\u2b07 更新 Kimi Code</button>';
         var html = '<div class="vc-row"><span class="vc-tag">当前 <strong>' + r.current + '</strong></span><span class="vc-tag vc-tag-warn">\u2192 最新 <strong>' + r.latest + '</strong></span>';
-        html += '<button class="vc-btn" onclick="runKimiUpdate()">\u2b07 更新</button>';
         if (notes) html += '<a class="vc-link" href="' + r.releaseUrl + '" target="_blank" rel="noopener" title="' + notes + '">更新内容</a>';
         else if (r.releaseUrl) html += '<a class="vc-link" href="' + r.releaseUrl + '" target="_blank" rel="noopener">Release</a>';
         html += '</div>';
