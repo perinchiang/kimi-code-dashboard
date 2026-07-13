@@ -1,0 +1,194 @@
+---
+name: dashboard-init
+description: 初始化 Kimi Code Dashboard：为 Skills / MCP Servers 生成中文描述，并教 AI 如何创建定时任务。当用户安装新 skill/MCP、发现卡片没有中文说明、或说"补齐描述""初始化 dashboard""给 skill/mcp 加描述""帮我加个定时任务""教 AI 生成定时任务"时调用。
+---
+
+# Dashboard 初始化 Skill
+
+本 skill 用于让 Kimi Code Dashboard 的 Skills / MCP 卡片对中文用户更友好。
+
+## 触发场景
+
+- 用户安装了一个新的 skill 或 MCP server，Dashboard 里只显示名字没有说明
+- 用户说"初始化 dashboard""补齐描述""给 skill 加中文描述""mcp 没说明"
+- 用户想把现有所有 skill/MCP 批量加上中文简介
+
+## 工作流程
+
+1. **扫描 Skill**
+   - 读取 `~/.agents/.skill-lock.json` 获取已安装 skill 列表
+   - 对每个 skill，读取 `~/.agents/skills/<id>/SKILL.md`
+   - 检查 frontmatter 中 `description` 字段：
+     - 如果为空、只有触发词、或明显是英文且用户要中文，则生成一段 30~60 字的中文描述
+     - 如果已有合适中文描述，跳过
+   - 把新描述写回 frontmatter（注意 YAML 中如果含冒号需加引号）
+   - 同步更新 `.skill-lock.json` 中对应 skill 的 `description` 字段
+
+2. **扫描 MCP Server**
+   - 读取 `~/.kimi-code/mcp.json`
+   - 对每个 `mcpServers` 条目：
+     - 如果已有 `description` 字段且不为空，跳过
+     - 否则根据其 `name`、`command`、`args` 推断用途，生成 20~40 字中文描述
+     - 写入 `mcp.json` 的 `description` 字段
+   - 如果 server 在 `~/.kimi-code/.mcp-disabled.json` 中，也一并处理
+
+3. **生成描述的原则**
+   - 用中文，简短，说清用途
+   - 包含典型触发场景（如"用于...""提供...能力"）
+   - 不要照搬原文，用自己的话概括
+   - 如果原描述已很好（即使是英文），可保留或只做轻微中文化
+
+4. **完成后**
+   - 列出所有被更新的 skill 和 MCP
+   - 提示用户刷新 Dashboard 页面查看最新效果
+   - 如果改了 `app.js` 里的 `MCP_DESC` 字典，提醒需要重启 Dashboard
+
+## 3. 初始化 / 创建定时任务
+
+当用户说"帮我加个定时任务""每天几点跑什么""每周同步一次""教 AI 生成定时任务"时，按下面流程处理。
+
+### 3.1 分析用户需求
+
+- 明确任务目标：要做什么、数据来源、输出到哪里
+- 选择触发频率：
+  - 每天固定时间 → `daily`
+  - 每周某些天 → `weekly`（`daysOfWeek` 用 0=周日 到 6=周六）
+  - 每月某一天 → `monthly`
+  - 只跑一次 → `once`
+- 确认脚本是否已经存在；如果不存在，需要新建 Python 脚本并放到 `scriptsDir`
+
+### 3.2 任务配置格式
+
+配置文件：`~/.kimi-code/dashboard/tasks.json`
+
+一个任务条目示例：
+
+```json
+{
+  "id": "wiki-sync-daily",
+  "name": "WikiSync 每日同步",
+  "description": "GitHub/Bilibili/Spotify/Steam/Xteink/Garmin 数据同步到 Wiki",
+  "script": "wiki-sync-daily.py",
+  "schedule": "每日 08:00",
+  "trigger": {
+    "type": "daily",
+    "time": "08:00"
+  },
+  "enabled": true,
+  "logFile": "wiki-sync-daily.log",
+  "sources": ["GitHub", "Bilibili", "Spotify", "Steam", "Xteink", "Garmin"],
+  "taskName": "WikiSync-Daily"
+}
+```
+
+字段说明：
+
+| 字段 | 说明 |
+|------|------|
+| `id` | 小写、唯一、用 kebab-case，例如 `bark-notify-weekly` |
+| `name` | 显示名称，简短中文 |
+| `description` | 30~60 字中文说明 |
+| `script` | `scriptsDir` 下的 Python 脚本相对路径 |
+| `schedule` | 人类可读字符串，例如"每日 08:00""每周日 21:30" |
+| `trigger` | 机器解析的触发器对象，见下表 |
+| `enabled` | 是否启用 |
+| `logFile` | 脚本输出的日志文件名（相对 `scriptsDir`），可选 |
+| `sources` | 数据来源标签，用于看板展示，可选 |
+| `taskName` | Windows 任务计划程序里的名字，建议大驼峰，例如 `WikiSync-Daily` |
+
+### 3.3 trigger 类型
+
+```json
+// 每日
+{ "type": "daily", "time": "08:00" }
+
+// 每周日、三 21:30
+{ "type": "weekly", "time": "21:30", "daysOfWeek": [0, 3] }
+
+// 每月 1 日 09:00
+{ "type": "monthly", "time": "09:00", "day": 1 }
+
+// 只跑一次
+{ "type": "once", "datetime": "2026-07-20T09:00:00" }
+```
+
+### 3.4 脚本约定
+
+- 脚本放在 `tasks.json` 中 `scriptsDir` 指定的目录下
+- 脚本自己负责日志写入到 `logFile` 指定的文件
+- 日志里如果包含 `[SourceName] OK` 或 `[SourceName] FAIL`，看板会自动显示来源状态
+- 脚本开头建议加上 shebang 和编码声明：
+
+```python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import logging, sys, datetime
+
+LOG_FILE = "wiki-sync-daily.log"
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
+def main():
+    logging.info("[GitHub] OK")
+    # ...
+
+if __name__ == "__main__":
+    main()
+```
+
+### 3.5 创建方式
+
+如果 Dashboard 后端已经支持 `POST /api/tasks/create`，优先调用 API：
+
+```python
+import requests, json
+
+body = {
+    "id": "bark-notify-weekly",
+    "name": "Bark 周报提醒",
+    "description": "每周日晚上推送一次本周同步状态",
+    "script": "sync-notify-weekly.py",
+    "trigger": {"type": "weekly", "time": "21:30", "daysOfWeek": [0]},
+    "enabled": True,
+    "logFile": "sync-notify-weekly.log",
+    "sources": ["Bark"],
+    "taskName": "BarkNotify-Weekly",
+}
+
+r = requests.post("http://127.0.0.1:8080/api/tasks/create", json=body)
+print(r.json())
+```
+
+如果 API 不存在或调用失败，则直接修改 `tasks.json`：
+
+1. 读取现有配置
+2. 检查 `id` 是否已存在，避免重复
+3. 追加新任务到 `tasks` 数组
+4. 确保 `schedule` 字段与 `trigger` 一致
+5. 保存文件
+6. 如果脚本文件不存在，先创建脚本
+
+### 3.6 注册到 Windows 任务计划程序
+
+- 只有以管理员身份运行的 Dashboard 才能调用 `Register-ScheduledTask`
+- 如果保存成功但任务显示"未注册"，提示用户：
+  > 配置已保存。因为注册 Windows 计划任务需要管理员权限，请右键以管理员身份重启 Dashboard，任务会自动注册。
+- 非 Windows 系统（如 macOS/Linux）目前 Dashboard 不会调用系统调度器，只把配置保存在 `tasks.json` 中
+
+### 3.7 命名建议
+
+- `id`：kebab-case，例如 `garmin-sync-daily`
+- `taskName`：PascalCase，例如 `GarminSync-Daily`
+- `script`：与 `id` 对应，例如 `garmin-sync-daily.py`
+- `logFile`：与 `id` 对应，例如 `garmin-sync-daily.log`
+
+## 注意事项
+
+- 修改前先看一眼现有内容，避免覆盖用户手写的优质描述
+- YAML frontmatter 编辑时要保留 `---` 分隔符和原有字段
+- `mcp.json` 写入时要保持 JSON 格式，`description` 放在 `command`/`args`/`cwd`/`env` 附近即可
+- 本 skill 不直接操作 Dashboard 进程，只修改数据文件；定时任务除外，可直接改 `tasks.json` 或调用 `/api/tasks/create`

@@ -5,7 +5,8 @@ var trendData = null;
 var currentTrendUnit = 'daily';
 var pageLoadTime = Date.now();
 var statusData = {};
-var startupServiceState = { supported: false, enabled: false, loaded: false };
+var startupServiceState = { supported: false, loaded: false, dashboard: { enabled: false }, kimi: { enabled: false } };
+var elevatedStartupState = { supported: false, loaded: false, enabled: false };
 
 // === Settings ===
 var SETTINGS_KEY = 'kimi_dashboard_settings_v1';
@@ -25,6 +26,8 @@ var SETTINGS_DEFAULTS = {
     kw_bypass_auth: true,        // 关闭密码认证 (true=无需密码)
     kw_allowed_hosts: '',         // 允许的域名 (逗号分隔)
     kw_public_url: '',           // 自定义访问URL (留空自动生成)
+    default_permission_mode: 'manual', // Kimi Code 默认权限模式 (manual/auto/yolo)
+    enable_pwa_icons: false,     // 是否启用 PWA 图标（添加到手机主屏幕）
 };
 // 分组定义：icon 用 SVG path data (24x24 viewBox)
 var SETTINGS_GROUPS = [
@@ -33,21 +36,28 @@ var SETTINGS_GROUPS = [
         desc: '启动配置',
         icon: '<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>',
         items: [
-            { key: 'kw_bind', label: '绑定地址', desc: '切换会自动重启服务', type: 'select', row: true, options: [
-                { v: '127.0.0.1', t: '仅本机' },
+            { key: 'kw_bind', label: '绑定地址', desc: '切换会自动重启服务', type: 'segment', row: true, options: [
+                { v: '127.0.0.1', t: '仅本机访问' },
                 { v: '0.0.0.0',   t: '外网可访问' }
             ]},
             { key: 'kw_port', label: '端口', desc: '默认 5494', type: 'number', row: true },
             { key: 'kw_bypass_auth', label: '关闭密码认证', desc: '无需密码直接访问', row: true },
             { key: 'kw_public_url', label: '自定义访问 URL', desc: '域名会自动加入信任列表', type: 'text', row: true, wide: true },
+            { key: 'default_permission_mode', label: '默认权限模式', desc: 'Kimi Code 新建会话时的默认审批模式；修改后需重启 Kimi Web', type: 'segment', row: true, options: [
+                { v: 'manual', t: '逐条确认' },
+                { v: 'auto', t: '自动模式' },
+                { v: 'yolo', t: 'YOLO 模式' },
+            ]},
         ]
     },
     {
         title: '开机启动',
-        desc: '登录时自动启动 Dashboard',
+        desc: '登录时自动启动服务',
         icon: '<path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6v6l4 2"/>',
         items: [
-            { key: '__startup_service', label: '开机自启', desc: '将 Dashboard 加入 macOS 登录启动项', type: 'startup_toggle', row: true },
+            { key: '__startup_dashboard', label: 'Dashboard 开机自启', desc: '登录后自动启动本面板', type: 'startup_toggle', row: true },
+            { key: '__startup_elevated', label: 'Dashboard 管理员启动', desc: '以管理员权限开机启动 Dashboard，可管理 Windows 定时任务（会触发 UAC）', type: 'elevated_startup_toggle', row: true },
+            { key: '__startup_kimi', label: 'Kimi Code 开机自启', desc: '登录后自动启动 Kimi Web 服务', type: 'startup_toggle', row: true },
         ]
     },
     {
@@ -56,6 +66,14 @@ var SETTINGS_GROUPS = [
         icon: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
         items: [
             { key: 'follow_system_theme', label: '跟随系统主题', desc: '开启后随系统切换日间/夜间；关闭后用顶部按钮手动切换', row: true },
+        ]
+    },
+    {
+        title: 'PWA',
+        desc: '手机主屏幕图标',
+        icon: '<rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>',
+        items: [
+            { key: 'enable_pwa_icons', label: '启用 PWA 图标', desc: '开启后注入 favicon、apple-touch-icon 和 manifest，方便添加到手机桌面', row: true },
         ]
     },
     {
@@ -132,13 +150,68 @@ function applySettings() {
     var statusBar = document.getElementById('statusBar');
     if (statusBar) statusBar.style.display = s.show_status_bar ? '' : 'none';
     applyTheme();
+    applyPwaIcons();
+}
+
+function applyPwaIcons() {
+    var enabled = settings.enable_pwa_icons;
+    var head = document.head;
+    var ids = ['pwa-favicon', 'pwa-apple-touch-icon', 'pwa-manifest', 'pwa-apple-capable', 'pwa-apple-status'];
+
+    if (!enabled) {
+        ids.forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.remove();
+        });
+        return;
+    }
+
+    function ensureLink(id, rel, href) {
+        var el = document.getElementById(id);
+        if (!el) {
+            el = document.createElement('link');
+            el.id = id;
+            el.rel = rel;
+            head.appendChild(el);
+        }
+        el.href = href;
+    }
+    function ensureMeta(id, name, content) {
+        var el = document.getElementById(id);
+        if (!el) {
+            el = document.createElement('meta');
+            el.id = id;
+            el.name = name;
+            head.appendChild(el);
+        }
+        el.content = content;
+    }
+
+    ensureLink('pwa-favicon', 'icon', '/static/pwa/favicon.ico');
+    ensureLink('pwa-apple-touch-icon', 'apple-touch-icon', '/static/pwa/apple-touch-icon.png');
+    ensureLink('pwa-manifest', 'manifest', '/static/pwa/manifest.json');
+    ensureMeta('pwa-apple-capable', 'apple-mobile-web-app-capable', 'yes');
+    ensureMeta('pwa-apple-status', 'apple-mobile-web-app-status-bar-style', 'black-translucent');
 }
 
 function setSetting(key, value) {
     settings[key] = value;
     saveSettings(settings);
     applySettings();
-    if (key === 'kw_bind') renderSettings();
+    if (key === 'kw_bind' || key === 'default_permission_mode') renderSettings();
+    if (key === 'default_permission_mode') {
+        postJSON('/api/update-config', { default_permission_mode: value })
+            .then(function(data) {
+                if (data.success) {
+                    showToast('已保存到 config.toml，重启 Kimi Web 后生效', 4000);
+                } else {
+                    showToast('保存失败: ' + (data.error || '未知错误'), 5000);
+                }
+            })
+            .catch(function(e) {
+                showToast('保存失败: ' + e.message, 5000);
+            });
+    }
 }
 
 function resetSettings() {
@@ -193,6 +266,7 @@ if (window.matchMedia) {
 
 // 页面加载时立即应用一次
 applyTheme();
+applyPwaIcons();
 
 // === Skill / MCP descriptions ===
 var SKILL_DESC = {
@@ -388,8 +462,11 @@ async function loadSkills() {
     try {
         var data = await fetchJSON('/api/skills');
         statusData.skills = data;
-        document.getElementById('skillsMiniMetric').textContent = data.total;
-        document.getElementById('skillsMiniLabel').textContent = '已安装 · 本地 ' + data.localCount;
+        document.getElementById('skillsMiniMetric').textContent = data.enabledCount + '/' + data.total;
+        document.getElementById('skillsMiniLabel').textContent = '启用 / 总计';
+        var pills = [];
+        if (data.disabledCount) pills.push('<span class="task-mini-pill disabled"><span class="dot"></span>已禁用 ' + data.disabledCount + '</span>');
+        document.getElementById('skillsMiniStatus').innerHTML = pills.join('') || '';
     } catch (e) {
         document.getElementById('skillsMiniMetric').textContent = '!';
         document.getElementById('skillsMiniLabel').textContent = '加载失败';
@@ -403,6 +480,9 @@ async function loadMCP() {
         statusData.mcp = data;
         document.getElementById('mcpMiniMetric').textContent = data.available + '/' + data.total;
         document.getElementById('mcpMiniLabel').textContent = '可用 / 总数';
+        var pills = [];
+        if (data.disabled) pills.push('<span class="task-mini-pill disabled"><span class="dot"></span>已禁用 ' + data.disabled + '</span>');
+        document.getElementById('mcpMiniStatus').innerHTML = pills.join('') || '';
     } catch (e) {
         document.getElementById('mcpMiniMetric').textContent = '!';
         document.getElementById('mcpMiniLabel').textContent = '加载失败';
@@ -431,16 +511,28 @@ function renderSkillsDetail() {
     var list = document.getElementById('skillsDetailList');
     var stats = document.getElementById('skillsDetailStats');
     if (!data) { list.innerHTML = '<div class="empty">数据加载中...</div>'; return; }
-    stats.innerHTML = '<span>共 <strong>' + data.total + '</strong> 个</span><span>本地可用 <strong>' + data.localCount + '</strong> 个</span>';
+    stats.innerHTML = '<span>共 <strong>' + data.total + '</strong> 个</span><span>已启用 <strong>' + data.enabledCount + '</strong></span>' + (data.disabledCount ? '<span>已禁用 <strong>' + data.disabledCount + '</strong></span>' : '') + '<span>本地可用 <strong>' + data.localCount + '</strong></span>';
     renderSkillsDetailList(data.skills);
+}
+
+function renderSkillCard(s) {
+    var enabledChecked = s.enabled ? ' checked' : '';
+    var badgeCls = s.enabled ? (s.local ? 'badge-local' : 'badge-remote') : 'badge-disabled';
+    var badgeText = s.enabled ? (s.local ? '本地' : '仅 lock') : '已禁用';
+    var desc = getSkillDesc(s);
+    var actions = '<div class="skill-card-actions">' +
+        '<label class="toggle-switch" title="启用/禁用"><input type="checkbox" onchange="toggleSkillEnabled(\'' + s.id + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label>' +
+        '<button class="btn-task" onclick="openSkillEdit(\'' + s.id + '\')">编辑</button>' +
+        '<button class="btn-task btn-danger" onclick="deleteSkill(\'' + s.id + '\')">卸载</button>' +
+    '</div>';
+    return '<div class="skill-card ' + (s.enabled ? '' : 'disabled') + '" data-skill-id="' + s.id + '"><div class="skill-card-header"><span class="skill-card-name">' + s.name + '</span><span class="badge ' + badgeCls + '">' + badgeText + '</span></div><div class="skill-card-desc">' + desc + '</div><div class="skill-card-meta"><span class="label">ID:</span> ' + s.id + '</div><div class="skill-card-meta"><span class="label">来源:</span> ' + (s.source || '未知') + '</div>' + (s.installedAt ? '<div class="skill-card-meta"><span class="label">安装时间:</span> ' + s.installedAt.slice(0, 10) + '</div>' : '') + actions + '</div>';
 }
 
 function renderSkillsDetailList(skills) {
     var list = document.getElementById('skillsDetailList');
+    list.className = 'skill-grid';
     if (!skills || !skills.length) { list.innerHTML = '<div class="empty">暂无 Skills</div>'; return; }
-    list.innerHTML = skills.map(function(s) {
-        return '<div class="list-item"><div class="list-title"><span>' + s.name + '</span><span class="badge ' + (s.local ? 'badge-local' : 'badge-remote') + '">' + (s.local ? '本地' : '仅 lock') + '</span></div><div class="list-desc">' + getSkillDesc(s) + '</div><div class="list-meta">' + (s.source || '未知') + (s.installedAt ? ' &middot; ' + s.installedAt.slice(0, 10) : '') + '</div></div>';
-    }).join('');
+    list.innerHTML = skills.map(renderSkillCard).join('');
 }
 
 function filterSkillsDetail(q) {
@@ -458,12 +550,106 @@ function renderMcpDetail() {
     var list = document.getElementById('mcpDetailList');
     var stats = document.getElementById('mcpDetailStats');
     if (!data) { list.innerHTML = '<div class="empty">数据加载中...</div>'; return; }
-    stats.innerHTML = '<span>共 <strong>' + data.total + '</strong> 个</span><span>可用 <strong>' + data.available + '</strong> 个</span>';
+    stats.innerHTML = '<span>共 <strong>' + data.total + '</strong> 个</span><span>已启用 <strong>' + data.enabled + '</strong></span>' + (data.disabled ? '<span>已禁用 <strong>' + data.disabled + '</strong></span>' : '') + '<span>可用 <strong>' + data.available + '</strong></span>';
+    list.className = 'mcp-grid';
     if (!data.servers.length) { list.innerHTML = '<div class="empty">未配置 MCP</div>'; return; }
-    list.innerHTML = data.servers.map(function(s) {
-        var mcpDesc = getMcpDesc(s.name);
-        return '<div class="list-item"><div class="list-title"><span>' + s.name + '</span><span class="status ' + s.status + '"><span class="status-dot"></span>' + s.status + '</span></div><div class="list-desc">' + (mcpDesc || s.detail) + '</div><div class="list-meta">' + [s.command].concat(s.args || []).join(' ') + '</div>' + (s.cwd ? '<div class="list-meta">cwd: ' + s.cwd + '</div>' : '') + '</div>';
-    }).join('');
+    list.innerHTML = data.servers.map(renderMcpCard).join('');
+}
+
+function _mcpTypeInfo(s) {
+    var cmd = (s.command || '').toLowerCase();
+    var args = s.args || [];
+    var type = 'other', label = 'Other', cls = 'badge-remote';
+    var display = '';
+
+    if (cmd.endsWith('python.exe') || cmd.endsWith('python') || cmd.includes('python')) {
+        type = 'python';
+        label = 'Python';
+        cls = 'badge-local';
+        var script = args.find(function(a) { return a.toLowerCase().endsWith('.py'); }) || args[args.length - 1] || s.command;
+        display = script.split('/').pop().split('\\').pop();
+    } else if (cmd === 'npx' || cmd.endsWith('npx') || cmd.endsWith('npx.cmd')) {
+        type = 'npx';
+        label = 'NPX';
+        cls = 'mcp-type-npx';
+        var pkg = args.filter(function(a) { return a !== '-y'; }).pop() || '';
+        display = pkg;
+    } else if (cmd.endsWith('node.exe') || cmd.endsWith('node')) {
+        type = 'node';
+        label = 'Node';
+        cls = 'mcp-type-node';
+        var script = args.find(function(a) { return a.toLowerCase().endsWith('.js'); }) || args[args.length - 1] || s.command;
+        display = script.split('/').pop().split('\\').pop();
+    } else if (cmd.endsWith('.cmd') || cmd.endsWith('.bat')) {
+        type = 'cmd';
+        label = 'CMD';
+        cls = 'mcp-type-cmd';
+        display = s.command.split('/').pop().split('\\').pop();
+    } else {
+        display = s.command.split('/').pop().split('\\').pop();
+    }
+    return { type: type, label: label, cls: cls, display: display || s.command };
+}
+
+function _mcpCompactCommand(s) {
+    var info = _mcpTypeInfo(s);
+    return info.label + ': ' + info.display;
+}
+
+function _mcpDetailHtml(s) {
+    var info = _mcpTypeInfo(s);
+    var desc = s.description || getMcpDesc(s.name) || s.detail || '';
+    var lines = [];
+    if (desc) lines.push('<div class="mcp-detail-row"><span class="label">描述:</span> ' + desc + '</div>');
+    lines.push('<div class="mcp-detail-row"><span class="label">类型:</span> <span class="badge ' + info.cls + '">' + info.label + '</span></div>');
+    lines.push('<div class="mcp-detail-row"><span class="label">状态:</span> <span class="status ' + s.status + '"><span class="status-dot"></span>' + s.status + '</span></div>');
+    lines.push('<div class="mcp-detail-row"><span class="label">命令:</span> <code>' + escapeHtml(s.command) + '</code></div>');
+    if (s.args && s.args.length) {
+        lines.push('<div class="mcp-detail-row"><span class="label">参数:</span></div>');
+        lines.push('<ul class="mcp-detail-list">' + s.args.map(function(a) { return '<li><code>' + escapeHtml(a) + '</code></li>'; }).join('') + '</ul>');
+    }
+    if (s.cwd) lines.push('<div class="mcp-detail-row"><span class="label">cwd:</span> <code>' + escapeHtml(s.cwd) + '</code></div>');
+    if (s.env && Object.keys(s.env).length) {
+        lines.push('<div class="mcp-detail-row"><span class="label">环境变量:</span></div>');
+        lines.push('<ul class="mcp-detail-list">' + Object.keys(s.env).map(function(k) { return '<li>' + escapeHtml(k) + '=<span class="mcp-secret">***</span></li>'; }).join('') + '</ul>');
+    }
+    return lines.join('');
+}
+
+var _currentMcpDetailId = null;
+
+function openMcpDetail(mcpId) {
+    var data = statusData.mcp;
+    if (!data) return;
+    var s = data.servers.find(function(x) { return x.name === mcpId; });
+    if (!s) return;
+    _currentMcpDetailId = mcpId;
+    document.getElementById('mcp-detail-name').textContent = s.name;
+    document.getElementById('mcp-detail-content').innerHTML = _mcpDetailHtml(s);
+    document.getElementById('mcpDetailModal').style.display = '';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeMcpDetail() {
+    document.getElementById('mcpDetailModal').style.display = 'none';
+    document.body.style.overflow = '';
+    _currentMcpDetailId = null;
+}
+
+function renderMcpCard(s) {
+    var enabledChecked = s.enabled ? ' checked' : '';
+    var statusCls = s.status;
+    var desc = s.description || getMcpDesc(s.name) || s.detail || '';
+    return '<div class="mcp-card ' + (s.enabled ? '' : 'disabled') + '" data-mcp-id="' + s.name + '" onclick="if(event.target===this)openMcpDetail(\'' + s.name + '\')">' +
+        '<div class="mcp-card-header"><span class="mcp-card-name">' + s.name + '</span><span class="status ' + statusCls + '"><span class="status-dot"></span>' + s.status + '</span></div>' +
+        (desc ? '<div class="mcp-card-desc">' + desc + '</div>' : '') +
+        '<div class="mcp-card-actions">' +
+            '<label class="toggle-switch" title="启用/禁用" onclick="event.stopPropagation()"><input type="checkbox" onchange="toggleMcpEnabled(\'' + s.name + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label>' +
+            '<button class="btn-task" onclick="event.stopPropagation();openMcpDetail(\'' + s.name + '\')">详情</button>' +
+            '<button class="btn-task" onclick="event.stopPropagation();openMcpEdit(\'' + s.name + '\')">编辑</button>' +
+            '<button class="btn-task btn-danger" onclick="event.stopPropagation();deleteMcp(\'' + s.name + '\')">删除</button>' +
+        '</div>' +
+    '</div>';
 }
 
 // === Memory ===
@@ -1190,6 +1376,14 @@ function renderSettings() {
             }).join('');
             return '<select class="search-box" onchange="setSetting(\'' + item.key + '\', this.value)">' + opts + '</select>';
         }
+        if (item.type === 'segment') {
+            var cur = settings[item.key];
+            var btns = item.options.map(function(o) {
+                var active = (o.v === cur) ? ' active' : '';
+                return '<button type="button" class="segment-btn' + active + '" onclick="setSetting(\'' + item.key + '\', \'' + escapeHtml(o.v) + '\')">' + escapeHtml(o.t) + '</button>';
+            }).join('');
+            return '<div class="segment-control">' + btns + '</div>';
+        }
         if (item.type === 'text') {
             var val = settings[item.key] || '';
             return '<input type="text" class="search-box" value="' + escapeHtml(val) + '" oninput="setSetting(\'' + item.key + '\', this.value)" onblur="setSetting(\'' + item.key + '\', normalizePublicUrl(this.value))" placeholder="https://your-domain.com:port">';
@@ -1203,11 +1397,25 @@ function renderSettings() {
                 return '<span style="color:var(--text-tertiary);font-size:0.8rem">检测中...</span>';
             }
             if (!startupServiceState.supported) {
-                return '<span style="color:var(--text-tertiary);font-size:0.8rem">仅 macOS 可用</span>';
+                return '<span style="color:var(--text-tertiary);font-size:0.8rem">仅 macOS / Windows 可用</span>';
             }
-            var checked = startupServiceState.enabled ? ' checked' : '';
+            var svc = item.key === '__startup_kimi' ? 'kimi' : 'dashboard';
+            var checked = startupServiceState[svc].enabled ? ' checked' : '';
             return '<label class="toggle-switch">' +
-                '<input type="checkbox" onchange="toggleStartupService(this.checked)"' + checked + '>' +
+                '<input type="checkbox" onchange="toggleStartupService(\'' + svc + '\', this.checked)"' + checked + '>' +
+                '<span class="toggle-slider"></span>' +
+            '</label>';
+        }
+        if (item.type === 'elevated_startup_toggle') {
+            if (!elevatedStartupState.loaded) {
+                return '<span style="color:var(--text-tertiary);font-size:0.8rem">检测中...</span>';
+            }
+            if (!elevatedStartupState.supported) {
+                return '<span style="color:var(--text-tertiary);font-size:0.8rem">仅 Windows 可用</span>';
+            }
+            var checked = elevatedStartupState.enabled ? ' checked' : '';
+            return '<label class="toggle-switch">' +
+                '<input type="checkbox" onchange="toggleElevatedStartup(this.checked)"' + checked + '>' +
                 '<span class="toggle-slider"></span>' +
             '</label>';
         }
@@ -1298,7 +1506,8 @@ function renderTaskCard(t) {
     var resultStatus = s.resultStatus || { label: '未知', ok: null };
     var resultColor = resultStatus.ok === true ? 'var(--success)' : (resultStatus.ok === false ? 'var(--danger)' : 'var(--text-secondary)');
     var resultLabel = '<span style="color:' + resultColor + '">' + resultStatus.label + '</span>';
-    return '<div class="task-card"><div class="task-card-header"><span class="task-card-name">' + t.name + '</span><span class="task-state-badge ' + stateCls + '">' + stateLabel + '</span></div><div class="task-card-desc">' + t.description + '</div><div class="task-card-schedule">\u23f0 ' + t.schedule + '</div>' + renderTaskSources(t.sources, t.logPreview) + '<div class="task-card-info">' + (s.lastRun && s.lastRun !== '1999-11-30T00:00:00' ? '<div><span class="label">上次运行:</span> ' + s.lastRun.replace('T', ' ') + '</div>' : '<div><span class="label">上次运行:</span> 尚未运行</div>') + (s.nextRun ? '<div><span class="label">下次运行:</span> ' + s.nextRun.replace('T', ' ') + '</div>' : '') + (resultStatus.label ? '<div><span class="label">运行结果:</span> ' + resultLabel + '</div>' : '') + '</div><div class="task-card-actions"><button class="btn-task" onclick="runTask(\'' + t.id + '\', this)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>立即运行</button>' + (t.logFile ? '<button class="btn-task" onclick="toggleTaskLog(\'' + t.id + '\', this)">' + (t.logPreview ? '查看日志' : '日志为空') + '</button>' : '') + '</div>' + (t.logPreview ? '<div class="task-log" id="log-' + t.id + '">' + t.logPreview.replace(/</g, '&lt;') + '</div>' : '') + '</div>';
+    var enabledChecked = t.enabled ? ' checked' : '';
+    return '<div class="task-card" data-task-id="' + t.id + '"><div class="task-card-header"><span class="task-card-name">' + t.name + '</span><span class="task-state-badge ' + stateCls + '">' + stateLabel + '</span></div><div class="task-card-desc">' + t.description + '</div><div class="task-card-schedule">\u23f0 ' + t.schedule + '</div>' + renderTaskSources(t.sources, t.logPreview) + '<div class="task-card-info">' + (s.lastRun && s.lastRun !== '1999-11-30T00:00:00' ? '<div><span class="label">上次运行:</span> ' + s.lastRun.replace('T', ' ') + '</div>' : '<div><span class="label">上次运行:</span> 尚未运行</div>') + (s.nextRun ? '<div><span class="label">下次运行:</span> ' + s.nextRun.replace('T', ' ') + '</div>' : '') + (resultStatus.label ? '<div><span class="label">运行结果:</span> ' + resultLabel + '</div>' : '') + '</div><div class="task-card-actions"><label class="toggle-switch" title="启用/禁用"><input type="checkbox" onchange="toggleTaskEnabled(\'' + t.id + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label><button class="btn-task" onclick="runTask(\'' + t.id + '\', this)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>立即运行</button><button class="btn-task" onclick="openTaskEdit(\'' + t.id + '\')">编辑</button>' + (t.logFile ? '<button class="btn-task" onclick="openTaskLog(\'' + t.id + '\')">日志</button>' : '') + '<button class="btn-task btn-danger" onclick="deleteTask(\'' + t.id + '\')">删除</button></div></div>';
 }
 
 function renderTasksDetail() {
@@ -1395,6 +1604,411 @@ function toggleTaskLog(taskId, btn) {
     if (log) { var showing = log.classList.toggle('show'); btn.textContent = showing ? '隐藏日志' : '查看日志'; }
 }
 
+// === Task Edit Modal ===
+var _currentTaskEditId = null;
+var _currentTaskCreate = false;
+var _currentLogTaskId = null;
+
+function _setTaskEditTitle(title) {
+    var el = document.querySelector('#taskEditModal .modal-header h3');
+    if (el) el.childNodes[el.childNodes.length - 1].textContent = ' ' + title;
+}
+
+function openTaskCreate() {
+    _currentTaskCreate = true;
+    _currentTaskEditId = null;
+    _setTaskEditTitle('新建定时任务');
+    document.getElementById('task-edit-id').value = '';
+    var idVisible = document.getElementById('task-edit-id-visible');
+    idVisible.value = '';
+    idVisible.disabled = false;
+    idVisible.placeholder = '例如 wiki-sync-daily';
+    document.getElementById('task-edit-name').value = '';
+    document.getElementById('task-edit-desc').value = '';
+    document.getElementById('task-edit-script').value = '';
+    document.getElementById('task-edit-logfile').value = '';
+    document.getElementById('task-edit-sources').value = '';
+    setTaskEditType('daily');
+    document.getElementById('task-edit-time').value = '08:00';
+    document.querySelectorAll('#task-edit-days-row input[type="checkbox"]').forEach(function(cb) { cb.checked = false; });
+    document.getElementById('task-edit-day').value = 1;
+    document.getElementById('task-edit-datetime').value = '';
+    document.getElementById('taskEditModal').style.display = '';
+    document.body.style.overflow = 'hidden';
+}
+
+function openTaskEdit(taskId) {
+    var data = statusData.tasks;
+    if (!data) return;
+    var t = data.tasks.find(function(x) { return x.id === taskId; });
+    if (!t) return;
+    _currentTaskCreate = false;
+    _currentTaskEditId = taskId;
+    _setTaskEditTitle('编辑定时任务');
+
+    document.getElementById('task-edit-id').value = t.id;
+    var idVisible = document.getElementById('task-edit-id-visible');
+    idVisible.value = t.id;
+    idVisible.disabled = true;
+    document.getElementById('task-edit-name').value = t.name || '';
+    document.getElementById('task-edit-desc').value = t.description || '';
+    document.getElementById('task-edit-script').value = t.script || '';
+    document.getElementById('task-edit-logfile').value = t.logFile || '';
+    document.getElementById('task-edit-sources').value = (t.sources || []).join(', ');
+
+    var trigger = t.trigger || { type: 'daily', time: '00:00' };
+    setTaskEditType(trigger.type);
+
+    if (trigger.time) document.getElementById('task-edit-time').value = trigger.time;
+    if (trigger.type === 'weekly') {
+        var days = trigger.daysOfWeek || [0];
+        document.querySelectorAll('#task-edit-days-row input[type="checkbox"]').forEach(function(cb) {
+            cb.checked = days.indexOf(parseInt(cb.value, 10)) !== -1;
+        });
+    }
+    if (trigger.type === 'monthly') {
+        document.getElementById('task-edit-day').value = trigger.day || 1;
+    }
+    if (trigger.type === 'once') {
+        document.getElementById('task-edit-datetime').value = trigger.datetime || '';
+    }
+
+    document.getElementById('taskEditModal').style.display = '';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeTaskEdit() {
+    document.getElementById('taskEditModal').style.display = 'none';
+    document.body.style.overflow = '';
+    _currentTaskEditId = null;
+}
+
+function setTaskEditType(type) {
+    document.querySelectorAll('#task-edit-type-group .segment-btn').forEach(function(btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-value') === type);
+    });
+    document.getElementById('task-edit-time-row').style.display = (type === 'once') ? 'none' : '';
+    document.getElementById('task-edit-days-row').style.display = (type === 'weekly') ? '' : 'none';
+    document.getElementById('task-edit-day-row').style.display = (type === 'monthly') ? '' : 'none';
+    document.getElementById('task-edit-datetime-row').style.display = (type === 'once') ? '' : 'none';
+}
+
+function _collectTaskEditTrigger() {
+    var type = document.querySelector('#task-edit-type-group .segment-btn.active');
+    type = type ? type.getAttribute('data-value') : 'daily';
+    if (type === 'once') {
+        return { type: 'once', datetime: document.getElementById('task-edit-datetime').value };
+    }
+    var time = document.getElementById('task-edit-time').value || '00:00';
+    if (type === 'weekly') {
+        var days = [];
+        document.querySelectorAll('#task-edit-days-row input[type="checkbox"]:checked').forEach(function(cb) {
+            days.push(parseInt(cb.value, 10));
+        });
+        if (!days.length) days = [0];
+        return { type: 'weekly', time: time, daysOfWeek: days.sort(function(a,b){return a-b;}) };
+    }
+    if (type === 'monthly') {
+        var day = parseInt(document.getElementById('task-edit-day').value, 10) || 1;
+        return { type: 'monthly', time: time, day: day };
+    }
+    return { type: 'daily', time: time };
+}
+
+async function saveTask() {
+    var taskId = _currentTaskEditId;
+    var isCreate = _currentTaskCreate;
+    if (!isCreate && !taskId) return;
+    var btn = document.getElementById('task-edit-save-btn');
+    var orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '保存中...';
+
+    var sources = document.getElementById('task-edit-sources').value
+        .split(/[,，]/)
+        .map(function(s) { return s.trim(); })
+        .filter(function(s) { return s; });
+
+    var body = {
+        name: document.getElementById('task-edit-name').value.trim(),
+        description: document.getElementById('task-edit-desc').value.trim(),
+        script: document.getElementById('task-edit-script').value.trim(),
+        logFile: document.getElementById('task-edit-logfile').value.trim(),
+        sources: sources,
+        trigger: _collectTaskEditTrigger(),
+    };
+
+    try {
+        var data;
+        if (isCreate) {
+            var rawId = document.getElementById('task-edit-id-visible').value.trim();
+            if (!rawId) { showToast('请填写任务 ID', 3000); btn.disabled = false; btn.innerHTML = orig; return; }
+            body.id = rawId;
+            body.taskName = rawId.replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); }).replace(/\s+/g, '');
+            body.enabled = true;
+            data = await postJSON('/api/tasks/create', body);
+        } else {
+            data = await postJSON('/api/tasks/' + taskId + '/save', body);
+        }
+        closeTaskEdit();
+        if (data.warning) {
+            showToast('任务已保存，但计划任务未更新: ' + data.warning, 7000);
+        } else {
+            showToast(isCreate ? '任务已创建' : '任务已保存', 3000);
+        }
+        await loadTasks();
+    } catch (e) {
+        showToast('保存失败: ' + e.message, 5000);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+    }
+}
+
+async function deleteTask(taskId) {
+    var data = statusData.tasks;
+    var t = data && data.tasks.find(function(x) { return x.id === taskId; });
+    var name = t ? t.name : taskId;
+    if (!confirm('确定删除任务 "' + name + '"？\n这会同时删除 Windows 任务计划程序中的对应任务。')) return;
+    try {
+        var res = await postJSON('/api/tasks/' + taskId + '/delete');
+        if (res.warning) {
+            showToast('任务配置已删除，但计划任务未移除: ' + res.warning, 7000);
+        } else {
+            showToast('任务已删除', 3000);
+        }
+        await loadTasks();
+    } catch (e) {
+        showToast('删除失败: ' + e.message, 5000);
+    }
+}
+
+async function toggleTaskEnabled(taskId, enabled) {
+    try {
+        var data = await postJSON('/api/tasks/' + taskId + '/toggle', { enabled: enabled });
+        if (data.success) {
+            if (data.warning) {
+                showToast('任务状态已保存，但计划任务未更新: ' + data.warning, 7000);
+            } else {
+                showToast('任务已' + (data.enabled ? '启用' : '禁用'), 3000);
+            }
+            await loadTasks();
+        } else {
+            showToast('设置失败: ' + (data.error || '未知错误'), 5000);
+            await loadTasks();
+        }
+    } catch (e) {
+        showToast('设置失败: ' + e.message, 5000);
+        await loadTasks();
+    }
+}
+
+// === Task Log Modal ===
+async function openTaskLog(taskId) {
+    _currentLogTaskId = taskId;
+    var data = statusData.tasks;
+    var t = data && data.tasks.find(function(x) { return x.id === taskId; });
+    document.getElementById('task-log-meta').textContent = t ? (t.logFile || '') : '';
+    document.getElementById('task-log-content').textContent = '加载中...';
+    document.getElementById('taskLogModal').style.display = '';
+    document.body.style.overflow = 'hidden';
+    await refreshTaskLog();
+}
+
+function closeTaskLog() {
+    document.getElementById('taskLogModal').style.display = 'none';
+    document.body.style.overflow = '';
+    _currentLogTaskId = null;
+}
+
+async function refreshTaskLog() {
+    if (!_currentLogTaskId) return;
+    try {
+        var data = await fetchJSON('/api/tasks/' + _currentLogTaskId + '/log');
+        var content = document.getElementById('task-log-content');
+        content.textContent = data.log || '（空日志）';
+        var meta = document.getElementById('task-log-meta');
+        meta.textContent = data.logFile ? '日志文件: ' + data.logFile : '';
+    } catch (e) {
+        document.getElementById('task-log-content').textContent = '加载失败: ' + e.message;
+    }
+}
+
+// === Skill management ===
+var _currentSkillEditId = null;
+
+function openSkillEdit(skillId) {
+    var data = statusData.skills;
+    if (!data) return;
+    var s = data.skills.find(function(x) { return x.id === skillId; });
+    if (!s) return;
+    _currentSkillEditId = skillId;
+    document.getElementById('skill-edit-id').value = s.id;
+    document.getElementById('skill-edit-name').value = s.name || '';
+    document.getElementById('skill-edit-desc').value = s.description || '';
+    document.getElementById('skill-edit-source').value = s.source || '';
+    document.getElementById('skill-edit-sourceurl').value = s.sourceUrl || '';
+    document.getElementById('skillEditModal').style.display = '';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeSkillEdit() {
+    document.getElementById('skillEditModal').style.display = 'none';
+    document.body.style.overflow = '';
+    _currentSkillEditId = null;
+}
+
+async function saveSkill() {
+    var skillId = _currentSkillEditId;
+    if (!skillId) return;
+    var btn = document.getElementById('skill-edit-save-btn');
+    var orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '保存中...';
+    try {
+        await postJSON('/api/skills/' + skillId + '/save', {
+            name: document.getElementById('skill-edit-name').value.trim(),
+            description: document.getElementById('skill-edit-desc').value.trim(),
+            source: document.getElementById('skill-edit-source').value.trim(),
+            sourceUrl: document.getElementById('skill-edit-sourceurl').value.trim(),
+        });
+        closeSkillEdit();
+        showToast('Skill 已保存', 3000);
+        await loadSkills();
+    } catch (e) {
+        showToast('保存失败: ' + e.message, 5000);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+    }
+}
+
+async function deleteSkill(skillId) {
+    var data = statusData.skills;
+    var s = data && data.skills.find(function(x) { return x.id === skillId; });
+    var name = s ? s.name : skillId;
+    if (!confirm('确定卸载 Skill "' + name + '"？\n这会删除本地 skill 目录。')) return;
+    try {
+        await postJSON('/api/skills/' + skillId + '/delete');
+        showToast('Skill 已卸载', 3000);
+        await loadSkills();
+    } catch (e) {
+        showToast('卸载失败: ' + e.message, 5000);
+    }
+}
+
+async function toggleSkillEnabled(skillId, enabled) {
+    try {
+        var data = await postJSON('/api/skills/' + skillId + '/toggle', { enabled: enabled });
+        if (data.success) {
+            showToast('Skill 已' + (data.enabled ? '启用' : '禁用'), 3000);
+            await loadSkills();
+        } else {
+            showToast('设置失败: ' + (data.error || '未知错误'), 5000);
+            await loadSkills();
+        }
+    } catch (e) {
+        showToast('设置失败: ' + e.message, 5000);
+        await loadSkills();
+    }
+}
+
+// === MCP management ===
+var _currentMcpEditId = null;
+
+function openMcpEdit(mcpId) {
+    var data = statusData.mcp;
+    if (!data) return;
+    var s = data.servers.find(function(x) { return x.name === mcpId; });
+    if (!s) return;
+    _currentMcpEditId = mcpId;
+    document.getElementById('mcp-edit-id').value = s.name;
+    document.getElementById('mcp-edit-command').value = s.command || '';
+    document.getElementById('mcp-edit-args').value = (s.args || []).join('\n');
+    document.getElementById('mcp-edit-cwd').value = s.cwd || '';
+    document.getElementById('mcp-edit-description').value = s.description || getMcpDesc(s.name) || '';
+    var env = s.env || {};
+    document.getElementById('mcp-edit-env').value = Object.keys(env).map(function(k) { return k + '=' + env[k]; }).join('\n');
+    document.getElementById('mcpEditModal').style.display = '';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeMcpEdit() {
+    document.getElementById('mcpEditModal').style.display = 'none';
+    document.body.style.overflow = '';
+    _currentMcpEditId = null;
+}
+
+async function saveMcp() {
+    var mcpId = _currentMcpEditId;
+    if (!mcpId) return;
+    var btn = document.getElementById('mcp-edit-save-btn');
+    var orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '保存中...';
+
+    var args = document.getElementById('mcp-edit-args').value.split('\n').map(function(s) { return s.trim(); }).filter(function(s) { return s; });
+    var envLines = document.getElementById('mcp-edit-env').value.split('\n');
+    var env = {};
+    envLines.forEach(function(line) {
+        var idx = line.indexOf('=');
+        if (idx > 0) {
+            var k = line.slice(0, idx).trim();
+            var v = line.slice(idx + 1).trim();
+            if (k) env[k] = v;
+        }
+    });
+
+    var body = {
+        command: document.getElementById('mcp-edit-command').value.trim(),
+        args: args,
+        cwd: document.getElementById('mcp-edit-cwd').value.trim(),
+        description: document.getElementById('mcp-edit-description').value.trim(),
+    };
+    if (Object.keys(env).length) body.env = env;
+
+    try {
+        await postJSON('/api/mcp/' + mcpId + '/save', body);
+        closeMcpEdit();
+        showToast('MCP Server 已保存', 3000);
+        await loadMCP();
+    } catch (e) {
+        showToast('保存失败: ' + e.message, 5000);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+    }
+}
+
+async function deleteMcp(mcpId) {
+    var data = statusData.mcp;
+    var s = data && data.servers.find(function(x) { return x.name === mcpId; });
+    if (!confirm('确定删除 MCP Server "' + (s ? s.name : mcpId) + '"？\n这会从配置中移除，不会删除实际文件。')) return;
+    try {
+        await postJSON('/api/mcp/' + mcpId + '/delete');
+        showToast('MCP Server 已删除', 3000);
+        await loadMCP();
+    } catch (e) {
+        showToast('删除失败: ' + e.message, 5000);
+    }
+}
+
+async function toggleMcpEnabled(mcpId, enabled) {
+    try {
+        var data = await postJSON('/api/mcp/' + mcpId + '/toggle', { enabled: enabled });
+        if (data.success) {
+            showToast('MCP Server 已' + (data.enabled ? '启用' : '禁用'), 3000);
+            await loadMCP();
+        } else {
+            showToast('设置失败: ' + (data.error || '未知错误'), 5000);
+            await loadMCP();
+        }
+    } catch (e) {
+        showToast('设置失败: ' + e.message, 5000);
+        await loadMCP();
+    }
+}
+
 // === Dashboard version ===
 async function loadDashboardVersion() {
     try {
@@ -1405,23 +2019,80 @@ async function loadDashboardVersion() {
     }
 }
 
-// === Startup service (macOS launchd) ===
+// === Startup service (macOS launchd / Windows Task Scheduler) ===
+async function loadKimiConfig() {
+    try {
+        var data = await fetchJSON('/api/kimi-config');
+        if (data.default_permission_mode) {
+            settings.default_permission_mode = data.default_permission_mode;
+            saveSettings(settings);
+        }
+    } catch (e) {
+        log.debug('Failed to load kimi config: %s', e.message);
+    }
+}
+
 async function loadStartupServiceStatus() {
     try {
-        var data = await fetchJSON('/api/startup-service-status');
-        startupServiceState = { supported: data.supported, enabled: data.enabled, loaded: true };
+        var data = await fetchJSON('/api/startup-status');
+        startupServiceState = {
+            supported: data.supported,
+            loaded: true,
+            dashboard: data.dashboard || { enabled: false },
+            kimi: data.kimi || { enabled: false }
+        };
     } catch (e) {
-        startupServiceState = { supported: false, enabled: false, loaded: true };
+        startupServiceState = { supported: false, loaded: true, dashboard: { enabled: false }, kimi: { enabled: false } };
     }
     if (location.hash === '#/settings') renderSettings();
 }
 
-async function toggleStartupService(enable) {
+async function toggleStartupService(service, enable) {
     try {
-        var data = await postJSON('/api/startup-service-toggle', { enable: enable });
+        var payload = { service: service, enable: enable };
+        if (service === 'kimi') {
+            payload.port = settings.kw_port;
+            payload.bind = settings.kw_bind;
+            payload.bypass_auth = settings.kw_bypass_auth;
+            payload.allowed_hosts = settings.kw_allowed_hosts;
+            payload.public_url = settings.kw_public_url;
+        }
+        var data = await postJSON('/api/startup-toggle', payload);
         if (data.success) {
-            startupServiceState.enabled = enable;
-            showToast('开机启动已' + (enable ? '开启' : '关闭'), 3000);
+            startupServiceState[service].enabled = enable;
+            var name = service === 'kimi' ? 'Kimi Code' : 'Dashboard';
+            showToast(name + ' 开机启动已' + (enable ? '开启' : '关闭'), 3000);
+        } else {
+            showToast('设置失败: ' + (data.error || '未知错误'), 5000);
+            renderSettings();
+        }
+    } catch (e) {
+        showToast('设置失败: ' + e.message, 5000);
+        renderSettings();
+    }
+}
+
+async function loadElevatedStartupStatus() {
+    try {
+        var data = await fetchJSON('/api/startup-elevated-status');
+        elevatedStartupState = {
+            supported: data.supported,
+            loaded: true,
+            enabled: data.enabled
+        };
+    } catch (e) {
+        elevatedStartupState = { supported: false, loaded: true, enabled: false };
+    }
+    if (location.hash === '#/settings') renderSettings();
+}
+
+async function toggleElevatedStartup(enable) {
+    try {
+        var data = await postJSON('/api/startup-elevated-toggle', { enable: enable });
+        if (data.success) {
+            elevatedStartupState.enabled = data.enabled;
+            showToast('管理员启动任务' + (data.enabled ? '已创建' : '已移除') + '，请刷新页面确认状态', 5000);
+            await loadElevatedStartupStatus();
         } else {
             showToast('设置失败: ' + (data.error || '未知错误'), 5000);
             renderSettings();
@@ -1447,7 +2118,7 @@ async function loadAll() {
 }
 
 // === Init ===
-Promise.all([loadDashboardVersion(), loadStartupServiceStatus()]).then(loadAll);
+Promise.all([loadDashboardVersion(), loadStartupServiceStatus(), loadElevatedStartupStatus(), loadKimiConfig()]).then(loadAll);
 checkKimiWebStatus();
 setInterval(checkKimiWebStatus, 10000);
 window.addEventListener('hashchange', handleRoute);

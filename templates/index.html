@@ -19,7 +19,7 @@
         } catch (e) {}
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=19">
+    <link rel="stylesheet" href="/static/css/style.css?v=26">
 </head>
 <body>
     <header>
@@ -116,6 +116,7 @@
                         <span class="metric" id="skillsMiniMetric"><div class="skeleton sk-metric"></div></span>
                         <span class="metric-label" id="skillsMiniLabel">已安装</span>
                     </div>
+                    <div id="skillsMiniStatus" class="tasks-mini-status"></div>
                 </a>
                 <a href="#/mcp" class="mini-card">
                     <div class="mini-card-header">
@@ -126,6 +127,7 @@
                         <span class="metric" id="mcpMiniMetric"><div class="skeleton sk-metric"></div></span>
                         <span class="metric-label" id="mcpMiniLabel">可用</span>
                     </div>
+                    <div id="mcpMiniStatus" class="tasks-mini-status"></div>
                 </a>
                 <a href="#/tasks" class="mini-card" id="tasksMiniCard">
                     <div class="mini-card-header">
@@ -295,12 +297,223 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 定时任务看板
             </h2>
+            <button class="btn-task" onclick="openTaskCreate()">+ 新建任务</button>
         </div>
         <div class="detail-stats" id="tasksDetailStats"></div>
         <div id="tasksDetailGrid" class="tasks-grid"></div>
     </div>
 
+    <!-- Task Edit Modal -->
+    <div id="taskEditModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeTaskEdit()">
+        <div class="modal modal-md" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    编辑定时任务
+                </h3>
+                <button class="modal-close" onclick="closeTaskEdit()" aria-label="关闭">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="taskEditForm" class="task-form">
+                    <input type="hidden" id="task-edit-id">
+                    <div class="form-row" id="task-edit-id-row">
+                        <label for="task-edit-id-visible">任务 ID</label>
+                        <input type="text" id="task-edit-id-visible" placeholder="例如 wiki-sync-daily">
+                    </div>
+                    <div class="form-row">
+                        <label for="task-edit-name">名称</label>
+                        <input type="text" id="task-edit-name" placeholder="例如 WikiSync 每日同步">
+                    </div>
+                    <div class="form-row">
+                        <label for="task-edit-desc">描述</label>
+                        <input type="text" id="task-edit-desc" placeholder="任务用途说明">
+                    </div>
+                    <div class="form-row">
+                        <label for="task-edit-script">脚本文件</label>
+                        <input type="text" id="task-edit-script" placeholder="scriptsDir 下的相对路径，例如 wiki-sync.py">
+                    </div>
+                    <div class="form-row">
+                        <label for="task-edit-logfile">日志文件</label>
+                        <input type="text" id="task-edit-logfile" placeholder="scriptsDir 下的相对路径，例如 task.log">
+                    </div>
+                    <div class="form-row">
+                        <label for="task-edit-sources">来源标签</label>
+                        <input type="text" id="task-edit-sources" placeholder="逗号分隔，例如 GitHub,Bilibili,Spotify">
+                    </div>
+                    <div class="form-row">
+                        <label>触发器类型</label>
+                        <div class="segment-control" id="task-edit-type-group">
+                            <button type="button" class="segment-btn" data-value="daily" onclick="setTaskEditType('daily')">每日</button>
+                            <button type="button" class="segment-btn" data-value="weekly" onclick="setTaskEditType('weekly')">每周</button>
+                            <button type="button" class="segment-btn" data-value="monthly" onclick="setTaskEditType('monthly')">每月</button>
+                            <button type="button" class="segment-btn" data-value="once" onclick="setTaskEditType('once')">一次</button>
+                        </div>
+                    </div>
+                    <div class="form-row" id="task-edit-time-row">
+                        <label for="task-edit-time">执行时间</label>
+                        <input type="time" id="task-edit-time">
+                    </div>
+                    <div class="form-row" id="task-edit-days-row" style="display:none">
+                        <label>星期</label>
+                        <div class="day-check-group">
+                            <label class="day-check"><input type="checkbox" value="0"><span>日</span></label>
+                            <label class="day-check"><input type="checkbox" value="1"><span>一</span></label>
+                            <label class="day-check"><input type="checkbox" value="2"><span>二</span></label>
+                            <label class="day-check"><input type="checkbox" value="3"><span>三</span></label>
+                            <label class="day-check"><input type="checkbox" value="4"><span>四</span></label>
+                            <label class="day-check"><input type="checkbox" value="5"><span>五</span></label>
+                            <label class="day-check"><input type="checkbox" value="6"><span>六</span></label>
+                        </div>
+                    </div>
+                    <div class="form-row" id="task-edit-day-row" style="display:none">
+                        <label for="task-edit-day">日期</label>
+                        <input type="number" id="task-edit-day" min="1" max="31" value="1">
+                    </div>
+                    <div class="form-row" id="task-edit-datetime-row" style="display:none">
+                        <label for="task-edit-datetime">执行时间</label>
+                        <input type="datetime-local" id="task-edit-datetime">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-task" onclick="closeTaskEdit()">取消</button>
+                <button id="task-edit-save-btn" onclick="saveTask()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task Log Modal -->
+    <div id="taskLogModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeTaskLog()">
+        <div class="modal modal-lg" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    任务日志
+                </h3>
+                <button class="modal-close" onclick="closeTaskLog()" aria-label="关闭">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="task-log-meta" id="task-log-meta"></div>
+                <pre id="task-log-content" class="task-log-full">加载中...</pre>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-task" onclick="refreshTaskLog()">刷新</button>
+                <button onclick="closeTaskLog()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Skill Edit Modal -->
+    <div id="skillEditModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeSkillEdit()">
+        <div class="modal modal-md" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                    编辑 Skill
+                </h3>
+                <button class="modal-close" onclick="closeSkillEdit()" aria-label="关闭">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="skillEditForm" class="task-form">
+                    <input type="hidden" id="skill-edit-id">
+                    <div class="form-row">
+                        <label for="skill-edit-name">显示名称</label>
+                        <input type="text" id="skill-edit-name" placeholder="Skill 名称">
+                    </div>
+                    <div class="form-row">
+                        <label for="skill-edit-desc">描述</label>
+                        <textarea id="skill-edit-desc" rows="3" placeholder="Skill 用途与触发词"></textarea>
+                    </div>
+                    <div class="form-row">
+                        <label for="skill-edit-source">来源</label>
+                        <input type="text" id="skill-edit-source" placeholder="例如 workspace/home-assistant">
+                    </div>
+                    <div class="form-row">
+                        <label for="skill-edit-sourceurl">来源 URL</label>
+                        <input type="text" id="skill-edit-sourceurl" placeholder="可选">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-task" onclick="closeSkillEdit()">取消</button>
+                <button id="skill-edit-save-btn" onclick="saveSkill()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MCP Detail Modal -->
+    <div id="mcpDetailModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeMcpDetail()">
+        <div class="modal modal-md" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>
+                    <span id="mcp-detail-name"></span>
+                </h3>
+                <button class="modal-close" onclick="closeMcpDetail()" aria-label="关闭">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="mcp-detail-content" class="mcp-detail-readonly"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-task" onclick="closeMcpDetail()">关闭</button>
+                <button id="mcp-detail-edit-btn" onclick="closeMcpDetail();openMcpEdit(_currentMcpDetailId)">编辑</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MCP Edit Modal -->
+    <div id="mcpEditModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeMcpEdit()">
+        <div class="modal modal-md" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>
+                    编辑 MCP Server
+                </h3>
+                <button class="modal-close" onclick="closeMcpEdit()" aria-label="关闭">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="mcpEditForm" class="task-form">
+                    <input type="hidden" id="mcp-edit-id">
+                    <div class="form-row">
+                        <label for="mcp-edit-command">命令</label>
+                        <input type="text" id="mcp-edit-command" placeholder="例如 python、npx">
+                    </div>
+                    <div class="form-row">
+                        <label for="mcp-edit-args">参数（每行一个）</label>
+                        <textarea id="mcp-edit-args" rows="3" placeholder="例如&#10;C:/path/to/server.py"></textarea>
+                    </div>
+                    <div class="form-row">
+                        <label for="mcp-edit-cwd">工作目录</label>
+                        <input type="text" id="mcp-edit-cwd" placeholder="可选">
+                    </div>
+                    <div class="form-row">
+                        <label for="mcp-edit-description">描述</label>
+                        <input type="text" id="mcp-edit-description" placeholder="简短中文说明，例如 MCP web 抓取服务">
+                    </div>
+                    <div class="form-row">
+                        <label for="mcp-edit-env">环境变量（每行 key=value）</label>
+                        <textarea id="mcp-edit-env" rows="3" placeholder="例如&#10;API_KEY=xxx"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-task" onclick="closeMcpEdit()">取消</button>
+                <button id="mcp-edit-save-btn" onclick="saveMcp()">保存</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/js/charts.js?v=12"></script>
-    <script src="/static/js/app.js?v=21"></script>
+    <script src="/static/js/app.js?v=35"></script>
 </body>
 </html>

@@ -2,18 +2,71 @@
 
 import json
 import os
+import platform
 import re
 import subprocess
 import threading
 import time
 import urllib.parse
+from pathlib import Path
 
 from flask import Blueprint, jsonify, render_template, request
 
-from config import DASHBOARD_VERSION, KIMI_BIN, KIMI_CODE_DIR, LAUNCHD_PLIST_PATH, log
+from config import APP_DIR, DASHBOARD_VERSION, KIMI_BIN, KIMI_CODE_DIR, log
 from services.helpers import no_window_kwargs, tcp_open
 
 bp = Blueprint("system", __name__)
+
+KIMI_CONFIG = KIMI_CODE_DIR / "config.toml"
+
+# --- Startup service constants ---
+STARTUP_SUPPORTED_SYSTEMS = ("Darwin", "Windows")
+STARTUP_SERVICES = {
+    "dashboard": {
+        "label": "com.perinchiang.kimi-code-dashboard",
+        "windows_name": "KimiCodeDashboard",
+    },
+    "kimi": {
+        "label": "com.perinchiang.kimi-code-server",
+        "windows_name": "KimiCodeServer",
+    },
+}
+
+# Windows elevated startup task name (separate from non-elevated Startup folder)
+WINDOWS_ELEVATED_TASK_NAME = "KimiCodeDashboardAdmin"
+
+
+def _read_default_permission_mode() -> str:
+    """Read default_permission_mode from Kimi config.toml."""
+    try:
+        text = KIMI_CONFIG.read_text(encoding="utf-8")
+        m = re.search(r'^default_permission_mode\s*=\s*"([^"]+)"', text, re.MULTILINE)
+        if m:
+            return m.group(1)
+    except Exception as e:
+        log.warning("Failed to read %s: %s", KIMI_CONFIG, e)
+    return "manual"
+
+
+def _write_default_permission_mode(mode: str) -> bool:
+    """Write default_permission_mode to Kimi config.toml, preserving other content."""
+    try:
+        text = KIMI_CONFIG.read_text(encoding="utf-8")
+        new_line = f'default_permission_mode = "{mode}"'
+        if re.search(r'^default_permission_mode\s*=\s*"', text, re.MULTILINE):
+            text = re.sub(
+                r'^default_permission_mode\s*=.*$',
+                new_line,
+                text,
+                flags=re.MULTILINE,
+            )
+        else:
+            text = new_line + "\n" + text
+        KIMI_CONFIG.write_text(text, encoding="utf-8")
+        return True
+    except Exception as e:
+        log.error("Failed to write %s: %s", KIMI_CONFIG, e)
+        return False
 
 
 def _clean_stale_lock():
@@ -40,7 +93,7 @@ def _pid_alive(pid: int) -> bool:
     try:
         result = subprocess.run(
             ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, errors="replace", timeout=5,
             **no_window_kwargs(),
         )
         return str(pid) in result.stdout
@@ -81,7 +134,7 @@ def _kill_kimi_server():
     try:
         subprocess.run(
             [str(KIMI_BIN), "server", "kill"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, errors="replace", timeout=10,
             **no_window_kwargs(),
         )
         time.sleep(1)
@@ -256,49 +309,350 @@ def api_launch_kimi_web():
         return jsonify({"status": "error", "error": str(e)})
 
 
+# --- Startup service helpers ---
+
 def _startup_service_supported() -> bool:
-    """Startup service management only works on macOS with an existing plist."""
-    return os.uname().sysname == "Darwin" and LAUNCHD_PLIST_PATH.exists()
+    """Startup service management works on macOS (launchd) and Windows (Task Scheduler)."""
+    return platform.system() in STARTUP_SUPPORTED_SYSTEMS
 
 
-@bp.route("/api/startup-service-status")
-def api_startup_service_status():
-    """Check whether the dashboard launchd startup service is enabled."""
-    if not _startup_service_supported():
-        return jsonify({"supported": False, "enabled": False, "error": "不支持或未配置启动服务"})
+# macOS launchd helpers
 
+def _macos_plist_path(service: str) -> Path:
+    label = STARTUP_SERVICES[service]["label"]
+    return Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+
+
+def _macos_plist_exists(service: str) -> bool:
+    return _macos_plist_path(service).exists()
+
+
+def _macos_service_loaded(service: str) -> bool:
+    label = STARTUP_SERVICES[service]["label"]
     try:
         result = subprocess.run(
             ["launchctl", "list"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, errors="replace", timeout=10,
             **no_window_kwargs(),
         )
-        enabled = bool(result.returncode == 0 and "com.perinchiang.kimi-code-dashboard" in result.stdout)
-        return jsonify({"supported": True, "enabled": enabled})
+        return result.returncode == 0 and label in result.stdout
+    except Exception:
+        return False
+
+
+def _macos_create_dashboard_plist() -> None:
+    plist_path = _macos_plist_path("dashboard")
+    python_path = str((APP_DIR / ".venv" / "bin" / "python").resolve())
+    log_path = str((KIMI_CODE_DIR / "dashboard.log").resolve())
+    plist = f'''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.perinchiang.kimi-code-dashboard</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{python_path}</string>
+        <string>app.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>{APP_DIR}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>{log_path}</string>
+    <key>StandardErrorPath</key>
+    <string>{log_path}</string>
+</dict>
+</plist>'''
+    plist_path.parent.mkdir(parents=True, exist_ok=True)
+    plist_path.write_text(plist, encoding="utf-8")
+
+
+def _macos_create_kimi_plist(cfg: dict) -> None:
+    plist_path = _macos_plist_path("kimi")
+    log_path = str((KIMI_CODE_DIR / "kimi-server.log").resolve())
+    # Reuse command builder but ensure --foreground is present for launchd
+    cmd = _build_cmd(cfg)
+    args_xml = "\n".join(f"        <string>{_escape_xml(str(arg))}</string>" for arg in cmd)
+    plist = f'''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.perinchiang.kimi-code-server</string>
+    <key>ProgramArguments</key>
+    <array>
+{args_xml}
+    </array>
+    <key>WorkingDirectory</key>
+    <string>{KIMI_CODE_DIR}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{log_path}</string>
+    <key>StandardErrorPath</key>
+    <string>{log_path}</string>
+</dict>
+</plist>'''
+    plist_path.parent.mkdir(parents=True, exist_ok=True)
+    plist_path.write_text(plist, encoding="utf-8")
+
+
+def _macos_remove_plist(service: str) -> None:
+    plist_path = _macos_plist_path(service)
+    if plist_path.exists():
+        plist_path.unlink()
+
+
+def _escape_xml(value: str) -> str:
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&apos;")
+
+
+# Windows Startup folder helpers
+# Avoid Task Scheduler (often requires elevation); use the user's Startup folder instead.
+
+def _windows_startup_folder() -> Path:
+    return Path.home() / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+
+
+def _windows_startup_file(service: str) -> Path:
+    name = "StartKimiDashboard.vbs" if service == "dashboard" else "StartKimiServer.vbs"
+    return _windows_startup_folder() / name
+
+
+def _windows_startup_exists(service: str) -> bool:
+    return _windows_startup_file(service).exists()
+
+
+def _escape_vbs_string(value: str) -> str:
+    """Escape a string for embedding inside a VBScript string literal."""
+    return value.replace('"', '""')
+
+
+def _windows_create_dashboard_startup() -> None:
+    vbs_path = _windows_startup_file("dashboard")
+    dashboard_dir = str(APP_DIR.resolve())
+    pythonw = str((APP_DIR / ".venv" / "Scripts" / "pythonw.exe").resolve())
+    run_cmd = f'cmd /c cd /d "{dashboard_dir}" && "{pythonw}" app.py'
+    vbs = f'''Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "{_escape_vbs_string(run_cmd)}", 0, False
+Set WshShell = Nothing
+'''
+    _windows_startup_folder().mkdir(parents=True, exist_ok=True)
+    vbs_path.write_text(vbs, encoding="utf-8")
+
+
+def _windows_create_kimi_startup(cfg: dict) -> None:
+    vbs_path = _windows_startup_file("kimi")
+    cmd = _build_cmd(cfg)
+    # Build a single command line with each argument quoted if it contains spaces.
+    cmd_line = " ".join(f'"{str(arg)}"' if " " in str(arg) else str(arg) for arg in cmd)
+    vbs = f'''Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "{_escape_vbs_string(cmd_line)}", 0, False
+Set WshShell = Nothing
+'''
+    _windows_startup_folder().mkdir(parents=True, exist_ok=True)
+    vbs_path.write_text(vbs, encoding="utf-8")
+
+
+def _windows_remove_startup(service: str) -> None:
+    vbs_path = _windows_startup_file(service)
+    if vbs_path.exists():
+        vbs_path.unlink()
+
+
+# Windows elevated startup via Task Scheduler (highest privileges)
+
+def _windows_elevated_task_exists() -> bool:
+    """Check whether the elevated dashboard startup task exists."""
+    if platform.system() != "Windows":
+        return False
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"Get-ScheduledTask -TaskName '{WINDOWS_ELEVATED_TASK_NAME}' -ErrorAction SilentlyContinue | Select-Object -First 1"],
+            capture_output=True, text=True, errors="replace", timeout=10, **no_window_kwargs()
+        )
+        return WINDOWS_ELEVATED_TASK_NAME in result.stdout
     except Exception as e:
-        log.warning("Failed to query startup service status: %s", e)
-        return jsonify({"supported": True, "enabled": False, "error": str(e)})
+        log.debug("Failed to check elevated task: %s", e)
+        return False
 
 
-@bp.route("/api/startup-service-toggle", methods=["POST"])
-def api_startup_service_toggle():
-    """Enable or disable the dashboard launchd startup service."""
+def _windows_elevated_task_ps(enable: bool) -> str:
+    """Return PowerShell code to create or remove the elevated startup task."""
+    dashboard_dir = str(APP_DIR.resolve())
+    pythonw = str((APP_DIR / ".venv" / "Scripts" / "pythonw.exe").resolve())
+    log_path = str((KIMI_CODE_DIR / "dashboard.log").resolve())
+
+    if enable:
+        action = f'New-ScheduledTaskAction -Execute "{pythonw}" -Argument "app.py" -WorkingDirectory "{dashboard_dir}"'
+        trigger = 'New-ScheduledTaskTrigger -AtLogon'
+        principal = 'New-ScheduledTaskPrincipal -UserId "$env:USERNAME" -RunLevel Highest -LogonType Interactive'
+        settings_cmd = 'New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable'
+        return (
+            f'Unregister-ScheduledTask -TaskName "{WINDOWS_ELEVATED_TASK_NAME}" -Confirm:$false -ErrorAction SilentlyContinue; '
+            f'$action = {action}; '
+            f'$trigger = {trigger}; '
+            f'$principal = {principal}; '
+            f'$settings = {settings_cmd}; '
+            f'Register-ScheduledTask -TaskName "{WINDOWS_ELEVATED_TASK_NAME}" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force; '
+            f'Write-Output "created"'
+        )
+    return (
+        f'Unregister-ScheduledTask -TaskName "{WINDOWS_ELEVATED_TASK_NAME}" -Confirm:$false -ErrorAction SilentlyContinue; '
+        f'Write-Output "removed"'
+    )
+
+
+def _windows_run_elevated_ps(ps_code: str) -> tuple[bool, str]:
+    """Run PowerShell code with UAC elevation (shows prompt)."""
+    import tempfile
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".ps1", delete=False, encoding="utf-8") as f:
+            f.write(ps_code)
+            script_path = f.name
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f'Start-Process powershell -Verb runAs -Wait -ArgumentList \'-NoProfile -ExecutionPolicy Bypass -File "{script_path}"\''],
+            capture_output=True, text=True, timeout=60, **no_window_kwargs()
+        )
+        # Clean up script after execution
+        try:
+            Path(script_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
+# Cross-platform status/toggle
+
+def _get_startup_status(service: str) -> dict:
     if not _startup_service_supported():
-        return jsonify({"success": False, "error": "不支持或未配置启动服务"})
+        return {"supported": False, "enabled": False}
+    system = platform.system()
+    if system == "Darwin":
+        exists = _macos_plist_exists(service)
+        loaded = _macos_service_loaded(service) if exists else False
+        return {"supported": True, "enabled": exists and loaded}
+    if system == "Windows":
+        return {"supported": True, "enabled": _windows_startup_exists(service)}
+    return {"supported": False, "enabled": False}
 
+
+def _set_startup_service(service: str, enable: bool, cfg: dict = None) -> dict:
+    if not _startup_service_supported():
+        return {"success": False, "error": "当前操作系统不支持开机自启"}
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            label = STARTUP_SERVICES[service]["label"]
+            plist_path = _macos_plist_path(service)
+            if enable:
+                # Unload first to avoid "already loaded" errors
+                subprocess.run(["launchctl", "unload", "-w", str(plist_path)], capture_output=True, text=True, errors="replace", timeout=15, **no_window_kwargs())
+                if service == "dashboard":
+                    _macos_create_dashboard_plist()
+                else:
+                    _macos_create_kimi_plist(cfg or {})
+                result = subprocess.run(["launchctl", "load", "-w", str(plist_path)], capture_output=True, text=True, errors="replace", timeout=15, **no_window_kwargs())
+            else:
+                result = subprocess.run(["launchctl", "unload", "-w", str(plist_path)], capture_output=True, text=True, errors="replace", timeout=15, **no_window_kwargs())
+                _macos_remove_plist(service)
+            if result.returncode != 0 and "No such process" not in result.stderr:
+                return {"success": False, "error": result.stderr or "launchctl 失败"}
+            return {"success": True, "enabled": enable}
+        if system == "Windows":
+            if enable:
+                _windows_remove_startup(service)  # recreate to update parameters
+                if service == "dashboard":
+                    _windows_create_dashboard_startup()
+                else:
+                    _windows_create_kimi_startup(cfg or {})
+            else:
+                _windows_remove_startup(service)
+            return {"success": True, "enabled": enable}
+        return {"success": False, "error": "不支持的操作系统"}
+    except Exception as e:
+        log.error("Failed to toggle %s startup service: %s", service, e)
+        return {"success": False, "error": str(e)}
+
+
+@bp.route("/api/startup-status")
+def api_startup_status():
+    """Check whether dashboard and Kimi Code startup services are enabled."""
+    return jsonify({
+        "supported": _startup_service_supported(),
+        "dashboard": _get_startup_status("dashboard"),
+        "kimi": _get_startup_status("kimi"),
+    })
+
+
+@bp.route("/api/startup-toggle", methods=["POST"])
+def api_startup_toggle():
+    """Enable or disable dashboard or Kimi Code startup service."""
+    body = request.get_json(silent=True) or {}
+    service = body.get("service")
+    enable = bool(body.get("enable"))
+    if service not in STARTUP_SERVICES:
+        return jsonify({"success": False, "error": f"service 必须是 {list(STARTUP_SERVICES.keys())} 之一"}), 400
+
+    cfg = {}
+    if service == "kimi":
+        allowed_hosts_raw = body.get("allowed_hosts", "") or ""
+        allowed_hosts_list = [h.strip() for h in allowed_hosts_raw.split(",") if h.strip()]
+        cfg = {
+            "port": int(body.get("port", 5494)),
+            "bind": body.get("bind", "0.0.0.0"),
+            "bypass_auth": bool(body.get("bypass_auth", True)),
+            "allowed_hosts_list": allowed_hosts_list,
+            "public_url": (body.get("public_url") or "").strip(),
+        }
+    result = _set_startup_service(service, enable, cfg)
+    return jsonify(result)
+
+
+@bp.route("/api/startup-elevated-status")
+def api_startup_elevated_status():
+    """Check whether the Windows elevated dashboard startup task exists."""
+    return jsonify({
+        "supported": platform.system() == "Windows",
+        "enabled": _windows_elevated_task_exists(),
+    })
+
+
+@bp.route("/api/startup-elevated-toggle", methods=["POST"])
+def api_startup_elevated_toggle():
+    """Enable or disable the Windows elevated dashboard startup task (requires UAC)."""
+    if platform.system() != "Windows":
+        return jsonify({"success": False, "error": "仅 Windows 可用"}), 400
     body = request.get_json(silent=True) or {}
     enable = bool(body.get("enable"))
-    cmd = ["launchctl", "load", "-w", str(LAUNCHD_PLIST_PATH)] if enable else ["launchctl", "unload", "-w", str(LAUNCHD_PLIST_PATH)]
 
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, **no_window_kwargs())
-        if result.returncode != 0:
-            log.warning("launchctl %s failed: %s", "load" if enable else "unload", result.stderr)
-            return jsonify({"success": False, "error": result.stderr or "launchctl 失败"})
-        return jsonify({"success": True, "enabled": enable})
-    except Exception as e:
-        log.error("Failed to toggle startup service: %s", e)
-        return jsonify({"success": False, "error": str(e)})
+    # If enabling, remove non-elevated startup to avoid double launch
+    if enable:
+        _windows_remove_startup("dashboard")
+
+    ps_code = _windows_elevated_task_ps(enable)
+    ok, error = _windows_run_elevated_ps(ps_code)
+    if not ok:
+        return jsonify({"success": False, "error": error}), 500
+
+    return jsonify({
+        "success": True,
+        "enabled": _windows_elevated_task_exists(),
+        "note": "UAC 提示已处理，请刷新页面查看最新状态",
+    })
 
 
 @bp.route("/api/dashboard-version")
@@ -310,3 +664,25 @@ def api_dashboard_version():
 @bp.route("/")
 def index():
     return render_template("index.html")
+
+
+@bp.route("/api/kimi-config")
+def api_kimi_config():
+    """Return relevant Kimi Code config values for the dashboard settings UI."""
+    return jsonify({
+        "default_permission_mode": _read_default_permission_mode(),
+    })
+
+
+@bp.route("/api/update-config", methods=["POST"])
+def api_update_config():
+    """Update Kimi Code config values from the dashboard settings UI."""
+    body = request.get_json(silent=True) or {}
+    mode = body.get("default_permission_mode")
+    valid_modes = ("manual", "auto", "yolo")
+    if mode not in valid_modes:
+        return jsonify({"success": False, "error": f"default_permission_mode 必须是 {valid_modes} 之一"}), 400
+    if _write_default_permission_mode(mode):
+        log.info("Updated default_permission_mode to %s", mode)
+        return jsonify({"success": True, "default_permission_mode": mode})
+    return jsonify({"success": False, "error": "写入 config.toml 失败"}), 500
