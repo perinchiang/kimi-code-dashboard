@@ -19,7 +19,7 @@
         } catch (e) {}
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=28">
+    <link rel="stylesheet" href="/static/css/style.css?v=29">
 </head>
 <body>
     <header>
@@ -92,8 +92,8 @@
                         <div class="metric-label">全周期 Token 总量</div>
                     </div>
                     <div class="trend-summary-item">
-                        <div class="metric" id="trendCacheRate">-</div>
-                        <div class="metric-label" id="trendCacheRateLabel">缓存命中评估</div>
+                        <div class="metric-row"><div class="metric" id="trendCacheRate">-</div><span id="trendCacheRateEval" class="cache-eval-badge"></span></div>
+                        <div class="metric-label">缓存命中率</div>
                     </div>
                 </div>
                 <div class="trend-tabs">
@@ -518,6 +518,6 @@
     </div>
 
     <script src="/static/js/charts.js?v=12"></script>
-    <script src="/static/js/app.js?v=37"></script>
+    <script src="/static/js/app.js?v=38"></script>
 </body>
 </html>

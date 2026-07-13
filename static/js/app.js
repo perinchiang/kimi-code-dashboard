@@ -872,19 +872,20 @@ async function loadTrends() {
         if (trendData.total) {
             document.getElementById('trendGrandTotal').textContent = formatTokens(trendData.total.value);
             var rateEl = document.getElementById('trendCacheRate');
-            var rateLabelEl = document.getElementById('trendCacheRateLabel');
+            var evalEl = document.getElementById('trendCacheRateEval');
             var ev = trendData.total.cacheEvaluation;
             if (rateEl) {
                 rateEl.textContent = (trendData.total.cacheRate || 0) + '%';
+                rateEl.className = 'metric';
+            }
+            if (evalEl) {
                 if (ev && ev.level !== 'none') {
-                    rateEl.className = 'metric cache-eval-text cache-eval-' + ev.level;
-                    if (rateLabelEl) {
-                        rateLabelEl.textContent = ev.label;
-                        rateLabelEl.className = 'metric-label cache-eval-label cache-eval-' + ev.level;
-                    }
+                    evalEl.textContent = ev.label;
+                    evalEl.className = 'cache-eval-badge cache-eval-' + ev.level;
+                    evalEl.title = '缓存命中率 ' + (trendData.total.cacheRate || 0) + '%';
                 } else {
-                    rateEl.className = 'metric';
-                    if (rateLabelEl) { rateLabelEl.textContent = '缓存命中评估'; rateLabelEl.className = 'metric-label'; }
+                    evalEl.textContent = '';
+                    evalEl.className = 'cache-eval-badge';
                 }
             }
         }
@@ -893,9 +894,9 @@ async function loadTrends() {
         document.getElementById('trendTotal').textContent = '-';
         document.getElementById('trendGrandTotal').textContent = '-';
         var rateElErr = document.getElementById('trendCacheRate');
-        var rateLabelErr = document.getElementById('trendCacheRateLabel');
+        var evalElErr = document.getElementById('trendCacheRateEval');
         if (rateElErr) { rateElErr.textContent = '-'; rateElErr.className = 'metric'; }
-        if (rateLabelErr) { rateLabelErr.textContent = '缓存命中评估'; rateLabelErr.className = 'metric-label'; }
+        if (evalElErr) { evalElErr.textContent = ''; evalElErr.className = 'cache-eval-badge'; }
     }
 }
 
