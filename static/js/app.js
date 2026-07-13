@@ -5,8 +5,7 @@ var trendData = null;
 var currentTrendUnit = 'daily';
 var pageLoadTime = Date.now();
 var statusData = {};
-var startupServiceState = { supported: false, loaded: false, dashboard: { enabled: false }, kimi: { enabled: false } };
-var elevatedStartupState = { supported: false, loaded: false, enabled: false };
+var startupServiceState = { supported: false, loaded: false, dashboard: { enabled: false, mode: 'off' }, kimi: { enabled: false } };
 
 // === Settings ===
 var SETTINGS_KEY = 'kimi_dashboard_settings_v1';
@@ -28,6 +27,7 @@ var SETTINGS_DEFAULTS = {
     kw_public_url: '',           // 自定义访问URL (留空自动生成)
     default_permission_mode: 'manual', // Kimi Code 默认权限模式 (manual/auto/yolo)
     enable_pwa_icons: false,     // 是否启用 PWA 图标（添加到手机主屏幕）
+    __startup_dashboard_mode: 'off', // Dashboard 开机启动模式 (normal/elevated/off)
 };
 // 分组定义：icon 用 SVG path data (24x24 viewBox)
 var SETTINGS_GROUPS = [
@@ -55,8 +55,11 @@ var SETTINGS_GROUPS = [
         desc: '登录时自动启动服务',
         icon: '<path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6v6l4 2"/>',
         items: [
-            { key: '__startup_dashboard', label: 'Dashboard 开机自启', desc: '登录后自动启动本面板', type: 'startup_toggle', row: true },
-            { key: '__startup_elevated', label: 'Dashboard 管理员启动', desc: '以管理员权限开机启动 Dashboard，可管理 Windows 定时任务（会触发 UAC）', type: 'elevated_startup_toggle', row: true },
+            { key: '__startup_dashboard_mode', label: 'Dashboard 开机启动', desc: '选择 Dashboard 的启动方式', type: 'segment', row: true, options: [
+                { v: 'normal', t: '开机自启' },
+                { v: 'elevated', t: '管理员启动' },
+                { v: 'off', t: '关闭' }
+            ]},
             { key: '__startup_kimi', label: 'Kimi Code 开机自启', desc: '登录后自动启动 Kimi Web 服务', type: 'startup_toggle', row: true },
         ]
     },
@@ -199,6 +202,10 @@ function setSetting(key, value) {
     saveSettings(settings);
     applySettings();
     if (key === 'kw_bind' || key === 'default_permission_mode') renderSettings();
+    if (key === '__startup_dashboard_mode') {
+        setDashboardStartupMode(value);
+        return;
+    }
     if (key === 'default_permission_mode') {
         postJSON('/api/update-config', { default_permission_mode: value })
             .then(function(data) {
@@ -1399,23 +1406,10 @@ function renderSettings() {
             if (!startupServiceState.supported) {
                 return '<span style="color:var(--text-tertiary);font-size:0.8rem">仅 macOS / Windows 可用</span>';
             }
-            var svc = item.key === '__startup_kimi' ? 'kimi' : 'dashboard';
+            var svc = 'kimi';
             var checked = startupServiceState[svc].enabled ? ' checked' : '';
             return '<label class="toggle-switch">' +
                 '<input type="checkbox" onchange="toggleStartupService(\'' + svc + '\', this.checked)"' + checked + '>' +
-                '<span class="toggle-slider"></span>' +
-            '</label>';
-        }
-        if (item.type === 'elevated_startup_toggle') {
-            if (!elevatedStartupState.loaded) {
-                return '<span style="color:var(--text-tertiary);font-size:0.8rem">检测中...</span>';
-            }
-            if (!elevatedStartupState.supported) {
-                return '<span style="color:var(--text-tertiary);font-size:0.8rem">仅 Windows 可用</span>';
-            }
-            var checked = elevatedStartupState.enabled ? ' checked' : '';
-            return '<label class="toggle-switch">' +
-                '<input type="checkbox" onchange="toggleElevatedStartup(this.checked)"' + checked + '>' +
                 '<span class="toggle-slider"></span>' +
             '</label>';
         }
@@ -2038,11 +2032,13 @@ async function loadStartupServiceStatus() {
         startupServiceState = {
             supported: data.supported,
             loaded: true,
-            dashboard: data.dashboard || { enabled: false },
+            dashboard: data.dashboard || { enabled: false, mode: 'off' },
             kimi: data.kimi || { enabled: false }
         };
+        settings.__startup_dashboard_mode = startupServiceState.dashboard.mode || 'off';
+        saveSettings(settings);
     } catch (e) {
-        startupServiceState = { supported: false, loaded: true, dashboard: { enabled: false }, kimi: { enabled: false } };
+        startupServiceState = { supported: false, loaded: true, dashboard: { enabled: false, mode: 'off' }, kimi: { enabled: false } };
     }
     if (location.hash === '#/settings') renderSettings();
 }
@@ -2072,34 +2068,25 @@ async function toggleStartupService(service, enable) {
     }
 }
 
-async function loadElevatedStartupStatus() {
+async function setDashboardStartupMode(mode) {
     try {
-        var data = await fetchJSON('/api/startup-elevated-status');
-        elevatedStartupState = {
-            supported: data.supported,
-            loaded: true,
-            enabled: data.enabled
-        };
-    } catch (e) {
-        elevatedStartupState = { supported: false, loaded: true, enabled: false };
-    }
-    if (location.hash === '#/settings') renderSettings();
-}
-
-async function toggleElevatedStartup(enable) {
-    try {
-        var data = await postJSON('/api/startup-elevated-toggle', { enable: enable });
+        var data = await postJSON('/api/startup-toggle', { service: 'dashboard', mode: mode });
         if (data.success) {
-            elevatedStartupState.enabled = data.enabled;
-            showToast('管理员启动任务' + (data.enabled ? '已创建' : '已移除') + '，请刷新页面确认状态', 5000);
-            await loadElevatedStartupStatus();
+            startupServiceState.dashboard.mode = data.mode || mode;
+            startupServiceState.dashboard.enabled = (data.mode || mode) !== 'off';
+            settings.__startup_dashboard_mode = data.mode || mode;
+            saveSettings(settings);
+            var labelMap = { normal: '开机自启', elevated: '管理员启动', off: '关闭' };
+            var msg = 'Dashboard 已设为 ' + (labelMap[data.mode || mode] || data.mode || mode);
+            if (data.note) msg += '，' + data.note;
+            showToast(msg, data.note ? 6000 : 3000);
         } else {
             showToast('设置失败: ' + (data.error || '未知错误'), 5000);
-            renderSettings();
+            await loadStartupServiceStatus();
         }
     } catch (e) {
         showToast('设置失败: ' + e.message, 5000);
-        renderSettings();
+        await loadStartupServiceStatus();
     }
 }
 
@@ -2118,7 +2105,7 @@ async function loadAll() {
 }
 
 // === Init ===
-Promise.all([loadDashboardVersion(), loadStartupServiceStatus(), loadElevatedStartupStatus(), loadKimiConfig()]).then(loadAll);
+Promise.all([loadDashboardVersion(), loadStartupServiceStatus(), loadKimiConfig()]).then(loadAll);
 checkKimiWebStatus();
 setInterval(checkKimiWebStatus, 10000);
 window.addEventListener('hashchange', handleRoute);

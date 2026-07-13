@@ -539,15 +539,23 @@ def _windows_run_elevated_ps(ps_code: str) -> tuple[bool, str]:
 
 def _get_startup_status(service: str) -> dict:
     if not _startup_service_supported():
-        return {"supported": False, "enabled": False}
+        return {"supported": False, "enabled": False, "mode": "off"}
     system = platform.system()
     if system == "Darwin":
         exists = _macos_plist_exists(service)
         loaded = _macos_service_loaded(service) if exists else False
-        return {"supported": True, "enabled": exists and loaded}
+        enabled = exists and loaded
+        mode = "normal" if enabled else "off"
+        return {"supported": True, "enabled": enabled, "mode": mode}
     if system == "Windows":
-        return {"supported": True, "enabled": _windows_startup_exists(service)}
-    return {"supported": False, "enabled": False}
+        if service == "dashboard":
+            if _windows_elevated_task_exists():
+                return {"supported": True, "enabled": True, "mode": "elevated"}
+            if _windows_startup_exists("dashboard"):
+                return {"supported": True, "enabled": True, "mode": "normal"}
+            return {"supported": True, "enabled": False, "mode": "off"}
+        return {"supported": True, "enabled": _windows_startup_exists(service), "mode": "off"}
+    return {"supported": False, "enabled": False, "mode": "off"}
 
 
 def _set_startup_service(service: str, enable: bool, cfg: dict = None) -> dict:
@@ -588,6 +596,65 @@ def _set_startup_service(service: str, enable: bool, cfg: dict = None) -> dict:
         return {"success": False, "error": str(e)}
 
 
+def _set_dashboard_startup_mode(mode: str) -> dict:
+    """Set dashboard startup mode: normal (Startup folder), elevated (Task Scheduler), or off."""
+    if not _startup_service_supported():
+        return {"success": False, "error": "当前操作系统不支持开机自启"}
+    if mode not in ("normal", "elevated", "off"):
+        return {"success": False, "error": "mode 必须是 normal/elevated/off 之一"}
+
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            plist_path = _macos_plist_path("dashboard")
+            if mode == "off":
+                subprocess.run(
+                    ["launchctl", "unload", "-w", str(plist_path)],
+                    capture_output=True, text=True, errors="replace", timeout=15,
+                    **no_window_kwargs(),
+                )
+                _macos_remove_plist("dashboard")
+            else:
+                # macOS has no separate elevated mode; treat both as launchd
+                subprocess.run(
+                    ["launchctl", "unload", "-w", str(plist_path)],
+                    capture_output=True, text=True, errors="replace", timeout=15,
+                    **no_window_kwargs(),
+                )
+                _macos_create_dashboard_plist()
+                result = subprocess.run(
+                    ["launchctl", "load", "-w", str(plist_path)],
+                    capture_output=True, text=True, errors="replace", timeout=15,
+                    **no_window_kwargs(),
+                )
+                if result.returncode != 0 and "No such process" not in result.stderr:
+                    return {"success": False, "error": result.stderr or "launchctl 失败"}
+            return {"success": True, "mode": mode}
+
+        if system == "Windows":
+            # Remove non-elevated startup first
+            _windows_remove_startup("dashboard")
+            # Remove elevated task (may trigger UAC when disabling)
+            ps_code = _windows_elevated_task_ps(False)
+            _windows_run_elevated_ps(ps_code)
+
+            if mode == "normal":
+                _windows_create_dashboard_startup()
+                return {"success": True, "mode": "normal"}
+            if mode == "elevated":
+                ps_code = _windows_elevated_task_ps(True)
+                ok, error = _windows_run_elevated_ps(ps_code)
+                if not ok:
+                    return {"success": False, "error": error}
+                return {"success": True, "mode": "elevated", "note": "UAC 提示已处理，请刷新页面查看最新状态"}
+            return {"success": True, "mode": "off"}
+
+        return {"success": False, "error": "不支持的操作系统"}
+    except Exception as e:
+        log.error("Failed to set dashboard startup mode: %s", e)
+        return {"success": False, "error": str(e)}
+
+
 @bp.route("/api/startup-status")
 def api_startup_status():
     """Check whether dashboard and Kimi Code startup services are enabled."""
@@ -600,13 +667,17 @@ def api_startup_status():
 
 @bp.route("/api/startup-toggle", methods=["POST"])
 def api_startup_toggle():
-    """Enable or disable dashboard or Kimi Code startup service."""
+    """Enable or disable Kimi Code startup service, or set dashboard startup mode."""
     body = request.get_json(silent=True) or {}
     service = body.get("service")
-    enable = bool(body.get("enable"))
+    if service == "dashboard":
+        mode = body.get("mode", "off")
+        result = _set_dashboard_startup_mode(mode)
+        return jsonify(result)
     if service not in STARTUP_SERVICES:
         return jsonify({"success": False, "error": f"service 必须是 {list(STARTUP_SERVICES.keys())} 之一"}), 400
 
+    enable = bool(body.get("enable"))
     cfg = {}
     if service == "kimi":
         allowed_hosts_raw = body.get("allowed_hosts", "") or ""
