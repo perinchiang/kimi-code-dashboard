@@ -869,11 +869,25 @@ async function loadTrends() {
         trendData = await fetchJSON('/api/kimi-trends');
         statusData.trends = trendData;
         renderTrend(currentTrendUnit);
-        if (trendData.total) document.getElementById('trendGrandTotal').textContent = formatTokens(trendData.total.value);
+        if (trendData.total) {
+            document.getElementById('trendGrandTotal').textContent = formatTokens(trendData.total.value);
+            var evalEl = document.getElementById('trendGrandTotalEval');
+            var ev = trendData.total.cacheEvaluation;
+            if (evalEl && ev && ev.level !== 'none') {
+                evalEl.textContent = ev.label;
+                evalEl.className = 'cache-eval-badge cache-eval-' + ev.level;
+                evalEl.title = '缓存命中率 ' + (trendData.total.cacheRate || 0) + '%';
+            } else if (evalEl) {
+                evalEl.textContent = '';
+                evalEl.className = 'cache-eval-badge';
+            }
+        }
     } catch (e) {
         setError('trendChart', '加载失败: ' + e.message);
         document.getElementById('trendTotal').textContent = '-';
         document.getElementById('trendGrandTotal').textContent = '-';
+        var evalElErr = document.getElementById('trendGrandTotalEval');
+        if (evalElErr) { evalElErr.textContent = ''; evalElErr.className = 'cache-eval-badge'; }
     }
 }
 

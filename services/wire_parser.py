@@ -287,6 +287,24 @@ def _aggregate_usage(records: list[UsageRecord], unit: str, count: int) -> list[
     return result
 
 
+def _evaluate_cache_rate(input_total: int, cache_read: int) -> dict:
+    """Return human-readable cache hit evaluation for the grand total.
+
+    Thresholds:
+    - 优秀: cache rate >= 70%
+    - 良好: 40% <= cache rate < 70%
+    - 很差: cache rate < 40% (or no input tokens)
+    """
+    if input_total <= 0:
+        return {"label": "无数据", "level": "none"}
+    rate = cache_read / input_total * 100
+    if rate >= 70:
+        return {"label": "优秀", "level": "excellent"}
+    if rate >= 40:
+        return {"label": "良好", "level": "good"}
+    return {"label": "很差", "level": "poor"}
+
+
 def get_trends() -> dict:
     """Get cached trend data, re-parsing if stale."""
     now_ts = time.time()
@@ -309,6 +327,7 @@ def get_trends() -> dict:
                 "output": grand_output,
                 "cacheRead": grand_cache,
                 "cacheRate": round((grand_cache / grand_input * 100), 1) if grand_input > 0 else 0.0,
+                "cacheEvaluation": _evaluate_cache_rate(grand_input, grand_cache),
             },
         }
         _trend_cache["at"] = now_ts
