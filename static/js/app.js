@@ -871,23 +871,31 @@ async function loadTrends() {
         renderTrend(currentTrendUnit);
         if (trendData.total) {
             document.getElementById('trendGrandTotal').textContent = formatTokens(trendData.total.value);
-            var evalEl = document.getElementById('trendGrandTotalEval');
+            var rateEl = document.getElementById('trendCacheRate');
+            var rateLabelEl = document.getElementById('trendCacheRateLabel');
             var ev = trendData.total.cacheEvaluation;
-            if (evalEl && ev && ev.level !== 'none') {
-                evalEl.textContent = ev.label;
-                evalEl.className = 'cache-eval-badge cache-eval-' + ev.level;
-                evalEl.title = '缓存命中率 ' + (trendData.total.cacheRate || 0) + '%';
-            } else if (evalEl) {
-                evalEl.textContent = '';
-                evalEl.className = 'cache-eval-badge';
+            if (rateEl) {
+                rateEl.textContent = (trendData.total.cacheRate || 0) + '%';
+                if (ev && ev.level !== 'none') {
+                    rateEl.className = 'metric cache-eval-text cache-eval-' + ev.level;
+                    if (rateLabelEl) {
+                        rateLabelEl.textContent = ev.label;
+                        rateLabelEl.className = 'metric-label cache-eval-label cache-eval-' + ev.level;
+                    }
+                } else {
+                    rateEl.className = 'metric';
+                    if (rateLabelEl) { rateLabelEl.textContent = '缓存命中评估'; rateLabelEl.className = 'metric-label'; }
+                }
             }
         }
     } catch (e) {
         setError('trendChart', '加载失败: ' + e.message);
         document.getElementById('trendTotal').textContent = '-';
         document.getElementById('trendGrandTotal').textContent = '-';
-        var evalElErr = document.getElementById('trendGrandTotalEval');
-        if (evalElErr) { evalElErr.textContent = ''; evalElErr.className = 'cache-eval-badge'; }
+        var rateElErr = document.getElementById('trendCacheRate');
+        var rateLabelErr = document.getElementById('trendCacheRateLabel');
+        if (rateElErr) { rateElErr.textContent = '-'; rateElErr.className = 'metric'; }
+        if (rateLabelErr) { rateLabelErr.textContent = '缓存命中评估'; rateLabelErr.className = 'metric-label'; }
     }
 }
 
