@@ -19,7 +19,7 @@
         } catch (e) {}
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=52">
+    <link rel="stylesheet" href="/static/css/style.css?v=53">
 </head>
 <body>
     <header>
@@ -179,13 +179,24 @@
                 <a href="#/tool-model" class="mini-card" id="toolModelMiniCard">
                     <div class="mini-card-header">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                        工具调用 & 模型用量
+                        工具调用
                     </div>
                     <div class="mini-card-right">
                         <span class="metric" id="toolModelMiniMetric"><div class="skeleton sk-metric"></div></span>
                         <span class="metric-label" id="toolModelMiniLabel">加载中</span>
                     </div>
                     <div id="toolModelMiniStatus" class="tasks-mini-status"></div>
+                </a>
+                <a href="#/model-usage" class="mini-card" id="modelUsageMiniCard">
+                    <div class="mini-card-header">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                        模型用量
+                    </div>
+                    <div class="mini-card-right">
+                        <span class="metric" id="modelUsageMiniMetric"><div class="skeleton sk-metric"></div></span>
+                        <span class="metric-label" id="modelUsageMiniLabel">加载中</span>
+                    </div>
+                    <div id="modelUsageMiniStatus" class="tasks-mini-status"></div>
                 </a>
             </div>
 
@@ -292,7 +303,7 @@
             <a href="#/" class="back-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>返回</a>
             <h2>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                工具调用 & 模型用量
+                工具调用
             </h2>
         </div>
         <section class="card" style="animation-delay: 0s;">
@@ -316,10 +327,41 @@
                 </div>
                 <div id="skillUsageListDetail" class="leaderboard"></div>
             </div>
+        </section>
+    </div>
+
+    <div id="view-model-usage" class="detail-page" style="display:none">
+        <div class="detail-header">
+            <a href="#/" class="back-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>返回</a>
+            <h2>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                模型用量
+            </h2>
+        </div>
+        <section class="card" style="animation-delay: 0s;">
+            <div class="model-usage-summary" id="modelUsageSummary">
+                <div class="mu-summary-item">
+                    <span class="mu-summary-label">总 Token</span>
+                    <span class="mu-summary-value" id="modelTotalTokens">-</span>
+                </div>
+                <div class="mu-summary-item">
+                    <span class="mu-summary-label">调用次数</span>
+                    <span class="mu-summary-value" id="modelTotalCalls">-</span>
+                </div>
+                <div class="mu-summary-item">
+                    <span class="mu-summary-label">最常用模型</span>
+                    <span class="mu-summary-value" id="modelTopModel">-</span>
+                </div>
+            </div>
+            <div class="seg-filter" id="modelUsageWindowFilter">
+                <button class="seg-item active" data-window="all" onclick="setModelUsageWindow('all')">全部</button>
+                <button class="seg-item" data-window="30d" onclick="setModelUsageWindow('30d')">30 天</button>
+                <button class="seg-item" data-window="7d" onclick="setModelUsageWindow('7d')">7 天</button>
+                <button class="seg-item" data-window="24h" onclick="setModelUsageWindow('24h')">24 小时</button>
+            </div>
             <div class="lb-section">
                 <div class="lb-subheader">
-                    <span class="lb-title lb-title-model">模型用量</span>
-                    <span class="lb-total lb-total-model" id="modelTotalCallsDetail">-</span>
+                    <span class="lb-title lb-title-model">模型分布</span>
                     <button class="lb-sort-btn" id="sortModelBtnDetail" onclick="toggleSort('model')" title="切换排序">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
                     </button>
@@ -724,6 +766,6 @@
     </div>
 
     <script src="/static/js/charts.js?v=12"></script>
-    <script src="/static/js/app.js?v=80"></script>
+    <script src="/static/js/app.js?v=81"></script>
 </body>
 </html>
