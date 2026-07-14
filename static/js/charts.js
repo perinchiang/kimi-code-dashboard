@@ -219,16 +219,25 @@ function attachHeatmapHover(data) {
 }
 
 // === Memory Donut ===
+function _formatPct(fraction) {
+    var pct = fraction * 100;
+    if (pct > 0 && pct < 0.1) return '<0.1';
+    if (pct >= 99.9 && pct < 100) return '>99.9';
+    return pct.toFixed(1);
+}
+
 function renderDonut(values, total, colorMap) {
     if (total === 0) return '<div class="trend-empty">暂无数据</div>';
     var size = 180, cx = 90, cy = 90, r = 72;
     var circumference = 2 * Math.PI * r;
     var strokeWidth = 20;
     var defaultColors = ['var(--accent)', 'var(--purple)', 'var(--success)', 'var(--warning)'];
+    // 最小可见弧长，避免极小占比段在 donut 上完全不可见
+    var minLen = circumference * 0.012;
     var cumulative = 0;
     var segments = values.map(function(v, i) {
         var fraction = v.value / total;
-        var length = fraction * circumference;
+        var length = Math.max(fraction * circumference, fraction > 0 ? minLen : 0);
         var offset = -cumulative * circumference;
         cumulative += fraction;
         var color = colorMap && colorMap[v.rawModel || v.label] ? colorMap[v.rawModel || v.label] : defaultColors[i % defaultColors.length];
@@ -236,11 +245,11 @@ function renderDonut(values, total, colorMap) {
     });
     var circles = segments.map(function(s) {
         if (s.length <= 0) return '';
-        var pct = (s.fraction * 100).toFixed(1);
+        var pct = _formatPct(s.fraction);
         return '<circle class="donut-segment" data-label="' + escapeHtml(s.label) + '" data-value="' + s.value + '" data-pct="' + pct + '" cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + s.color + '" stroke-width="' + strokeWidth + '" stroke-dasharray="' + s.length + ' ' + (circumference - s.length) + '" stroke-dashoffset="' + s.offset + '" transform="rotate(-90 ' + cx + ' ' + cy + ')" style="transition: stroke-dasharray 0.6s ease; cursor: pointer"/>';
     }).join('');
     var legend = segments.map(function(s) {
-        var pct = (s.fraction * 100).toFixed(1);
+        var pct = _formatPct(s.fraction);
         return '<div class="legend-item"><span class="legend-swatch" style="background:' + s.color + '"></span><div class="legend-text"><div class="legend-name">' + escapeHtml(s.label) + '</div><div class="legend-meta">' + formatTokens(s.value) + ' · ' + pct + '%</div></div></div>';
     }).join('');
     return '<div class="donut-wrap"><div class="donut-container"><svg viewBox="0 0 ' + size + ' ' + size + '" style="width:100%;height:100%">' + circles + '</svg><div class="donut-center"><div class="donut-total">' + formatTokens(total) + '</div><div class="donut-label">总 Token</div></div></div><div class="memory-legend">' + legend + '</div></div>';
