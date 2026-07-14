@@ -11,6 +11,9 @@ var currentArtifactSource = 'all';
 var currentArtifactQuery = '';
 var kimiUpdateState = { checking: false, updateAvailable: false, error: null };
 var selectedProvider = null;
+var currentSkillStatusFilter = 'all';
+var currentMcpStatusFilter = 'all';
+var currentTaskStatusFilter = 'all';
 
 // === Settings ===
 var SETTINGS_KEY = 'kimi_dashboard_settings_v1';
@@ -578,13 +581,32 @@ function handleRoute() {
     else if (hash === '#/settings') renderSettings();
 }
 
+function _filterSkillsByStatus(skills) {
+    if (currentSkillStatusFilter === 'enabled') return skills.filter(function(s) { return s.enabled; });
+    if (currentSkillStatusFilter === 'disabled') return skills.filter(function(s) { return !s.enabled; });
+    return skills;
+}
+
+function setSkillStatusFilter(status) {
+    currentSkillStatusFilter = status || 'all';
+    var filterEl = document.getElementById('skillStatusFilter');
+    if (filterEl) {
+        filterEl.querySelectorAll('.seg-item').forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.status === status);
+        });
+    }
+    var q = document.getElementById('skillSearchDetail');
+    filterSkillsDetail(q ? q.value : '');
+}
+
 function renderSkillsDetail() {
     var data = statusData.skills;
     var list = document.getElementById('skillsDetailList');
     var stats = document.getElementById('skillsDetailStats');
     if (!data) { list.innerHTML = '<div class="empty">数据加载中...</div>'; return; }
     stats.innerHTML = '<span>共 <strong>' + data.total + '</strong> 个</span><span>已启用 <strong>' + data.enabledCount + '</strong></span>' + (data.disabledCount ? '<span>已禁用 <strong>' + data.disabledCount + '</strong></span>' : '') + '<span>本地可用 <strong>' + data.localCount + '</strong></span>';
-    renderSkillsDetailList(data.skills);
+    var filtered = _filterSkillsByStatus(data.skills);
+    renderSkillsDetailList(filtered);
 }
 
 function renderSkillCard(s) {
@@ -608,13 +630,31 @@ function renderSkillsDetailList(skills) {
 }
 
 function filterSkillsDetail(q) {
-    var skills = statusData.skills ? statusData.skills.skills : [];
+    var skills = statusData.skills ? _filterSkillsByStatus(statusData.skills.skills) : [];
     var ql = (q || '').toLowerCase().trim();
     var filtered = ql ? skills.filter(function(s) {
         return (s.name || '').toLowerCase().indexOf(ql) !== -1 || (s.description || '').toLowerCase().indexOf(ql) !== -1 || (s.id || '').toLowerCase().indexOf(ql) !== -1;
     }) : skills;
     if (!filtered.length) { document.getElementById('skillsDetailList').innerHTML = '<div class="empty">未找到匹配的 Skill</div>'; return; }
     renderSkillsDetailList(filtered);
+}
+
+function _filterMcpByStatus(servers) {
+    if (currentMcpStatusFilter === 'enabled') return servers.filter(function(s) { return s.enabled; });
+    if (currentMcpStatusFilter === 'disabled') return servers.filter(function(s) { return !s.enabled; });
+    return servers;
+}
+
+function setMcpStatusFilter(status) {
+    currentMcpStatusFilter = status || 'all';
+    var filterEl = document.getElementById('mcpStatusFilter');
+    if (filterEl) {
+        filterEl.querySelectorAll('.seg-item').forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.status === status);
+        });
+    }
+    var q = document.getElementById('mcpSearchDetail');
+    filterMcpDetail(q ? q.value : '');
 }
 
 function renderMcpDetail() {
@@ -624,8 +664,19 @@ function renderMcpDetail() {
     if (!data) { list.innerHTML = '<div class="empty">数据加载中...</div>'; return; }
     stats.innerHTML = '<span>共 <strong>' + data.total + '</strong> 个</span><span>已启用 <strong>' + data.enabled + '</strong></span>' + (data.disabled ? '<span>已禁用 <strong>' + data.disabled + '</strong></span>' : '') + '<span>可用 <strong>' + data.available + '</strong></span>';
     list.className = 'mcp-grid';
-    if (!data.servers.length) { list.innerHTML = '<div class="empty">未配置 MCP</div>'; return; }
-    list.innerHTML = data.servers.map(renderMcpCard).join('');
+    var filtered = _filterMcpByStatus(data.servers);
+    if (!filtered.length) { list.innerHTML = '<div class="empty">未配置 MCP</div>'; return; }
+    list.innerHTML = filtered.map(renderMcpCard).join('');
+}
+
+function filterMcpDetail(q) {
+    var servers = statusData.mcp ? _filterMcpByStatus(statusData.mcp.servers) : [];
+    var ql = (q || '').toLowerCase().trim();
+    var filtered = ql ? servers.filter(function(s) {
+        return (s.name || '').toLowerCase().indexOf(ql) !== -1 || (s.description || '').toLowerCase().indexOf(ql) !== -1 || (s.command || '').toLowerCase().indexOf(ql) !== -1;
+    }) : servers;
+    if (!filtered.length) { document.getElementById('mcpDetailList').innerHTML = '<div class="empty">未找到匹配的 MCP</div>'; return; }
+    document.getElementById('mcpDetailList').innerHTML = filtered.map(renderMcpCard).join('');
 }
 
 function _mcpTypeInfo(s) {
@@ -672,20 +723,69 @@ function _mcpDetailHtml(s) {
     var info = _mcpTypeInfo(s);
     var desc = s.description || getMcpDesc(s.name) || s.detail || '';
     var lines = [];
-    if (desc) lines.push('<div class="mcp-detail-row block"><span class="label">描述:</span><div>' + desc + '</div></div>');
-    lines.push('<div class="mcp-detail-row"><span class="label">类型:</span> <span class="badge ' + info.cls + '">' + info.label + '</span></div>');
-    lines.push('<div class="mcp-detail-row"><span class="label">状态:</span> <span class="status ' + s.status + '"><span class="status-dot"></span>' + s.status + '</span></div>');
-    lines.push('<div class="mcp-detail-row"><span class="label">命令:</span> <code>' + escapeHtml(s.command) + '</code></div>');
+    if (desc) lines.push('<div class="mcp-detail-desc"><div class="label">描述</div><div class="detail-content">' + escapeHtml(desc) + '</div></div>');
+    lines.push('<div class="mcp-detail-meta"><span class="label">类型</span><span class="badge ' + info.cls + '">' + info.label + '</span></div>');
+    lines.push('<div class="mcp-detail-meta"><span class="label">状态</span><span class="status ' + s.status + '"><span class="status-dot"></span>' + s.status + '</span></div>');
+    lines.push('<div class="mcp-detail-meta"><span class="label">命令</span><code>' + escapeHtml(s.command) + '</code></div>');
     if (s.args && s.args.length) {
-        lines.push('<div class="mcp-detail-row"><span class="label">参数:</span></div>');
+        lines.push('<div class="mcp-detail-meta"><span class="label">参数</span></div>');
         lines.push('<ul class="mcp-detail-list">' + s.args.map(function(a) { return '<li><code>' + escapeHtml(a) + '</code></li>'; }).join('') + '</ul>');
     }
-    if (s.cwd) lines.push('<div class="mcp-detail-row"><span class="label">cwd:</span> <code>' + escapeHtml(s.cwd) + '</code></div>');
+    if (s.cwd) lines.push('<div class="mcp-detail-meta"><span class="label">cwd</span><code>' + escapeHtml(s.cwd) + '</code></div>');
     if (s.env && Object.keys(s.env).length) {
-        lines.push('<div class="mcp-detail-row"><span class="label">环境变量:</span></div>');
+        lines.push('<div class="mcp-detail-meta"><span class="label">环境变量</span></div>');
         lines.push('<ul class="mcp-detail-list">' + Object.keys(s.env).map(function(k) { return '<li>' + escapeHtml(k) + '=<span class="mcp-secret">***</span></li>'; }).join('') + '</ul>');
     }
+    if (s.detail && s.status === 'offline') {
+        lines.push('<div class="mcp-detail-meta row-error"><span class="label">诊断信息</span><span>' + escapeHtml(s.detail) + '</span></div>');
+    }
     return lines.join('');
+}
+
+function _buildMcpDiagnosticPrompt(s) {
+    var lines = [
+        '请帮我诊断下面这个 MCP Server 为什么无法启动或处于 offline 状态，并给出修复建议。',
+        '',
+        'MCP 名称: ' + (s.name || ''),
+        '状态: ' + (s.status || 'unknown'),
+        '诊断信息: ' + (s.detail || '无'),
+        '命令: ' + (s.command || ''),
+        '参数: ' + (s.args && s.args.length ? s.args.join(' ') : '无'),
+        '工作目录: ' + (s.cwd || '无'),
+        '环境变量键: ' + (s.env && Object.keys(s.env).length ? Object.keys(s.env).join(', ') : '无'),
+        '',
+        '请检查命令是否存在、参数是否正确、依赖是否安装，并告诉我应该怎么修复。'
+    ];
+    return lines.join('\n');
+}
+
+async function copyMcpDiagnosticPrompt(mcpName) {
+    var data = statusData.mcp;
+    var s = data && data.servers.find(function(x) { return x.name === mcpName; });
+    if (!s) return;
+    var prompt = _buildMcpDiagnosticPrompt(s);
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(prompt);
+        } else {
+            var ta = document.createElement('textarea');
+            ta.value = prompt;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
+        showToast('已复制到剪贴板，去告诉kimi code诊断一下吧！', 3000);
+    } catch (e) {
+        showToast('复制失败，请手动复制', 3000);
+    }
+}
+
+function copyMcpFixPrompt() {
+    if (!_currentMcpDetailId) return;
+    copyMcpDiagnosticPrompt(_currentMcpDetailId);
 }
 
 var _currentMcpDetailId = null;
@@ -698,6 +798,8 @@ function openMcpDetail(mcpId) {
     _currentMcpDetailId = mcpId;
     document.getElementById('mcp-detail-name').textContent = s.name;
     document.getElementById('mcp-detail-content').innerHTML = _mcpDetailHtml(s);
+    var fixBtn = document.getElementById('mcp-detail-fix-btn');
+    if (fixBtn) fixBtn.style.display = (s.status === 'offline') ? '' : 'none';
     document.getElementById('mcpDetailModal').style.display = '';
     document.body.style.overflow = 'hidden';
 }
@@ -712,11 +814,15 @@ function renderMcpCard(s) {
     var enabledChecked = s.enabled ? ' checked' : '';
     var statusCls = s.status;
     var desc = s.description || getMcpDesc(s.name) || s.detail || '';
-    return '<div class="mcp-card ' + (s.enabled ? '' : 'disabled') + '" data-mcp-id="' + s.name + '" onclick="if(!event.target.closest(\'.toggle-switch\'))openMcpDetail(\'' + s.name + '\')">' +
+    var isOffline = s.status === 'offline';
+    var diagBtn = isOffline ? '<button class="btn-task mcp-diag-btn" title="复制诊断 prompt 给 AI" onclick="event.stopPropagation();copyMcpDiagnosticPrompt(\'' + s.name + '\')">诊断</button>' : '';
+    return '<div class="mcp-card ' + (s.enabled ? '' : 'disabled') + (isOffline ? ' offline' : '') + '" data-mcp-id="' + s.name + '" onclick="if(!event.target.closest(\'.toggle-switch\') && !event.target.closest(\'.mcp-diag-btn\'))openMcpDetail(\'' + s.name + '\')">' +
         '<div class="mcp-card-header"><span class="mcp-card-name">' + s.name + '</span><span class="status ' + statusCls + '"><span class="status-dot"></span>' + s.status + '</span></div>' +
         (desc ? '<div class="mcp-card-desc">' + desc + '</div>' : '') +
+        (isOffline && s.detail ? '<div class="mcp-card-error">' + escapeHtml(s.detail) + '</div>' : '') +
         '<div class="mcp-card-actions">' +
             '<label class="toggle-switch" title="启用/禁用" onclick="event.stopPropagation()"><input type="checkbox" onchange="toggleMcpEnabled(\'' + s.name + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label>' +
+            diagBtn +
         '</div>' +
     '</div>';
 }
@@ -1952,6 +2058,35 @@ function renderTaskCard(t) {
     return '<div class="task-card" data-task-id="' + t.id + '"><div class="task-card-header"><span class="task-card-name">' + t.name + '</span><span class="task-state-badge ' + stateCls + '">' + stateLabel + '</span></div><div class="task-card-desc">' + t.description + '</div><div class="task-card-schedule">\u23f0 ' + t.schedule + '</div>' + renderTaskSources(t.sources, t.logPreview) + '<div class="task-card-info">' + (s.lastRun && s.lastRun !== '1999-11-30T00:00:00' ? '<div><span class="label">上次运行:</span> ' + s.lastRun.replace('T', ' ') + '</div>' : '<div><span class="label">上次运行:</span> 尚未运行</div>') + (s.nextRun ? '<div><span class="label">下次运行:</span> ' + s.nextRun.replace('T', ' ') + '</div>' : '') + (resultStatus.label ? '<div><span class="label">运行结果:</span> ' + resultLabel + '</div>' : '') + '</div><div class="task-card-actions"><label class="toggle-switch" title="启用/禁用"><input type="checkbox" onchange="toggleTaskEnabled(\'' + t.id + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label><button class="btn-task" onclick="runTask(\'' + t.id + '\', this)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>立即运行</button><button class="btn-task" onclick="openTaskEdit(\'' + t.id + '\')">编辑</button>' + (t.logFile ? '<button class="btn-task" onclick="openTaskLog(\'' + t.id + '\')">日志</button>' : '') + '<button class="btn-task btn-danger" onclick="deleteTask(\'' + t.id + '\')">删除</button></div></div>';
 }
 
+function _filterTasksByStatus(tasks) {
+    if (currentTaskStatusFilter === 'enabled') return tasks.filter(function(t) { return t.enabled; });
+    if (currentTaskStatusFilter === 'disabled') return tasks.filter(function(t) { return !t.enabled; });
+    return tasks;
+}
+
+function setTaskStatusFilter(status) {
+    currentTaskStatusFilter = status || 'all';
+    var filterEl = document.getElementById('taskStatusFilter');
+    if (filterEl) {
+        filterEl.querySelectorAll('.seg-item').forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.status === status);
+        });
+    }
+    var q = document.getElementById('taskSearchDetail');
+    filterTasksDetail(q ? q.value : '');
+}
+
+function filterTasksDetail(q) {
+    var tasks = statusData.tasks ? _filterTasksByStatus(statusData.tasks.tasks) : [];
+    var ql = (q || '').toLowerCase().trim();
+    var filtered = ql ? tasks.filter(function(t) {
+        return (t.name || '').toLowerCase().indexOf(ql) !== -1 || (t.description || '').toLowerCase().indexOf(ql) !== -1 || (t.id || '').toLowerCase().indexOf(ql) !== -1;
+    }) : tasks;
+    var grid = document.getElementById('tasksDetailGrid');
+    if (!filtered.length) { grid.innerHTML = '<div class="empty">未找到匹配的定时任务</div>'; return; }
+    grid.innerHTML = filtered.map(renderTaskCard).join('');
+}
+
 function renderTasksDetail() {
     var data = statusData.tasks;
     var grid = document.getElementById('tasksDetailGrid');
@@ -1983,8 +2118,9 @@ function renderTasksDetail() {
         if (counts.unregistered) statItems.push('<span>未注册 <strong>' + counts.unregistered + '</strong></span>');
         stats.innerHTML = statItems.join('');
     }
-    if (!data.tasks.length) { grid.innerHTML = '<div class="empty">暂无定时任务</div>'; return; }
-    grid.innerHTML = data.tasks.map(renderTaskCard).join('');
+    var filtered = _filterTasksByStatus(data.tasks);
+    if (!filtered.length) { grid.innerHTML = '<div class="empty">暂无定时任务</div>'; return; }
+    grid.innerHTML = filtered.map(renderTaskCard).join('');
 }
 
 async function loadTasks() {

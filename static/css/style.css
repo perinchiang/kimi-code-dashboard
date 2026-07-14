@@ -1207,6 +1207,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 /* offline 卡片左侧红边强调，方便扫一眼定位坏的 MCP */
 .mcp-card.offline { border-left: 3px solid var(--danger); padding-left: calc(0.9rem - 3px); }
 .mcp-card-error { font-size: 0.72rem; color: var(--danger); font-weight: 500; margin: -0.2rem 0 0.6rem; line-height: 1.5; }
+.mcp-diag-btn { color: var(--warning); border-color: rgba(210,153,34,0.35); }
+.mcp-diag-btn:hover { background: rgba(210,153,34,0.12); color: var(--warning); }
 
 .mcp-detail-readonly { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.7; overflow-wrap: break-word; }
 .mcp-detail-readonly code {
@@ -1214,11 +1216,35 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
     border-radius: 0.25rem; font-family: var(--mono); font-size: 0.75rem;
     word-break: break-all; white-space: pre-wrap;
 }
+.mcp-detail-desc { margin-bottom: 0.75rem; }
+.mcp-detail-desc > .label {
+    display: block; font-size: 0.72rem; font-weight: 600; color: var(--text-tertiary);
+    text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.35rem;
+}
+.mcp-detail-desc .detail-content { color: var(--text); font-size: 0.8rem; line-height: 1.65; }
+.mcp-detail-meta {
+    display: flex; align-items: center; gap: 0.5rem;
+    margin-bottom: 0.45rem; min-height: 1.6rem;
+}
+.mcp-detail-meta .label {
+    flex: 0 0 auto; min-width: 3.2rem;
+    font-size: 0.72rem; font-weight: 600; color: var(--text-tertiary);
+    text-transform: uppercase; letter-spacing: 0.03em;
+}
+.mcp-detail-meta code {
+    font-size: 0.74rem; color: var(--text-secondary);
+}
+/* 详情中的诊断错误行红字 */
+.mcp-detail-meta.row-error { color: var(--danger); }
+.mcp-detail-meta.row-error .label { color: var(--danger); }
+
+/* 保留旧版行样式兼容 */
 .mcp-detail-row { margin-bottom: 0.4rem; }
 .mcp-detail-row .label { color: var(--text-secondary); font-weight: 600; display: inline-block; min-width: 4.5rem; vertical-align: top; }
-/* 长内容行：label 独占一行，内容下方占满宽度，保留换行 */
 .mcp-detail-row.block { display: flex; flex-direction: column; gap: 0.25rem; }
 .mcp-detail-row.block .label { min-width: 0; }
+.mcp-detail-row.row-error { color: var(--danger); }
+.mcp-detail-row.row-error .label { color: var(--danger); }
 .detail-content {
     background: var(--surface-2);
     border: 1px solid var(--border);
@@ -1233,9 +1259,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
     overflow-y: auto;
     scrollbar-width: thin;
 }
-/* 详情中的诊断错误行红字 */
-.mcp-detail-row.row-error { color: var(--danger); }
-.mcp-detail-row.row-error .label { color: var(--danger); }
 
 
 /* === Artifacts 产物浏览器 === */
