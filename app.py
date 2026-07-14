@@ -18,7 +18,7 @@ Open: http://127.0.0.1:8080
 from flask import Flask
 
 from config import log
-from routes import artifacts, image_bed, kimi, mcp, memory, model_config, skills, system, tasks
+from routes import artifacts, hooks, image_bed, kimi, mcp, memory, model_config, skills, system, tasks
 
 
 def create_app() -> Flask:
@@ -27,6 +27,7 @@ def create_app() -> Flask:
 
     # Register blueprints
     app.register_blueprint(skills.bp)
+    app.register_blueprint(hooks.bp)
     app.register_blueprint(mcp.bp)
     app.register_blueprint(memory.bp)
     app.register_blueprint(kimi.bp)

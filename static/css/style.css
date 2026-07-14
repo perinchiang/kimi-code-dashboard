@@ -1531,3 +1531,17 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
     font-size: 0.84rem; line-height: 1.65; color: var(--text);
     white-space: pre-wrap; word-break: break-word;
 }
+
+/* === Hooks === */
+.hook-command {
+    font-family: var(--mono); font-size: 0.78rem;
+    white-space: pre-wrap; word-break: break-all;
+    background: var(--bg-tertiary); color: var(--text);
+    padding: 0.55rem 0.7rem; border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+}
+.task-card-desc code {
+    font-family: var(--mono); font-size: 0.78em;
+    background: rgba(88,166,255,0.12); color: var(--accent);
+    padding: 0.05rem 0.3rem; border-radius: 0.2rem;
+}

@@ -1,0 +1,254 @@
+"""Hooks API blueprint.
+
+Reads and writes Kimi Code CLI lifecycle hooks from ~/.kimi-code/config.toml.
+Active hooks live under the top-level `hooks` array; disabled hooks live under
+`disabled_hooks`. Kimi Code CLI validates hook objects strictly, so we do not
+store any dashboard-only metadata inside individual hook entries.
+"""
+
+import shutil
+import tomllib
+from datetime import datetime
+from pathlib import Path
+
+import tomli_w
+from flask import Blueprint, jsonify, request
+
+from config import KIMI_CONFIG, log
+
+bp = Blueprint("hooks", __name__)
+
+HOOK_SCHEMA_FIELDS = ("event", "command", "matcher", "timeout")
+
+
+def _backup_config() -> Path:
+    """Create a timestamped backup of config.toml before mutation."""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = KIMI_CONFIG.with_suffix(f".toml.{timestamp}.bak")
+    try:
+        shutil.copy2(KIMI_CONFIG, backup_path)
+        log.info("Backed up %s to %s", KIMI_CONFIG, backup_path)
+    except Exception as e:
+        log.error("Failed to backup %s: %s", KIMI_CONFIG, e)
+    return backup_path
+
+
+def _load_config() -> dict:
+    try:
+        return tomllib.loads(KIMI_CONFIG.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        log.warning("%s not found, returning empty config", KIMI_CONFIG)
+        return {}
+    except Exception as e:
+        log.error("Failed to load %s: %s", KIMI_CONFIG, e)
+        return {}
+
+
+def _save_config(data: dict) -> bool:
+    """Write data back to config.toml with a timestamped backup."""
+    _backup_config()
+    try:
+        # Normalize empty arrays to omit the key entirely for cleanliness.
+        if not data.get("hooks"):
+            data.pop("hooks", None)
+        if not data.get("disabled_hooks"):
+            data.pop("disabled_hooks", None)
+        KIMI_CONFIG.write_text(tomli_w.dumps(data), encoding="utf-8")
+        log.info("Updated %s", KIMI_CONFIG)
+        return True
+    except Exception as e:
+        log.error("Failed to write %s: %s", KIMI_CONFIG, e)
+        return False
+
+
+def _clean_hook(hook: dict) -> dict:
+    """Return a hook dict containing only Kimi-compatible fields."""
+    clean = {}
+    for key in HOOK_SCHEMA_FIELDS:
+        if key in hook and hook[key] not in (None, ""):
+            clean[key] = hook[key]
+    return clean
+
+
+def _normalize_hook(hook: dict) -> dict:
+    """Normalize a hook for API responses."""
+    timeout = hook.get("timeout")
+    try:
+        timeout = int(timeout) if timeout is not None else None
+    except (TypeError, ValueError):
+        timeout = None
+    return {
+        "event": hook.get("event", ""),
+        "command": hook.get("command", ""),
+        "matcher": hook.get("matcher", ""),
+        "timeout": timeout,
+    }
+
+
+def _list_hooks(data: dict) -> list:
+    """Build a flat list of hooks with synthetic IDs.
+
+    IDs are positional indices across [active..., disabled...]. This is stable
+    enough for a single-user local dashboard because each request reloads the
+    file before mutation.
+    """
+    active = data.get("hooks") or []
+    disabled = data.get("disabled_hooks") or []
+    result = []
+    for idx, hook in enumerate(active):
+        item = _normalize_hook(hook)
+        item["enabled"] = True
+        item["id"] = str(idx)
+        result.append(item)
+    offset = len(active)
+    for idx, hook in enumerate(disabled):
+        item = _normalize_hook(hook)
+        item["enabled"] = False
+        item["id"] = str(offset + idx)
+        result.append(item)
+    return result
+
+
+def _locate_hook(data: dict, hook_id: str):
+    """Return (array_key, index) for a synthetic hook ID, or (None, None)."""
+    try:
+        idx = int(hook_id)
+    except (TypeError, ValueError):
+        return None, None
+    active = data.get("hooks") or []
+    disabled = data.get("disabled_hooks") or []
+    if 0 <= idx < len(active):
+        return "hooks", idx
+    offset = len(active)
+    if offset <= idx < offset + len(disabled):
+        return "disabled_hooks", idx - offset
+    return None, None
+
+
+@bp.route("/api/hooks")
+def api_hooks():
+    data = _load_config()
+    hooks = _list_hooks(data)
+    enabled_count = sum(1 for h in hooks if h["enabled"])
+    return jsonify({
+        "total": len(hooks),
+        "enabledCount": enabled_count,
+        "disabledCount": len(hooks) - enabled_count,
+        "hooks": hooks,
+    })
+
+
+@bp.route("/api/hooks", methods=["POST"])
+def api_hook_create():
+    body = request.get_json(silent=True) or {}
+    event = str(body.get("event", "")).strip()
+    command = str(body.get("command", "")).strip()
+    if not event or not command:
+        return jsonify({"success": False, "error": "event 和 command 不能为空"}), 400
+
+    matcher = str(body.get("matcher", "")).strip() or None
+    timeout_raw = body.get("timeout")
+    timeout = None
+    if timeout_raw not in (None, ""):
+        try:
+            timeout = int(timeout_raw)
+            if timeout <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "timeout 必须是正整数"}), 400
+
+    new_hook = _clean_hook({
+        "event": event,
+        "command": command,
+        "matcher": matcher,
+        "timeout": timeout,
+    })
+
+    data = _load_config()
+    enabled = bool(body.get("enabled", True))
+    key = "hooks" if enabled else "disabled_hooks"
+    data.setdefault(key, [])
+    data[key].append(new_hook)
+
+    if not _save_config(data):
+        return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
+    return jsonify({"success": True})
+
+
+@bp.route("/api/hooks/<hook_id>", methods=["POST"])
+def api_hook_update(hook_id: str):
+    body = request.get_json(silent=True) or {}
+    data = _load_config()
+    key, idx = _locate_hook(data, hook_id)
+    if key is None:
+        return jsonify({"success": False, "error": "Hook 不存在"}), 404
+
+    event = str(body.get("event", "")).strip()
+    command = str(body.get("command", "")).strip()
+    if not event or not command:
+        return jsonify({"success": False, "error": "event 和 command 不能为空"}), 400
+
+    matcher = str(body.get("matcher", "")).strip() or None
+    timeout_raw = body.get("timeout")
+    timeout = None
+    if timeout_raw not in (None, ""):
+        try:
+            timeout = int(timeout_raw)
+            if timeout <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "timeout 必须是正整数"}), 400
+
+    updated = _clean_hook({
+        "event": event,
+        "command": command,
+        "matcher": matcher,
+        "timeout": timeout,
+    })
+
+    target_enabled = bool(body.get("enabled", key == "hooks"))
+    current_enabled = key == "hooks"
+
+    if target_enabled == current_enabled:
+        data[key][idx] = updated
+    else:
+        # Move between arrays.
+        data[key].pop(idx)
+        new_key = "hooks" if target_enabled else "disabled_hooks"
+        data.setdefault(new_key, [])
+        data[new_key].append(updated)
+
+    if not _save_config(data):
+        return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
+    return jsonify({"success": True})
+
+
+@bp.route("/api/hooks/<hook_id>/toggle", methods=["POST"])
+def api_hook_toggle(hook_id: str):
+    data = _load_config()
+    key, idx = _locate_hook(data, hook_id)
+    if key is None:
+        return jsonify({"success": False, "error": "Hook 不存在"}), 404
+
+    hook = data[key].pop(idx)
+    new_key = "disabled_hooks" if key == "hooks" else "hooks"
+    data.setdefault(new_key, [])
+    data[new_key].append(hook)
+
+    if not _save_config(data):
+        return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
+    return jsonify({"success": True})
+
+
+@bp.route("/api/hooks/<hook_id>/delete", methods=["POST"])
+def api_hook_delete(hook_id: str):
+    data = _load_config()
+    key, idx = _locate_hook(data, hook_id)
+    if key is None:
+        return jsonify({"success": False, "error": "Hook 不存在"}), 404
+
+    data[key].pop(idx)
+
+    if not _save_config(data):
+        return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
+    return jsonify({"success": True})

@@ -133,6 +133,17 @@
                     </div>
                     <div id="mcpMiniStatus" class="tasks-mini-status"></div>
                 </a>
+                <a href="#/hooks" class="mini-card" id="hooksMiniCard">
+                    <div class="mini-card-header">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                        Hooks
+                    </div>
+                    <div class="mini-card-right">
+                        <span class="metric" id="hooksMiniMetric"><div class="skeleton sk-metric"></div></span>
+                        <span class="metric-label" id="hooksMiniLabel">启用 / 总计</span>
+                    </div>
+                    <div id="hooksMiniStatus" class="tasks-mini-status"></div>
+                </a>
                 <a href="#/tasks" class="mini-card" id="tasksMiniCard">
                     <div class="mini-card-header">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -347,6 +358,25 @@
             <span class="seg-stats" id="tasksDetailStats"></span>
         </div>
         <div id="tasksDetailGrid" class="tasks-grid"></div>
+    </div>
+
+    <div id="view-hooks" class="detail-page" style="display:none">
+        <div class="detail-header">
+            <a href="#/" class="back-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>返回</a>
+            <h2>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                Hooks 管理
+            </h2>
+            <input type="text" class="search-box detail-search" id="hookSearchDetail" placeholder="搜索 event、matcher 或 command..." oninput="filterHooksDetail(this.value)">
+            <button class="btn-task" onclick="openHookEdit()">+ 新建 Hook</button>
+        </div>
+        <div class="seg-filter" id="hookStatusFilter">
+            <button class="seg-item active" data-status="all" onclick="setHookStatusFilter('all')">全部</button>
+            <button class="seg-item" data-status="enabled" onclick="setHookStatusFilter('enabled')">已启用</button>
+            <button class="seg-item" data-status="disabled" onclick="setHookStatusFilter('disabled')">未启用</button>
+            <span class="seg-stats" id="hooksDetailStats"></span>
+        </div>
+        <div id="hooksDetailGrid" class="tasks-grid"></div>
     </div>
 
     <div id="view-artifacts" class="detail-page" style="display:none">
@@ -639,7 +669,61 @@
         </div>
     </div>
 
+    <!-- Hook Edit Modal -->
+    <div id="hookEditModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeHookEdit()">
+        <div class="modal modal-md" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    <span id="hook-edit-title">编辑 Hook</span>
+                </h3>
+                <button class="modal-close" onclick="closeHookEdit()" aria-label="关闭">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="hookEditForm" class="task-form">
+                    <input type="hidden" id="hook-edit-id">
+                    <div class="form-row">
+                        <label for="hook-edit-event">事件 (event)</label>
+                        <input type="text" id="hook-edit-event" list="hook-event-options" placeholder="例如 Stop、PreToolUse、PostToolUse">
+                        <datalist id="hook-event-options">
+                            <option value="Stop">
+                            <option value="PreToolUse">
+                            <option value="PostToolUse">
+                            <option value="UserPromptSubmit">
+                            <option value="SessionStart">
+                        </datalist>
+                    </div>
+                    <div class="form-row">
+                        <label for="hook-edit-matcher">匹配器 (matcher，可选)</label>
+                        <input type="text" id="hook-edit-matcher" placeholder="例如 Shell、WriteFile，留空表示匹配所有">
+                    </div>
+                    <div class="form-row">
+                        <label for="hook-edit-command">执行命令 (command)</label>
+                        <textarea id="hook-edit-command" rows="4" placeholder="例如 curl -s &quot;https://api.day.app/YOUR_KEY/标题/内容&quot;"></textarea>
+                    </div>
+                    <div class="form-row">
+                        <label for="hook-edit-timeout">超时秒数 (timeout，可选)</label>
+                        <input type="number" id="hook-edit-timeout" min="1" value="30">
+                    </div>
+                    <div class="form-row">
+                        <label>状态</label>
+                        <label class="toggle-switch" title="启用/禁用">
+                            <input type="checkbox" id="hook-edit-enabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-task" onclick="closeHookEdit()">取消</button>
+                <button id="hook-edit-save-btn" onclick="saveHook()">保存</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/js/charts.js?v=12"></script>
-    <script src="/static/js/app.js?v=79"></script>
+    <script src="/static/js/app.js?v=80"></script>
 </body>
 </html>

@@ -15,6 +15,7 @@ HOME = Path.home()
 AGENTS_DIR = HOME / ".agents"
 SKILL_LOCK = AGENTS_DIR / ".skill-lock.json"
 KIMI_CODE_DIR = HOME / ".kimi-code"
+KIMI_CONFIG = KIMI_CODE_DIR / "config.toml"
 MCP_CONFIG = KIMI_CODE_DIR / "mcp.json"
 KIMI_LOG = KIMI_CODE_DIR / "logs" / "kimi-code.log"
 KIMI_CREDENTIALS = KIMI_CODE_DIR / "credentials" / "kimi-code.json"

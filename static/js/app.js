@@ -15,7 +15,10 @@ var currentSkillStatusFilter = 'all';
 var currentSkillSort = 'name';
 var currentMcpStatusFilter = 'all';
 var currentTaskStatusFilter = 'all';
+var currentHookStatusFilter = 'all';
 var _currentSkillDetailId = null;
+var _currentHookEditId = null;
+var _currentHookCreate = false;
 
 // === Settings ===
 var SETTINGS_KEY = 'kimi_dashboard_settings_v1';
@@ -567,6 +570,22 @@ async function loadMCP() {
     }
 }
 
+// === Hooks ===
+async function loadHooks() {
+    try {
+        var data = await fetchJSON('/api/hooks');
+        statusData.hooks = data;
+        document.getElementById('hooksMiniMetric').textContent = data.enabledCount + '/' + data.total;
+        document.getElementById('hooksMiniLabel').textContent = '启用 / 总计';
+        var pills = [];
+        if (data.disabledCount) pills.push('<span class="task-mini-pill disabled"><span class="dot"></span>已禁用 ' + data.disabledCount + '</span>');
+        document.getElementById('hooksMiniStatus').innerHTML = pills.join('') || '';
+    } catch (e) {
+        document.getElementById('hooksMiniMetric').textContent = '!';
+        document.getElementById('hooksMiniLabel').textContent = '加载失败';
+    }
+}
+
 // === SPA routing ===
 function handleRoute() {
     var hash = location.hash || '#/';
@@ -575,6 +594,7 @@ function handleRoute() {
     document.getElementById('view-mcp').style.display = (hash === '#/mcp') ? '' : 'none';
     document.getElementById('view-models').style.display = (hash === '#/models') ? '' : 'none';
     document.getElementById('view-tasks').style.display = (hash === '#/tasks') ? '' : 'none';
+    document.getElementById('view-hooks').style.display = (hash === '#/hooks') ? '' : 'none';
     document.getElementById('view-artifacts').style.display = (hash === '#/artifacts') ? '' : 'none';
     document.getElementById('view-memory').style.display = (hash === '#/memory') ? '' : 'none';
     document.getElementById('view-settings').style.display = (hash === '#/settings') ? '' : 'none';
@@ -584,6 +604,7 @@ function handleRoute() {
     else if (hash === '#/mcp') renderMcpDetail();
     else if (hash === '#/models') renderModelConfigDetail();
     else if (hash === '#/tasks') renderTasksDetail();
+    else if (hash === '#/hooks') renderHooksDetail();
     else if (hash === '#/artifacts') renderArtifactsDetail();
     else if (hash === '#/memory') renderMemoryDetail();
     else if (hash === '#/settings') renderSettings();
@@ -2543,6 +2564,171 @@ async function toggleTaskEnabled(taskId, enabled) {
     }
 }
 
+// === Hooks Detail ===
+function renderHookCard(h) {
+    var stateCls = h.enabled ? 'ready' : 'disabled';
+    var stateLabel = h.enabled ? '已启用' : '已禁用';
+    var timeoutText = h.timeout ? h.timeout + 's' : '默认 30s';
+    var matcherText = h.matcher ? '<div><span class="label">matcher:</span> <code>' + escapeHtml(h.matcher) + '</code></div>' : '';
+    return '<div class="task-card" data-hook-id="' + h.id + '"><div class="task-card-header"><span class="task-card-name">' + escapeHtml(h.event) + '</span><span class="task-state-badge ' + stateCls + '">' + stateLabel + '</span></div><div class="task-card-desc">' + matcherText + '<div style="margin-top:0.4rem;"><span class="label">timeout:</span> ' + timeoutText + '</div></div><div class="task-card-info"><div style="font-family:var(--font-mono);font-size:0.8rem;white-space:pre-wrap;word-break:break-all;background:var(--bg-tertiary);padding:0.5rem;border-radius:6px;">' + escapeHtml(h.command) + '</div></div><div class="task-card-actions"><label class="toggle-switch" title="启用/禁用"><input type="checkbox" onchange="toggleHook(\'' + h.id + '\')"' + (h.enabled ? ' checked' : '') + '><span class="toggle-slider"></span></label><button class="btn-task" onclick="openHookEdit(\'' + h.id + '\')">编辑</button><button class="btn-task btn-danger" onclick="deleteHook(\'' + h.id + '\')">删除</button></div></div>';
+}
+
+function _filterHooksByStatus(hooks) {
+    if (currentHookStatusFilter === 'enabled') return hooks.filter(function(h) { return h.enabled; });
+    if (currentHookStatusFilter === 'disabled') return hooks.filter(function(h) { return !h.enabled; });
+    return hooks;
+}
+
+function setHookStatusFilter(status) {
+    currentHookStatusFilter = status || 'all';
+    var filterEl = document.getElementById('hookStatusFilter');
+    if (filterEl) {
+        filterEl.querySelectorAll('.seg-item').forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.status === status);
+        });
+    }
+    var q = document.getElementById('hookSearchDetail');
+    filterHooksDetail(q ? q.value : '');
+}
+
+function filterHooksDetail(q) {
+    var hooks = statusData.hooks ? _filterHooksByStatus(statusData.hooks.hooks) : [];
+    var ql = (q || '').toLowerCase().trim();
+    var filtered = ql ? hooks.filter(function(h) {
+        return (h.event || '').toLowerCase().indexOf(ql) !== -1 ||
+            (h.matcher || '').toLowerCase().indexOf(ql) !== -1 ||
+            (h.command || '').toLowerCase().indexOf(ql) !== -1;
+    }) : hooks;
+    var grid = document.getElementById('hooksDetailGrid');
+    if (!filtered.length) { grid.innerHTML = '<div class="empty">暂无 Hooks</div>'; return; }
+    grid.innerHTML = filtered.map(renderHookCard).join('');
+}
+
+function renderHooksDetail() {
+    var data = statusData.hooks;
+    var grid = document.getElementById('hooksDetailGrid');
+    var stats = document.getElementById('hooksDetailStats');
+    if (!data) {
+        if (grid) grid.innerHTML = '<div class="empty">数据加载中...</div>';
+        if (stats) stats.innerHTML = '';
+        loadHooks();
+        return;
+    }
+    if (stats) {
+        var statItems = ['<span>共 <strong>' + data.total + '</strong> 个</span>'];
+        if (data.enabledCount) statItems.push('<span>已启用 <strong>' + data.enabledCount + '</strong></span>');
+        if (data.disabledCount) statItems.push('<span>已禁用 <strong>' + data.disabledCount + '</strong></span>');
+        stats.innerHTML = statItems.join('');
+    }
+    filterHooksDetail(document.getElementById('hookSearchDetail').value);
+}
+
+// === Hook Edit Modal ===
+function openHookEdit(hookId) {
+    var data = statusData.hooks;
+    var h = hookId ? data.hooks.find(function(x) { return x.id === hookId; }) : null;
+    _currentHookCreate = !hookId;
+    _currentHookEditId = hookId || null;
+    document.getElementById('hook-edit-title').textContent = hookId ? '编辑 Hook' : '新建 Hook';
+    document.getElementById('hook-edit-id').value = hookId || '';
+    document.getElementById('hook-edit-event').value = h ? h.event : 'Stop';
+    document.getElementById('hook-edit-matcher').value = h ? (h.matcher || '') : '';
+    document.getElementById('hook-edit-command').value = h ? h.command : '';
+    document.getElementById('hook-edit-timeout').value = h && h.timeout ? h.timeout : '';
+    document.getElementById('hook-edit-enabled').checked = h ? h.enabled : true;
+    document.getElementById('hookEditModal').style.display = '';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeHookEdit() {
+    document.getElementById('hookEditModal').style.display = 'none';
+    document.body.style.overflow = '';
+    _currentHookEditId = null;
+    _currentHookCreate = false;
+}
+
+async function saveHook() {
+    var hookId = _currentHookEditId;
+    var isCreate = _currentHookCreate;
+    var btn = document.getElementById('hook-edit-save-btn');
+    var orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '保存中...';
+
+    var body = {
+        event: document.getElementById('hook-edit-event').value.trim(),
+        matcher: document.getElementById('hook-edit-matcher').value.trim(),
+        command: document.getElementById('hook-edit-command').value.trim(),
+        timeout: document.getElementById('hook-edit-timeout').value,
+        enabled: document.getElementById('hook-edit-enabled').checked,
+    };
+
+    if (!body.event || !body.command) {
+        showToast('事件和命令不能为空', 3000);
+        btn.disabled = false;
+        btn.innerHTML = orig;
+        return;
+    }
+
+    try {
+        var data;
+        if (isCreate) {
+            data = await postJSON('/api/hooks', body);
+        } else {
+            data = await postJSON('/api/hooks/' + hookId, body);
+        }
+        if (data.success) {
+            closeHookEdit();
+            showToast(isCreate ? 'Hook 已创建' : 'Hook 已保存', 3000);
+            await loadHooks();
+            if (location.hash === '#/hooks') renderHooksDetail();
+        } else {
+            showToast('保存失败: ' + (data.error || '未知错误'), 5000);
+        }
+    } catch (e) {
+        showToast('保存失败: ' + e.message, 5000);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+    }
+}
+
+async function toggleHook(hookId) {
+    try {
+        var data = await postJSON('/api/hooks/' + hookId + '/toggle');
+        if (data.success) {
+            showToast('Hook 状态已切换', 3000);
+            await loadHooks();
+            if (location.hash === '#/hooks') renderHooksDetail();
+        } else {
+            showToast('设置失败: ' + (data.error || '未知错误'), 5000);
+            await loadHooks();
+        }
+    } catch (e) {
+        showToast('设置失败: ' + e.message, 5000);
+        await loadHooks();
+    }
+}
+
+async function deleteHook(hookId) {
+    var data = statusData.hooks;
+    var h = data && data.hooks.find(function(x) { return x.id === hookId; });
+    var label = h ? h.event + (h.matcher ? ' (' + h.matcher + ')' : '') : hookId;
+    if (!confirm('确定删除 Hook "' + label + '"？')) return;
+    try {
+        var res = await postJSON('/api/hooks/' + hookId + '/delete');
+        if (res.success) {
+            showToast('Hook 已删除', 3000);
+            await loadHooks();
+            if (location.hash === '#/hooks') renderHooksDetail();
+        } else {
+            showToast('删除失败: ' + (res.error || '未知错误'), 5000);
+        }
+    } catch (e) {
+        showToast('删除失败: ' + e.message, 5000);
+    }
+}
+
 // === Task Log Modal ===
 async function openTaskLog(taskId) {
     _currentLogTaskId = taskId;
@@ -3021,7 +3207,7 @@ async function loadAll() {
     var icon = document.getElementById('refreshIcon');
     btn.disabled = true;
     icon.classList.add('spin');
-    await Promise.all([loadTrends(), loadSkills(), loadMCP(), loadMemory(), loadKimi(), loadToolUsage(), loadModelUsage(), loadTasks(), loadModelConfig(), loadArtifacts()]);
+    await Promise.all([loadTrends(), loadSkills(), loadMCP(), loadHooks(), loadMemory(), loadKimi(), loadToolUsage(), loadModelUsage(), loadTasks(), loadModelConfig(), loadArtifacts()]);
     renderStatusBar();
     applySettings();
     document.getElementById('lastUpdated').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN');
