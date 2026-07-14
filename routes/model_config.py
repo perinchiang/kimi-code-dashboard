@@ -316,15 +316,14 @@ def api_save_model():
 
     try:
         cfg = _load()
-        if mid == cfg.get("default_model"):
-            return jsonify({"error": "cannot edit default model"}), 403
         providers = cfg.get("providers", {})
-        provider = body.get("provider") or ""
-        if provider and provider not in providers:
-            return jsonify({"error": f"provider '{provider}' not found"}), 400
-
         models = cfg.setdefault("models", {})
         old = models.get(mid, {})
+        provider = body.get("provider") or old.get("provider", "")
+        if _is_protected_provider(provider):
+            return jsonify({"error": "cannot edit model of built-in provider"}), 403
+        if provider and provider not in providers:
+            return jsonify({"error": f"provider '{provider}' not found"}), 400
         entry = {
             "provider": provider or old.get("provider", ""),
             "model": body.get("model") or old.get("model", mid),
@@ -354,12 +353,16 @@ def api_save_model():
 def api_delete_model(mid: str):
     try:
         cfg = _load()
-        if mid == cfg.get("default_model"):
-            return jsonify({"error": "cannot delete default model"}), 403
         models = cfg.get("models", {})
+        model = models.get(mid)
+        if model and _is_protected_provider(model.get("provider", "")):
+            return jsonify({"error": "cannot delete model of built-in provider"}), 403
         if mid not in models:
             return jsonify({"error": "model not found"}), 404
         del models[mid]
+        # Keep default_model valid.
+        if cfg.get("default_model") == mid:
+            cfg["default_model"] = next(iter(models.keys()), "")
         _save(cfg)
         return jsonify({"ok": True})
     except Exception as e:
