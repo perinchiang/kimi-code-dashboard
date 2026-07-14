@@ -1077,7 +1077,8 @@ async function checkKimiUpdate() {
     renderStatusBar();
     try {
         var r = await fetchJSON('/api/kimi-update');
-        renderVersionCheck(r);
+        // /api/kimi-update 同时返回 Kimi 和 Dashboard 的检查结果
+        renderVersionCheck(r && r.kimi ? r.kimi : r);
     } catch (e) {
         kimiUpdateState = { checking: false, updateAvailable: false, error: e.message };
         renderStatusBar();
