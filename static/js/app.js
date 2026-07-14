@@ -980,7 +980,7 @@ async function loadMemory() {
         var gwStatus = data.gatewayReachable ? 'Gateway 在线' : 'Gateway 离线';
         var layerStatus = (data.l0 >= 0 && data.l1 >= 0 && data.l2 >= 0 && data.l3 >= 0) ? '四级记忆正常' : '部分记忆层异常';
         document.getElementById('memorySummary').innerHTML = '<div class="memory-subtitle">共 ' + total + ' 条记忆</div><div class="memory-breakdown">' + gwStatus + ' · ' + layerStatus + '</div>';
-        document.getElementById('memoryChart').innerHTML = renderDonut(values, total);
+        document.getElementById('memoryChart').innerHTML = renderDonut(values, total, null, '总记忆');
         attachDonutHover();
     } catch (e) { setError('memorySummary', '加载失败: ' + e.message); }
 }

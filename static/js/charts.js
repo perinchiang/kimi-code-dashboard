@@ -226,8 +226,9 @@ function _formatPct(fraction) {
     return pct.toFixed(1);
 }
 
-function renderDonut(values, total, colorMap) {
+function renderDonut(values, total, colorMap, centerLabel) {
     if (total === 0) return '<div class="trend-empty">暂无数据</div>';
+    centerLabel = centerLabel || '总 Token';
     var size = 180, cx = 90, cy = 90, r = 72;
     var circumference = 2 * Math.PI * r;
     var strokeWidth = 20;
@@ -252,7 +253,7 @@ function renderDonut(values, total, colorMap) {
         var pct = _formatPct(s.fraction);
         return '<div class="legend-item"><span class="legend-swatch" style="background:' + s.color + '"></span><div class="legend-text"><div class="legend-name">' + escapeHtml(s.label) + '</div><div class="legend-meta">' + formatTokens(s.value) + ' · ' + pct + '%</div></div></div>';
     }).join('');
-    return '<div class="donut-wrap"><div class="donut-container"><svg viewBox="0 0 ' + size + ' ' + size + '" style="width:100%;height:100%">' + circles + '</svg><div class="donut-center"><div class="donut-total">' + formatTokens(total) + '</div><div class="donut-label">总 Token</div></div></div><div class="memory-legend">' + legend + '</div></div>';
+    return '<div class="donut-wrap"><div class="donut-container"><svg viewBox="0 0 ' + size + ' ' + size + '" style="width:100%;height:100%">' + circles + '</svg><div class="donut-center"><div class="donut-total">' + formatTokens(total) + '</div><div class="donut-label">' + escapeHtml(centerLabel) + '</div></div></div><div class="memory-legend">' + legend + '</div></div>';
 }
 
 // === Model usage bars ===
