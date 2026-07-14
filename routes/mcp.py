@@ -113,6 +113,7 @@ def api_mcp():
         "total": len(result),
         "online": online,
         "available": available,
+        "healthy": online + available,
         "offline": offline,
         "enabled": enabled_count,
         "disabled": disabled_count,

@@ -503,8 +503,8 @@ function renderStatusBar() {
         pills.push('<button class="status-pill ' + cls + '" onclick="onKimiPillClick()" title="' + title + '"><span class="dot"></span>Kimi v' + statusData.kimi.version + ' &middot; ' + statusData.kimi.sessionCount + ' sessions</button>');
     }
     if (statusData.mcp) {
-        var cls2 = statusData.mcp.available === statusData.mcp.total ? 'ok' : (statusData.mcp.available > 0 ? 'warn' : 'err');
-        pills.push('<button class="status-pill ' + cls2 + '" onclick="location.hash=\'#/mcp\'"><span class="dot"></span>MCP ' + statusData.mcp.available + '/' + statusData.mcp.total + '</button>');
+        var cls2 = statusData.mcp.healthy === statusData.mcp.total ? 'ok' : (statusData.mcp.healthy > 0 ? 'warn' : 'err');
+        pills.push('<button class="status-pill ' + cls2 + '" onclick="location.hash=\'#/mcp\'"><span class="dot"></span>MCP ' + statusData.mcp.healthy + '/' + statusData.mcp.total + '</button>');
     }
     if (statusData.memory) {
         var cls3 = statusData.memory.gatewayReachable ? 'ok' : 'err';
@@ -556,7 +556,7 @@ async function loadMCP() {
     try {
         var data = await fetchJSON('/api/mcp');
         statusData.mcp = data;
-        document.getElementById('mcpMiniMetric').textContent = data.available + '/' + data.total;
+        document.getElementById('mcpMiniMetric').textContent = data.healthy + '/' + data.total;
         document.getElementById('mcpMiniLabel').textContent = '可用 / 总数';
         var pills = [];
         if (data.disabled) pills.push('<span class="task-mini-pill disabled"><span class="dot"></span>已禁用 ' + data.disabled + '</span>');
@@ -772,7 +772,7 @@ function renderMcpDetail() {
     var list = document.getElementById('mcpDetailList');
     var stats = document.getElementById('mcpDetailStats');
     if (!data) { list.innerHTML = '<div class="empty">数据加载中...</div>'; return; }
-    stats.innerHTML = '<span>共 <strong>' + data.total + '</strong> 个</span><span>已启用 <strong>' + data.enabled + '</strong></span>' + (data.disabled ? '<span>已禁用 <strong>' + data.disabled + '</strong></span>' : '') + '<span>可用 <strong>' + data.available + '</strong></span>';
+    stats.innerHTML = '<span>共 <strong>' + data.total + '</strong> 个</span><span>已启用 <strong>' + data.enabled + '</strong></span>' + (data.disabled ? '<span>已禁用 <strong>' + data.disabled + '</strong></span>' : '') + '<span>可用 <strong>' + data.healthy + '</strong></span>';
     list.className = 'mcp-grid';
     var filtered = _filterMcpByStatus(data.servers);
     if (!filtered.length) { list.innerHTML = '<div class="empty">未配置 MCP</div>'; return; }
