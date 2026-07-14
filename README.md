@@ -47,6 +47,33 @@ cd ~/.kimi-code/dashboard
 
 然后浏览器打开：http://127.0.0.1:8080
 
+### 控制台启动菜单
+
+如果 PowerShell Profile 中配置了 `kimi dashboard` 包装函数，输入该命令会弹出数字菜单（Windows）：
+
+- **macOS / Linux**：在 `~/.zshrc` 或 `~/.bashrc` 里加一个别名即可：
+  ```bash
+  alias kimi-dashboard='cd ~/.kimi-code/dashboard && ./.venv/bin/python launch_menu.py'
+  ```
+  然后输入 `kimi-dashboard` 使用菜单。
+
+```text
+===== Kimi Code 启动菜单 =====
+1. 启动 Dashboard
+2. 启动本地 Kimi Code Web
+3. 启动外网访问 Kimi Code Web
+4. 停止 Kimi Code Web（kimi server kill）
+0. 退出
+==============================
+```
+
+- 选项 1：后台启动 Dashboard 并自动打开浏览器。
+- 选项 2：在本机 `127.0.0.1:5494` 启动 Kimi Code Web（无密码）。
+- 选项 3：读取 `start-kimi-web.vbs` 中保存的命令，启动外网访问模式。
+- 选项 4：执行 `kimi server kill` 停止所有 Kimi Code Web 进程。
+
+也可以直接传入选项数字跳过菜单，例如 `kimi dashboard 2`。
+
 > **注意**：定时任务看板功能依赖 Windows PowerShell（`powershell` 命令），在 macOS / Linux 上不可用。其他功能（数据可视化、Kimi Web 服务配置、主题切换等）均跨平台可用。
 
 ## 项目结构
