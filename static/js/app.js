@@ -31,8 +31,7 @@ var SETTINGS_DEFAULTS = {
     show_tasks: true,
     show_kimi_web_btn: true,
     show_status_bar: true,
-    follow_system_theme: true,  // 跟随系统主题开关
-    manual_theme: 'dark',       // 手动模式下选中的主题: light / dark
+    theme_mode: 'system',        // 主题模式: light / dark / system
     kw_bind: '0.0.0.0',          // Kimi Web 绑定地址
     kw_port: 5494,               // Kimi Web 端口
     kw_bypass_auth: true,        // 关闭密码认证 (true=无需密码)
@@ -81,8 +80,11 @@ var SETTINGS_GROUPS = [
         desc: '外观偏好',
         icon: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
         items: [
-            { key: 'follow_system_theme', label: '跟随系统主题', desc: '开启后随系统切换日间/夜间；关闭后使用下方手动主题选项', row: true },
-            { key: 'manual_theme', label: '手动主题', desc: '关闭跟随系统后生效', type: 'segment', options: [{ v: 'dark', t: '暗色' }, { v: 'light', t: '亮色' }] },
+            { key: 'theme_mode', label: '主题', desc: '选择界面外观', type: 'segment', row: true, options: [
+                { v: 'light', t: '亮色' },
+                { v: 'dark', t: '暗色' },
+                { v: 'system', t: '跟随主题' }
+            ]},
         ]
     },
     {
@@ -134,6 +136,11 @@ function loadSettings() {
                 settings.kw_public_urls.push(legacy);
             }
             delete saved.kw_public_url;
+            saveSettings(settings);
+        }
+        // Migrate legacy theme settings to theme_mode
+        if (!settings.theme_mode) {
+            settings.theme_mode = (settings.follow_system_theme !== false) ? 'system' : (settings.manual_theme || 'dark');
             saveSettings(settings);
         }
         return settings;
@@ -253,7 +260,7 @@ function setSetting(key, value) {
     settings[key] = value;
     saveSettings(settings);
     applySettings();
-    if (key === 'kw_bind' || key === 'default_permission_mode' || key === 'follow_system_theme' || key === 'manual_theme') renderSettings();
+    if (key === 'kw_bind' || key === 'default_permission_mode' || key === 'theme_mode') renderSettings();
     if (key === '__startup_dashboard_mode') {
         setDashboardStartupMode(value);
         return;
@@ -283,10 +290,10 @@ function resetSettings() {
 // === Theme ===
 // 返回当前实际生效的主题
 function getEffectiveTheme() {
-    if (settings.follow_system_theme) {
+    if (settings.theme_mode === 'system') {
         return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
     }
-    return settings.manual_theme || 'dark';
+    return (settings.theme_mode === 'light') ? 'light' : 'dark';
 }
 
 // 应用主题到 <html data-theme=...>
@@ -302,7 +309,7 @@ function applyTheme() {
 // 系统主题变化时，若处于跟随系统模式则实时跟随
 if (window.matchMedia) {
     window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function () {
-        if (settings.follow_system_theme) applyTheme();
+        if (settings.theme_mode === 'system') applyTheme();
     });
 }
 
@@ -2052,8 +2059,6 @@ function renderSettings() {
     function renderItem(item) {
         // 本机模式下隐藏外网专属设置
         if (isLocal && item.key === 'kw_public_urls') return '';
-        // 跟随系统主题开启时隐藏手动主题选项
-        if (item.key === 'manual_theme' && settings.follow_system_theme) return '';
 
         var infoHtml = '<div class="settings-info">' +
             '<div class="config-item-title">' + escapeHtml(item.label) + '</div>' +
