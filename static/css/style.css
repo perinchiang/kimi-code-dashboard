@@ -1124,14 +1124,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 .seg-stats { margin-left: auto; padding-right: 0.4rem; font-size: 0.78rem; font-weight: 450; color: var(--text-secondary); }
 .seg-stats strong { color: var(--text); font-family: var(--mono); }
 .seg-divider { width: 1px; align-self: stretch; margin: 0.2rem 0.15rem; background: var(--border); flex-shrink: 0; }
-.seg-sort-select {
-    background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border);
-    border-radius: calc(var(--radius-sm) - 2px); padding: 0 0.5rem; font-size: 0.75rem; font-weight: 500;
-    height: 1.7rem; line-height: 1.7rem; cursor: pointer; outline: none;
-    margin-left: 0.25rem; flex-shrink: 0;
-}
-.seg-sort-select:hover { border-color: var(--text-tertiary); color: var(--text); }
-.seg-sort-select:focus { border-color: var(--accent); }
 
 .skill-grid, .mcp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; margin-top: 0.5rem; }
 .skill-card, .mcp-card {
@@ -1152,7 +1144,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 }
 .skill-card-meta, .mcp-card-meta { font-size: 0.73rem; color: var(--text-tertiary); font-family: var(--sans); font-weight: 450; line-height: 1.6; }
 .skill-card-meta .label, .mcp-card-meta .label { color: var(--text-secondary); font-weight: 500; }
-.skill-call-count { color: var(--text-secondary); font-weight: 500; }
 .mcp-card-command {
     margin-top: 0.5rem; padding: 0.45rem 0.6rem; background: var(--bg); border: 1px solid var(--border);
     border-radius: var(--radius-sm); font-family: var(--mono); font-size: 0.72rem; color: var(--text-secondary);
