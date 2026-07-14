@@ -42,16 +42,49 @@ Kimi Code CLI 的本地可视化面板，展示 Skill、MCP、记忆状态、Kim
 
 ## 启动
 
+### 一键安装（推荐）
+
 ```bash
-cd ~/.kimi-code/dashboard
-
-# 安装依赖（首次使用）
-.venv/Scripts/python.exe -m pip install -r requirements.txt
-
-# Windows
-.venv/Scripts/python.exe app.py
+# Windows（PowerShell）
+irm https://raw.githubusercontent.com/perinchiang/kimi-code-dashboard/master/install.ps1 | iex
 
 # macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/perinchiang/kimi-code-dashboard/master/install.sh | bash
+```
+
+安装脚本会自动：检测 Python 3.10+ → git clone → 创建 venv → 安装依赖 → 生成 `kimi-dashboard` 命令到 `~/.kimi-code/bin/`。
+
+安装完成后直接使用：
+
+```bash
+kimi-dashboard          # 弹出菜单
+kimi-dashboard 1        # 启动 Dashboard（后台 + 自动打开浏览器）
+kimi-dashboard 2        # 启动本地 Kimi Code Web（127.0.0.1:5494，无密码）
+kimi-dashboard 3        # 启动外网访问 Kimi Code Web
+kimi-dashboard 4        # 停止 Kimi Code Web
+kimi-dashboard 5        # 更新 Kimi Code CLI
+kimi-dashboard 6        # 更新 Dashboard（git pull）
+```
+
+> **PATH 提示**：如果你已安装 Kimi Code CLI，`~/.kimi-code/bin/` 已在 PATH 中，`kimi-dashboard` 开箱即用。否则脚本会提示你将该目录加入 PATH。
+
+### 手动安装
+
+如果不使用一键脚本：
+
+```bash
+git clone https://github.com/perinchiang/kimi-code-dashboard.git ~/.kimi-code/dashboard
+cd ~/.kimi-code/dashboard
+
+# 创建虚拟环境并安装依赖
+python -m venv .venv
+
+# Windows
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe app.py
+
+# macOS / Linux
+.venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python app.py
 ```
 
@@ -59,13 +92,7 @@ cd ~/.kimi-code/dashboard
 
 ### 控制台启动菜单
 
-如果 PowerShell Profile 中配置了 `kimi dashboard` 包装函数，输入该命令会弹出数字菜单（Windows）：
-
-- **macOS / Linux**：在 `~/.zshrc` 或 `~/.bashrc` 里加一个别名即可：
-  ```bash
-  alias kimi-dashboard='cd ~/.kimi-code/dashboard && ./.venv/bin/python launch_menu.py'
-  ```
-  然后输入 `kimi-dashboard` 使用菜单。
+`kimi-dashboard` 命令弹出数字菜单：
 
 ```text
 ===== Kimi Code 启动菜单 =====
@@ -86,7 +113,7 @@ cd ~/.kimi-code/dashboard
 - 选项 5：执行 `kimi upgrade` 更新 Kimi Code CLI。
 - 选项 6：在 Dashboard 目录执行 `git pull origin master` 更新面板代码。
 
-也可以直接传入选项数字跳过菜单，例如 `kimi dashboard 2`。
+也可以直接传入选项数字跳过菜单，例如 `kimi-dashboard 2`。
 
 > **跨平台支持**：
 > - **全平台可用**：数据可视化、产物与配置管理、Kimi Web 服务配置、主题切换、版本检查与一键更新、手动安装、开机自启（Windows Startup/Task Scheduler、macOS launchd）
@@ -103,6 +130,8 @@ dashboard/
 ├── app.py              # 入口：创建 Flask app，注册蓝图
 ├── config.py           # 路径、常量、日志配置
 ├── launch_menu.py      # 控制台启动菜单（数字选项）
+├── install.ps1         # Windows 一键安装脚本
+├── install.sh          # macOS / Linux 一键安装脚本
 ├── requirements.txt    # Python 依赖清单
 ├── .env                # API Key（不提交 git）
 ├── .gitignore
