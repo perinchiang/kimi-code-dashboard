@@ -649,7 +649,7 @@ function handleRoute() {
     if (hash === '#/skills') renderSkillsDetail();
     else if (hash === '#/mcp') renderMcpDetail();
     else if (hash === '#/models') renderModelConfigDetail();
-    else if (hash === '#/tasks') { switchTasksTab('scheduled'); renderTasksDetail(); }
+    else if (hash === '#/tasks') renderTasksDetail();
     else if (hash === '#/hooks') renderHooksDetail();
     else if (hash === '#/artifacts') renderArtifactsDetail();
     else if (hash === '#/memory') renderMemoryDetail();
@@ -2484,18 +2484,18 @@ async function loadTasks() {
         });
         document.getElementById('tasksMiniMetric').textContent = total;
         var pills = [];
-        if (counts.running) pills.push('<span class="task-mini-pill running" data-owner="scheduled"><span class="dot"></span>运行中 ' + counts.running + '</span>');
-        if (counts.ready) pills.push('<span class="task-mini-pill ready" data-owner="scheduled"><span class="dot"></span>就绪 ' + counts.ready + '</span>');
-        if (counts.failed) pills.push('<span class="task-mini-pill failed" data-owner="scheduled"><span class="dot"></span>失败 ' + counts.failed + '</span>');
-        if (counts.disabled) pills.push('<span class="task-mini-pill disabled" data-owner="scheduled"><span class="dot"></span>已禁用 ' + counts.disabled + '</span>');
-        if (counts.unregistered) pills.push('<span class="task-mini-pill unregistered" data-owner="scheduled"><span class="dot"></span>未注册 ' + counts.unregistered + '</span>');
-        _updateTasksMiniPills('scheduled', pills.join(''));
+        if (counts.running) pills.push('<span class="task-mini-pill running"><span class="dot"></span>运行中 ' + counts.running + '</span>');
+        if (counts.ready) pills.push('<span class="task-mini-pill ready"><span class="dot"></span>就绪 ' + counts.ready + '</span>');
+        if (counts.failed) pills.push('<span class="task-mini-pill failed"><span class="dot"></span>失败 ' + counts.failed + '</span>');
+        if (counts.disabled) pills.push('<span class="task-mini-pill disabled"><span class="dot"></span>已禁用 ' + counts.disabled + '</span>');
+        if (counts.unregistered) pills.push('<span class="task-mini-pill unregistered"><span class="dot"></span>未注册 ' + counts.unregistered + '</span>');
+        document.getElementById('tasksMiniStatus').innerHTML = pills.join('') || '<span class="task-mini-pill">暂无任务</span>';
 
         // If currently on detail page, render it
         if (location.hash === '#/tasks') renderTasksDetail();
     } catch (e) {
         document.getElementById('tasksMiniMetric').textContent = '-';
-        _updateTasksMiniPills('scheduled', '<span class="task-mini-pill" data-owner="scheduled">加载失败</span>');
+        document.getElementById('tasksMiniStatus').innerHTML = '<span class="task-mini-pill">加载失败</span>';
         statusData.tasks = null;
         if (location.hash === '#/tasks') {
             var grid = document.getElementById('tasksDetailGrid');
@@ -2503,298 +2503,6 @@ async function loadTasks() {
             if (grid) grid.innerHTML = '<div class="error">加载失败: ' + e.message + '</div>';
             if (stats) stats.innerHTML = '';
         }
-    }
-}
-
-// === 后台任务（Kimi Code CLI 运行时任务） ===
-// 设计目标：只关心「当前在跑的任务」，给用户一个实时活动指示器。
-// 历史 completed/failed 默认隐藏，需要手动开启「显示历史」开关。
-
-var currentBgTaskStatusFilter = 'running';  // 默认只看 running
-var currentTasksTab = 'scheduled';
-var showBgTaskHistory = false;              // 历史开关，默认 off
-var _currentBgLogTask = null;               // {sessionId, taskId}
-var _bgTaskRefreshTimer = null;             // 自动刷新计时器
-var _bgTaskLastRunningIds = {};             // 上次 running 集合，用于检测变化
-
-// 更新 mini card pill（owner-based，定时任务与后台任务 pill 共存）
-function _updateTasksMiniPills(owner, pillsHtml) {
-    var container = document.getElementById('tasksMiniStatus');
-    if (!container) return;
-    var old = container.querySelectorAll('[data-owner="' + owner + '"]');
-    for (var i = 0; i < old.length; i++) old[i].remove();
-    if (pillsHtml) {
-        container.insertAdjacentHTML('beforeend', pillsHtml);
-    }
-    var realPills = container.querySelectorAll('.task-mini-pill:not([data-owner="placeholder"])');
-    var placeholder = container.querySelector('[data-owner="placeholder"]');
-    if (realPills.length > 0) {
-        if (placeholder) placeholder.remove();
-    } else if (!placeholder) {
-        var ph = document.createElement('span');
-        ph.className = 'task-mini-pill';
-        ph.setAttribute('data-owner', 'placeholder');
-        ph.textContent = '暂无任务';
-        container.appendChild(ph);
-    }
-}
-
-async function loadBackgroundTasks() {
-    try {
-        var data = await fetchJSON('/api/background-tasks');
-        statusData.backgroundTasks = data;
-        // mini card pill：仅在 running > 0 时显示，否则不显示任何后台 pill
-        var bgPills = [];
-        if (data.running > 0) {
-            bgPills.push('<span class="task-mini-pill bg-running" data-owner="background"><span class="dot"></span>后台运行 ' + data.running + '</span>');
-        }
-        _updateTasksMiniPills('background', bgPills.join(''));
-        // tab 统计：仅显示 running，历史隐藏时也不显示 completed/failed 数字
-        var tabStats = document.getElementById('bgTaskTabStats');
-        if (tabStats) {
-            var bits = [];
-            if (data.running) bits.push('<span>运行中 <strong>' + data.running + '</strong></span>');
-            if (showBgTaskHistory) {
-                if (data.completed) bits.push('<span>已完成 <strong>' + data.completed + '</strong></span>');
-                if (data.failed) bits.push('<span>已失败 <strong>' + data.failed + '</strong></span>');
-                bits.push('<span>共 <strong>' + data.total + '</strong></span>');
-            }
-            tabStats.innerHTML = bits.join('');
-        }
-        // 若当前在后台 tab，重渲染
-        if (location.hash === '#/tasks' && currentTasksTab === 'background') {
-            renderBackgroundTasksDetail();
-        }
-        // 自动刷新管理：仅在仍有 running 任务时继续轮询
-        _scheduleBgTaskAutoRefresh(data.running > 0);
-    } catch (e) {
-        _updateTasksMiniPills('background', '');
-        statusData.backgroundTasks = null;
-        _scheduleBgTaskAutoRefresh(false);
-        if (location.hash === '#/tasks' && currentTasksTab === 'background') {
-            var grid = document.getElementById('bgTasksGrid');
-            var stats = document.getElementById('bgTasksDetailStats');
-            if (grid) grid.innerHTML = '<div class="error">后台任务加载失败: ' + e.message + '</div>';
-            if (stats) stats.innerHTML = '';
-        }
-    }
-}
-
-// 自动刷新：5s 轮询，仅当 (a) 当前在 #/tasks 后台 tab 且 (b) 有 running 任务时启用
-function _scheduleBgTaskAutoRefresh(hasRunning) {
-    if (_bgTaskRefreshTimer) {
-        clearTimeout(_bgTaskRefreshTimer);
-        _bgTaskRefreshTimer = null;
-    }
-    var onBgTab = location.hash === '#/tasks' && currentTasksTab === 'background';
-    if (hasRunning && onBgTab) {
-        _bgTaskRefreshTimer = setTimeout(function() {
-            _bgTaskRefreshTimer = null;
-            loadBackgroundTasks();
-        }, 5000);
-    }
-}
-
-function switchTasksTab(tab) {
-    currentTasksTab = tab;
-    var tabs = document.querySelectorAll('.tasks-tabs .seg-item');
-    for (var i = 0; i < tabs.length; i++) {
-        tabs[i].classList.toggle('active', tabs[i].dataset.tab === tab);
-    }
-    var scheduledPanel = document.getElementById('scheduledTasksPanel');
-    var bgPanel = document.getElementById('backgroundTasksPanel');
-    if (scheduledPanel) scheduledPanel.style.display = (tab === 'scheduled') ? '' : 'none';
-    if (bgPanel) bgPanel.style.display = (tab === 'background') ? '' : 'none';
-    if (tab === 'background') {
-        renderBackgroundTasksDetail();
-        var data = statusData.backgroundTasks;
-        _scheduleBgTaskAutoRefresh(!!(data && data.running > 0));
-    } else {
-        _scheduleBgTaskAutoRefresh(false);
-    }
-}
-
-function renderBackgroundTasksDetail() {
-    var data = statusData.backgroundTasks;
-    var grid = document.getElementById('bgTasksGrid');
-    var stats = document.getElementById('bgTasksDetailStats');
-    if (!data) {
-        if (grid) grid.innerHTML = '<div class="empty">后台任务加载中...</div>';
-        if (stats) stats.innerHTML = '';
-        loadBackgroundTasks();
-        return;
-    }
-    if (stats) {
-        var bits = ['<span>运行中 <strong>' + data.running + '</strong></span>'];
-        if (showBgTaskHistory) {
-            if (data.completed) bits.push('<span>已完成 <strong>' + data.completed + '</strong></span>');
-            if (data.failed) bits.push('<span>已失败 <strong>' + data.failed + '</strong></span>');
-            bits.push('<span>共 <strong>' + data.total + '</strong></span>');
-        }
-        stats.innerHTML = bits.join('');
-    }
-    var filtered = _filterBgTasksByStatus(data.tasks);
-    if (!filtered.length) {
-        var msg = showBgTaskHistory ? '暂无后台任务' : '当前无运行中的后台任务';
-        grid.innerHTML = '<div class="empty">' + msg + '</div>';
-        return;
-    }
-    grid.innerHTML = filtered.map(renderBgTaskCard).join('');
-}
-
-function _filterBgTasksByStatus(tasks) {
-    // 历史开关关闭时，永远只看 running
-    if (!showBgTaskHistory) {
-        return tasks.filter(function(t) { return t.status === 'running'; });
-    }
-    if (currentBgTaskStatusFilter === 'running') {
-        return tasks.filter(function(t) { return t.status === 'running'; });
-    }
-    if (currentBgTaskStatusFilter === 'completed') {
-        return tasks.filter(function(t) { return t.status === 'completed' && t.exitCode === 0; });
-    }
-    if (currentBgTaskStatusFilter === 'failed') {
-        return tasks.filter(function(t) { return t.status === 'completed' && t.exitCode !== 0 && t.exitCode !== null && t.exitCode !== undefined; });
-    }
-    return tasks;
-}
-
-function setBgTaskStatusFilter(status) {
-    currentBgTaskStatusFilter = status || 'running';
-    var filterEl = document.getElementById('bgTaskStatusFilter');
-    if (filterEl) {
-        var btns = filterEl.querySelectorAll('.seg-item');
-        for (var i = 0; i < btns.length; i++) {
-            btns[i].classList.toggle('active', btns[i].dataset.bgStatus === status);
-        }
-    }
-    renderBackgroundTasksDetail();
-}
-
-function toggleBgTaskHistory(on) {
-    showBgTaskHistory = !!on;
-    // 开启历史时显示全部筛选，关闭时强制回到 running
-    if (!showBgTaskHistory) {
-        currentBgTaskStatusFilter = 'running';
-        var filterEl = document.getElementById('bgTaskStatusFilter');
-        if (filterEl) {
-            var btns = filterEl.querySelectorAll('.seg-item');
-            for (var i = 0; i < btns.length; i++) {
-                btns[i].classList.toggle('active', btns[i].dataset.bgStatus === 'running');
-            }
-        }
-        // 历史开关 off 时隐藏状态筛选条
-        var filterWrap = document.getElementById('bgTaskStatusFilter');
-        if (filterWrap) filterWrap.style.display = 'none';
-    } else {
-        var filterWrapShow = document.getElementById('bgTaskStatusFilter');
-        if (filterWrapShow) filterWrapShow.style.display = '';
-    }
-    renderBackgroundTasksDetail();
-}
-
-function _formatBgTaskDuration(ms) {
-    if (!ms || typeof ms !== 'number' || ms < 0) return '';
-    var sec = Math.floor(ms / 1000);
-    if (sec < 60) return sec + 's';
-    var min = Math.floor(sec / 60);
-    var rem = sec % 60;
-    if (min < 60) return min + 'm' + rem + 's';
-    var hr = Math.floor(min / 60);
-    var mRem = min % 60;
-    return hr + 'h' + mRem + 'm';
-}
-
-// 卡片极简：状态徽章 + 任务短 ID + PID + 运行时长 + 查看日志
-// 不显示 description / command / 会话路径 / 开始时间 / kind
-function renderBgTaskCard(t) {
-    var status = t.status || '';
-    var cls = 'bg-task-card';
-    var badgeCls = 'bg-task-status-badge';
-    var badgeIcon = '';
-    var badgeText = '';
-    if (status === 'running') {
-        cls += ' running';
-        badgeCls += ' running';
-        badgeIcon = '<span class="bg-task-pulse-dot"></span>';
-        badgeText = '运行中';
-    } else if (status === 'completed' && t.exitCode === 0) {
-        cls += ' completed';
-        badgeCls += ' completed';
-        badgeIcon = '✓';
-        badgeText = '已完成';
-    } else if (status === 'completed' && t.exitCode !== 0 && t.exitCode !== null && t.exitCode !== undefined) {
-        cls += ' failed';
-        badgeCls += ' failed';
-        badgeIcon = '✗';
-        badgeText = '失败 (' + t.exitCode + ')';
-    } else {
-        badgeIcon = '•';
-        badgeText = status || '未知';
-    }
-
-    // 任务短 ID：bash-uwtmuzh7 → uwtmuzh7
-    var shortId = t.taskId || '';
-    var dashIdx = shortId.indexOf('-');
-    if (dashIdx > 0) shortId = shortId.slice(dashIdx + 1);
-
-    // 运行时长
-    var duration = '';
-    if (status === 'running' && t.startedAt) {
-        duration = _formatBgTaskDuration(Date.now() - t.startedAt);
-    } else if (t.startedAt && t.endedAt) {
-        duration = _formatBgTaskDuration(t.endedAt - t.startedAt);
-    }
-
-    var safeSession = escapeJsString(t.sessionId || '');
-    var safeTask = escapeJsString(t.taskId || '');
-
-    // 极简元信息行：#短ID · PID xxx · 已运行 xx
-    var metaBits = ['#' + escapeHtml(shortId)];
-    if (t.pid) metaBits.push('PID ' + t.pid);
-    if (duration) metaBits.push((status === 'running' ? '已运行 ' : '耗时 ') + escapeHtml(duration));
-    var metaLine = metaBits.join(' · ');
-
-    return '<div class="' + cls + '" data-bg-task-id="' + escapeHtml(t.taskId) + '">'
-        + '<div class="bg-task-card-header">'
-            + '<span class="bg-task-card-meta">' + metaLine + '</span>'
-            + '<span class="' + badgeCls + '">' + badgeIcon + ' ' + escapeHtml(badgeText) + '</span>'
-        + '</div>'
-        + '<div class="bg-task-card-actions">'
-            + '<button class="btn-task" onclick="openBgTaskLog(\'' + safeSession + '\', \'' + safeTask + '\')">查看日志</button>'
-        + '</div>'
-    + '</div>';
-}
-
-async function openBgTaskLog(sessionId, taskId) {
-    _currentBgLogTask = { sessionId: sessionId, taskId: taskId };
-    var metaEl = document.getElementById('bg-task-log-meta');
-    if (metaEl) metaEl.textContent = taskId;
-    var contentEl = document.getElementById('bg-task-log-content');
-    if (contentEl) contentEl.textContent = '加载中...';
-    var modal = document.getElementById('bgTaskLogModal');
-    if (modal) modal.style.display = '';
-    document.body.style.overflow = 'hidden';
-    await refreshBgTaskLog();
-}
-
-function closeBgTaskLog() {
-    var modal = document.getElementById('bgTaskLogModal');
-    if (modal) modal.style.display = 'none';
-    document.body.style.overflow = '';
-    _currentBgLogTask = null;
-}
-
-async function refreshBgTaskLog() {
-    if (!_currentBgLogTask) return;
-    var contentEl = document.getElementById('bg-task-log-content');
-    try {
-        var url = '/api/background-tasks/log?session=' + encodeURIComponent(_currentBgLogTask.sessionId)
-                  + '&task=' + encodeURIComponent(_currentBgLogTask.taskId);
-        var data = await fetchJSON(url);
-        if (contentEl) contentEl.textContent = data.log || '（空日志）';
-    } catch (e) {
-        if (contentEl) contentEl.textContent = '加载失败: ' + e.message;
     }
 }
 
@@ -3671,7 +3379,7 @@ async function setDashboardStartupMode(mode) {
 
 // === Load all ===
 async function loadAll() {
-    await Promise.all([loadTrends(), loadSkills(), loadMCP(), loadHooks(), loadMemory(), loadKimi(), loadToolUsage(), loadModelUsage(), loadTasks(), loadBackgroundTasks(), loadModelConfig(), loadArtifacts()]);
+    await Promise.all([loadTrends(), loadSkills(), loadMCP(), loadHooks(), loadMemory(), loadKimi(), loadToolUsage(), loadModelUsage(), loadTasks(), loadModelConfig(), loadArtifacts()]);
     renderStatusBar();
     applySettings();
     document.getElementById('lastUpdated').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN');

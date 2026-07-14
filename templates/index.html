@@ -19,7 +19,7 @@
         } catch (e) {}
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=65">
+    <link rel="stylesheet" href="/static/css/style.css?v=66">
 </head>
 <body>
     <header>
@@ -381,36 +381,13 @@
             <input type="text" class="search-box detail-search" id="taskSearchDetail" placeholder="搜索任务名称、ID 或描述..." oninput="filterTasksDetail(this.value)">
             <button class="btn-task" onclick="openTaskCreate()">+ 新建任务</button>
         </div>
-        <div class="tasks-tabs seg-filter" id="tasksTabs">
-            <button class="seg-item active" data-tab="scheduled" onclick="switchTasksTab('scheduled')">定时任务</button>
-            <button class="seg-item" data-tab="background" onclick="switchTasksTab('background')">后台任务</button>
-            <span class="seg-stats" id="bgTaskTabStats"></span>
+        <div class="seg-filter" id="taskStatusFilter">
+            <button class="seg-item active" data-status="all" onclick="setTaskStatusFilter('all')">全部</button>
+            <button class="seg-item" data-status="enabled" onclick="setTaskStatusFilter('enabled')">已启用</button>
+            <button class="seg-item" data-status="disabled" onclick="setTaskStatusFilter('disabled')">未启用</button>
+            <span class="seg-stats" id="tasksDetailStats"></span>
         </div>
-        <div id="scheduledTasksPanel">
-            <div class="seg-filter" id="taskStatusFilter">
-                <button class="seg-item active" data-status="all" onclick="setTaskStatusFilter('all')">全部</button>
-                <button class="seg-item" data-status="enabled" onclick="setTaskStatusFilter('enabled')">已启用</button>
-                <button class="seg-item" data-status="disabled" onclick="setTaskStatusFilter('disabled')">未启用</button>
-                <span class="seg-stats" id="tasksDetailStats"></span>
-            </div>
-            <div id="tasksDetailGrid" class="tasks-grid"></div>
-        </div>
-        <div id="backgroundTasksPanel" style="display:none">
-            <div class="seg-filter bg-task-toolbar">
-                <label class="bg-history-toggle" title="开启后显示已完成的 historical 任务">
-                    <input type="checkbox" id="bgShowHistory" onchange="toggleBgTaskHistory(this.checked)">
-                    <span>显示历史</span>
-                </label>
-                <div class="seg-filter" id="bgTaskStatusFilter" style="display:none">
-                    <button class="seg-item" data-bg-status="all" onclick="setBgTaskStatusFilter('all')">全部</button>
-                    <button class="seg-item active" data-bg-status="running" onclick="setBgTaskStatusFilter('running')">运行中</button>
-                    <button class="seg-item" data-bg-status="completed" onclick="setBgTaskStatusFilter('completed')">已完成</button>
-                    <button class="seg-item" data-bg-status="failed" onclick="setBgTaskStatusFilter('failed')">已失败</button>
-                </div>
-                <span class="seg-stats" id="bgTasksDetailStats"></span>
-            </div>
-            <div id="bgTasksGrid" class="tasks-grid"></div>
-        </div>
+        <div id="tasksDetailGrid" class="tasks-grid"></div>
     </div>
 
     <div id="view-hooks" class="detail-page" style="display:none">
@@ -588,29 +565,6 @@
             <div class="modal-footer">
                 <button class="btn-task" onclick="refreshTaskLog()">刷新</button>
                 <button onclick="closeTaskLog()">关闭</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Background Task Log Modal -->
-    <div id="bgTaskLogModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeBgTaskLog()">
-        <div class="modal modal-lg" onclick="event.stopPropagation()">
-            <div class="modal-header">
-                <h3>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-                    后台任务日志
-                </h3>
-                <button class="modal-close" onclick="closeBgTaskLog()" aria-label="关闭">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
-            </div>
-            <div class="modal-body">
-                <div class="task-log-meta" id="bg-task-log-meta"></div>
-                <pre id="bg-task-log-content" class="task-log-full">加载中...</pre>
-            </div>
-            <div class="modal-footer">
-                <button class="btn-task" onclick="refreshBgTaskLog()">刷新</button>
-                <button onclick="closeBgTaskLog()">关闭</button>
             </div>
         </div>
     </div>
@@ -821,6 +775,6 @@
     </div>
 
     <script src="/static/js/charts.js?v=19"></script>
-    <script src="/static/js/app.js?v=100"></script>
+    <script src="/static/js/app.js?v=101"></script>
 </body>
 </html>
