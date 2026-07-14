@@ -1271,6 +1271,11 @@ var MODEL_MAX_TOKENS_OPTIONS = [
 ];
 var MASKED_KEY = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
 
+function isProtectedProvider(p) {
+    // 受保护的内置 provider：id 以 managed: 开头，或类型为 kimi（Kimi / Moonshot 托管）
+    return (p.id || '').indexOf('managed:') === 0 || p.type === 'kimi';
+}
+
 function escapeHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -1314,14 +1319,19 @@ function renderModelConfigDetail() {
     // Providers list（可点击选中）
     var providersHtml = providers.map(function(p) {
         var isSelected = p.id === selectedProvider;
-        return '<div class="config-item provider-selectable' + (isSelected ? ' selected' : '') + '" id="provider-row-' + escapeHtml(p.id) + '" onclick="selectProvider(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">' +
-            '<div class="config-item-title"><span>' + escapeHtml(p.id) + '</span><span class="badge badge-local">' + escapeHtml(MODEL_CONFIG_TYPE_LABEL[p.type] || p.type) + '</span></div>' +
-            '<div class="config-item-meta">' + escapeHtml(p.base_url) + '</div>' +
+        var protected = isProtectedProvider(p);
+        var actionsHtml = protected ? '' :
             '<div class="config-item-actions">' +
                 '<button class="btn-task" onclick="event.stopPropagation(); detectModels(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">探测模型</button>' +
                 '<button class="btn-task" onclick="event.stopPropagation(); editProvider(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">编辑</button>' +
                 '<button class="btn-task" onclick="event.stopPropagation(); deleteProvider(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">删除</button>' +
-            '</div>' +
+            '</div>';
+        var badgeHtml = '<span class="badge badge-local">' + escapeHtml(MODEL_CONFIG_TYPE_LABEL[p.type] || p.type) + '</span>' +
+            (protected ? '<span class="badge badge-remote">内置</span>' : '');
+        return '<div class="config-item provider-selectable' + (isSelected ? ' selected' : '') + '" id="provider-row-' + escapeHtml(p.id) + '" onclick="selectProvider(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">' +
+            '<div class="config-item-title"><span>' + escapeHtml(p.id) + '</span>' + badgeHtml + '</div>' +
+            '<div class="config-item-meta">' + escapeHtml(p.base_url) + '</div>' +
+            actionsHtml +
         '</div>';
     }).join('');
     if (!providersHtml) providersHtml = '<div class="empty">暂无 Provider，点击右上角添加</div>';

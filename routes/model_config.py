@@ -23,6 +23,11 @@ CONFIG_PATH = Path.home() / ".kimi-code" / "config.toml"
 MASK = "••••••••"
 
 
+def _is_protected_provider(pid: str) -> bool:
+    """Built-in/managed providers should not be edited or deleted."""
+    return pid.startswith("managed:") or pid == "kimi"
+
+
 def _load() -> dict:
     with open(CONFIG_PATH, "rb") as f:
         return tomllib.load(f)
@@ -132,6 +137,8 @@ def api_save_provider():
     pid = (body.get("id") or "").strip()
     if not pid:
         return jsonify({"error": "provider id required"}), 400
+    if _is_protected_provider(pid):
+        return jsonify({"error": "cannot edit built-in provider"}), 403
 
     try:
         cfg = _load()
@@ -168,6 +175,8 @@ def api_save_provider():
 
 @bp.route("/provider/<path:pid>", methods=["DELETE"])
 def api_delete_provider(pid: str):
+    if _is_protected_provider(pid):
+        return jsonify({"error": "cannot delete built-in provider"}), 403
     try:
         cfg = _load()
         providers = cfg.get("providers", {})
@@ -231,6 +240,8 @@ def _infer_context_size(model_id: str) -> int:
 @bp.route("/provider/<path:pid>/detect-models", methods=["POST"])
 def api_detect_models(pid: str):
     """Call the provider's /models endpoint and return discoverable model IDs."""
+    if _is_protected_provider(pid):
+        return jsonify({"error": "cannot detect models for built-in provider"}), 403
     try:
         cfg = _load()
         providers = cfg.get("providers", {})
