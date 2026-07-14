@@ -12,6 +12,7 @@ from flask import Blueprint, jsonify, request
 
 from config import AGENTS_DIR, SKILL_LOCK, log
 from services.helpers import parse_skill_frontmatter, safe_json_load
+from services.wire_parser import get_tool_usage
 
 bp = Blueprint("skills", __name__)
 
@@ -55,7 +56,7 @@ def _save_lock(lock: dict) -> bool:
         return False
 
 
-def _skill_info(skill_id: str, meta: dict) -> dict:
+def _skill_info(skill_id: str, meta: dict, call_count: int = 0) -> dict:
     skill_path = AGENTS_DIR / meta.get("skillPath", f"skills/{skill_id}/SKILL.md")
     if not skill_path.exists():
         skill_path = AGENTS_DIR / "skills" / skill_id / "SKILL.md"
@@ -73,6 +74,7 @@ def _skill_info(skill_id: str, meta: dict) -> dict:
         "sourceUrl": meta.get("sourceUrl", ""),
         "installedAt": meta.get("installedAt", ""),
         "local": local,
+        "callCount": call_count,
     }
 
 
@@ -82,15 +84,23 @@ def api_skills():
     skills = []
     disabled_ids = set()
 
+    # Skill call counts from wire.jsonl (all-time total)
+    try:
+        tool_usage = get_tool_usage()
+        skill_counts = {item["name"]: item["count"] for item in tool_usage.get("skills", [])}
+    except Exception as e:
+        log.warning("Failed to load skill usage for /api/skills: %s", e)
+        skill_counts = {}
+
     # Enabled skills from lock file
     for skill_id, meta in lock.get("skills", {}).items():
-        info = _skill_info(skill_id, meta)
+        info = _skill_info(skill_id, meta, skill_counts.get(skill_id, 0))
         info["enabled"] = True
         skills.append(info)
 
     # Disabled skills from lock file
     for skill_id, meta in lock.get("disabled", {}).items():
-        info = _skill_info(skill_id, meta)
+        info = _skill_info(skill_id, meta, skill_counts.get(skill_id, 0))
         info["enabled"] = False
         skills.append(info)
         disabled_ids.add(skill_id)
@@ -112,6 +122,7 @@ def api_skills():
                         "installedAt": "",
                         "local": True,
                         "enabled": True,
+                        "callCount": skill_counts.get(skill_dir.name, 0),
                     })
 
     skills.sort(key=lambda s: s["name"].lower())
