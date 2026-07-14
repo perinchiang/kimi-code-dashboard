@@ -712,7 +712,7 @@ function renderMcpCard(s) {
     var enabledChecked = s.enabled ? ' checked' : '';
     var statusCls = s.status;
     var desc = s.description || getMcpDesc(s.name) || s.detail || '';
-    return '<div class="mcp-card ' + (s.enabled ? '' : 'disabled') + '" data-mcp-id="' + s.name + '" onclick="if(event.target===this)openMcpDetail(\'' + s.name + '\')">' +
+    return '<div class="mcp-card ' + (s.enabled ? '' : 'disabled') + '" data-mcp-id="' + s.name + '" onclick="if(!event.target.closest(\'.mcp-card-actions\'))openMcpDetail(\'' + s.name + '\')">' +
         '<div class="mcp-card-header"><span class="mcp-card-name">' + s.name + '</span><span class="status ' + statusCls + '"><span class="status-dot"></span>' + s.status + '</span></div>' +
         (desc ? '<div class="mcp-card-desc">' + desc + '</div>' : '') +
         '<div class="mcp-card-actions">' +
