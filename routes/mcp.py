@@ -102,15 +102,18 @@ def api_mcp():
         info["enabled"] = False
         result.append(info)
 
-    result.sort(key=lambda s: s["name"].lower())
+    # 排序：offline 优先（方便发现配置错误），其次按名称
+    result.sort(key=lambda s: (s["status"] != "offline", s["name"].lower()))
     online = sum(1 for r in result if r["status"] == "online")
-    available = sum(1 for r in result if r["status"] in ("online", "available"))
+    available = sum(1 for r in result if r["status"] == "available")
+    offline = sum(1 for r in result if r["status"] == "offline")
     enabled_count = sum(1 for r in result if r["enabled"])
     disabled_count = len(result) - enabled_count
     return jsonify({
         "total": len(result),
         "online": online,
         "available": available,
+        "offline": offline,
         "enabled": enabled_count,
         "disabled": disabled_count,
         "servers": result,

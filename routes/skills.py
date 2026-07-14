@@ -16,8 +16,34 @@ from services.helpers import parse_skill_frontmatter, safe_json_load
 bp = Blueprint("skills", __name__)
 
 
+def _cleanup_orphaned_entries(lock: dict) -> bool:
+    """Remove lock entries whose SKILL.md no longer exists on disk.
+
+    This keeps the lock file in sync with the actual workspace when skills
+    are deleted outside of the Dashboard (e.g. manual rm -rf).
+    """
+    changed = False
+    for section in ("skills", "disabled"):
+        entries = lock.get(section, {})
+        orphaned = []
+        for skill_id, meta in entries.items():
+            skill_path = AGENTS_DIR / meta.get("skillPath", f"skills/{skill_id}/SKILL.md")
+            if not skill_path.exists():
+                skill_path = AGENTS_DIR / "skills" / skill_id / "SKILL.md"
+            if not skill_path.exists():
+                orphaned.append(skill_id)
+                log.info("Removing orphaned skill entry from lock file: %s", skill_id)
+        for skill_id in orphaned:
+            del entries[skill_id]
+            changed = True
+    return changed
+
+
 def _load_lock() -> dict:
-    return safe_json_load(SKILL_LOCK) or {"version": 3, "skills": {}, "dismissed": {}, "disabled": {}}
+    lock = safe_json_load(SKILL_LOCK) or {"version": 3, "skills": {}, "dismissed": {}, "disabled": {}}
+    if _cleanup_orphaned_entries(lock):
+        _save_lock(lock)
+    return lock
 
 
 def _save_lock(lock: dict) -> bool:

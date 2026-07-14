@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kimi Web 外网访问图片不显示 - 修复指南</title>
+    <style>
+        :root {
+            --bg: #f8f9fa;
+            --card: #ffffff;
+            --text: #212529;
+            --muted: #6c757d;
+            --primary: #1976d2;
+            --code-bg: #f1f3f5;
+            --border: #dee2e6;
+            --danger: #dc3545;
+            --success: #28a745;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #121212;
+                --card: #1e1e1e;
+                --text: #e9ecef;
+                --muted: #adb5bd;
+                --primary: #64b5f6;
+                --code-bg: #2d2d2d;
+                --border: #343a40;
+                --danger: #f5c6cb;
+                --success: #c3e6cb;
+            }
+        }
+        body {
+            margin: 0;
+            padding: 2rem 1rem;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 1.75rem;
+            margin-bottom: 0.5rem;
+        }
+        .subtitle {
+            color: var(--muted);
+            margin-bottom: 2rem;
+        }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        h2 {
+            font-size: 1.25rem;
+            margin-top: 0;
+            margin-bottom: 1rem;
+            color: var(--primary);
+        }
+        h3 {
+            font-size: 1.1rem;
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+        p, li {
+            margin: 0.75rem 0;
+        }
+        ul {
+            padding-left: 1.5rem;
+        }
+        code {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            background: var(--code-bg);
+            padding: 0.15rem 0.35rem;
+            border-radius: 4px;
+            font-size: 0.9em;
+            word-break: break-all;
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 0.9rem;
+            border: 1px solid var(--border);
+        }
+        pre code {
+            background: transparent;
+            padding: 0;
+        }
+        .tag {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-right: 0.5rem;
+        }
+        .tag-success { background: rgba(40, 167, 69, 0.15); color: var(--success); }
+        .tag-danger { background: rgba(220, 53, 69, 0.15); color: var(--danger); }
+        .tag-info { background: rgba(25, 118, 210, 0.15); color: var(--primary); }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+        th, td {
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            font-weight: 600;
+            color: var(--muted);
+        }
+        .note {
+            background: rgba(25, 118, 210, 0.08);
+            border-left: 4px solid var(--primary);
+            padding: 1rem;
+            border-radius: 0 8px 8px 0;
+            margin: 1rem 0;
+        }
+        .footer {
+            text-align: center;
+            color: var(--muted);
+            margin-top: 3rem;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Kimi Web 外网访问图片不显示</h1>
+        <p class="subtitle">Content-Security-Policy 导致的图床/外部图片加载失败修复指南</p>
+
+        <div class="card">
+            <h2>现象</h2>
+            <p>通过 SakuraFrp、ngrok 等内网穿透访问 Kimi Web 时，消息里的图片显示裂图或 <code>Image failed to load</code>。但在本机直接访问 <code>http://127.0.0.1:5494</code> 时图片完全正常。</p>
+        </div>
+
+        <div class="card">
+            <h2>原因</h2>
+            <p>Kimi Code Web 默认在 HTTP 响应头中返回严格的 CSP 策略：</p>
+            <pre><code>Content-Security-Policy: default-src 'self'</code></pre>
+            <p>这表示浏览器<strong>只允许加载和 Kimi Web 同域名的资源</strong>。任何外部图片 URL（如 <code>https://pub-xxx.r2.dev/...</code>、<code>https://image.pathos.dpdns.org/...</code>）都会被浏览器直接拦截。</p>
+            <p>在浏览器 DevTools Console 中可以看到类似报错：</p>
+            <pre><code>Loading the image 'https://...' violates the following Content Security Policy directive: "default-src 'self'".</code></pre>
+        </div>
+
+        <div class="card">
+            <h2>解决方案对照表</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>访问方式</th>
+                        <th>能否改 CSP 头</th>
+                        <th>推荐做法</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>本机 127.0.0.1</td>
+                        <td><span class="tag tag-success">无需处理</span></td>
+                        <td>同源访问，不会触发限制</td>
+                    </tr>
+                    <tr>
+                        <td>SakuraFrp / ngrok</td>
+                        <td><span class="tag tag-danger">不能</span></td>
+                        <td>本机加 Caddy 反向代理（见方案 A）</td>
+                    </tr>
+                    <tr>
+                        <td>Cloudflare Tunnel</td>
+                        <td><span class="tag tag-success">能</span></td>
+                        <td>Cloudflare 面板加 Transform Rule（见方案 B）</td>
+                    </tr>
+                    <tr>
+                        <td>自建 Nginx / Caddy 反代</td>
+                        <td><span class="tag tag-success">能</span></td>
+                        <td>在反代配置里改响应头（见方案 C）</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>方案 A：SakuraFrp + 本地 Caddy</h2>
+            <p>在 Kimi Web 和 SakuraFrp 之间加一层 Caddy，让 Caddy 修改响应头。</p>
+            <h3>1. 安装 Caddy</h3>
+            <p>Windows 推荐用 WinGet：</p>
+            <pre><code>winget install Caddy.Caddy</code></pre>
+            <p>macOS 用 Homebrew：</p>
+            <pre><code>brew install caddy</code></pre>
+
+            <h3>2. 创建 Caddyfile</h3>
+            <p>新建 <code>Caddyfile</code>（路径任意，例如 <code>~/.kimi-code/pwa-proxy/Caddyfile</code>）：</p>
+            <pre><code>:8088 {
+    # PWA 静态资源（可选）
+    @pwaStatic path / /manifest.json /icon-192.png /icon-512.png /apple-touch-icon.png /favicon.ico
+    handle @pwaStatic {
+        root * ~/.kimi-code/pwa-proxy/static
+        file_server
+    }
+
+    # 其他请求转发到 Kimi Web
+    handle {
+        reverse_proxy http://127.0.0.1:5494
+
+        # 移除默认的严格 CSP
+        header -Content-Security-Policy
+        # 可选：设置一个宽松的 CSP
+        header Content-Security-Policy "default-src 'self'; img-src * data: blob:; font-src 'self' data:; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: http: https:; style-src 'self' 'unsafe-inline';"
+    }
+}</code></pre>
+
+            <h3>3. 启动 Caddy</h3>
+            <pre><code>caddy run --config /path/to/Caddyfile</code></pre>
+
+            <h3>4. 修改 SakuraFrp 隧道</h3>
+            <p>把隧道的<strong>本地端口</strong>从 <code>5494</code> 改成 <code>8088</code>，其他保持不变。</p>
+            <p>之后通过 frp 域名访问时，流量会先经过 Caddy，CSP 头被移除，外部图片即可正常显示。</p>
+        </div>
+
+        <div class="card">
+            <h2>方案 B：Cloudflare Tunnel</h2>
+            <p>Cloudflare Tunnel 支持在云端修改响应头，不需要本地 Caddy。</p>
+            <ol>
+                <li>登录 Cloudflare 控制台 → 你的域名 → <strong>Rules</strong> → <strong>Transform Rules</strong></li>
+                <li>创建 <strong>Modify Response Header</strong> 规则</li>
+                <li>匹配条件：Hostname equals <code>你的 tunnel 域名</code></li>
+                <li>操作：Remove header <code>Content-Security-Policy</code></li>
+                <li>保存并部署</li>
+            </ol>
+            <div class="note">
+                <strong>提示：</strong>也可以把 Remove 改成 Set，值为宽松的 CSP 策略，和方案 A 中一致。
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>方案 C：自建 Nginx 反代</h2>
+            <p>如果你前面已经有一层 Nginx，直接加响应头即可：</p>
+            <pre><code>server {
+    listen 443 ssl;
+    server_name kimi.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:5494;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+
+        # 移除 Kimi Web 的 CSP
+        proxy_hide_header Content-Security-Policy;
+        add_header Content-Security-Policy "default-src 'self'; img-src * data: blob:; font-src 'self' data:; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: http: https:; style-src 'self' 'unsafe-inline';" always;
+    }
+}</code></pre>
+        </div>
+
+        <div class="card">
+            <h2>验证是否修复</h2>
+            <ol>
+                <li>按 <code>F12</code> 打开浏览器 DevTools → <strong>Network</strong></li>
+                <li>刷新页面，点击任意一个 HTML 请求（如 <code>/app/</code>）</li>
+                <li>查看 Response Headers</li>
+                <li>如果 <code>Content-Security-Policy</code> 已消失或被替换成宽松策略，即修复成功</li>
+            </ol>
+        </div>
+
+        <div class="footer">
+            Kimi Code Dashboard · 外网图片显示修复指南
+        </div>
+    </div>
+</body>
+</html>

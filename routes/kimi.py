@@ -1,5 +1,6 @@
 """Kimi usage, trends, quota, version check, and model distribution API blueprint."""
 
+import concurrent.futures
 import getpass
 import json
 import os
@@ -13,6 +14,9 @@ from pathlib import Path
 from flask import Blueprint, jsonify
 
 from config import (
+    DASHBOARD_GITHUB_LATEST,
+    DASHBOARD_RELEASES_PAGE,
+    DASHBOARD_VERSION,
     KIMI_BIN,
     KIMI_CODE_DIR,
     KIMI_CREDENTIALS,
@@ -132,15 +136,22 @@ def _map_mac_model(hw_model: str) -> str:
 # ---------------------------------------------------------------------------
 @bp.route("/api/kimi")
 def api_kimi():
-    version = "unknown"
+    # Prefer live `kimi --version` so the UI reflects upgrades immediately.
+    version = _get_kimi_version_cli() or "unknown"
     starts = []
 
-    if KIMI_LOG.exists():
+    if version == "unknown" and KIMI_LOG.exists():
         try:
             text = KIMI_LOG.read_text(encoding="utf-8")
             versions = re.findall(r"version=(\S+)", text)
             if versions:
                 version = versions[-1]
+        except Exception as e:
+            log.warning("Failed to parse kimi log: %s", e)
+
+    if KIMI_LOG.exists():
+        try:
+            text = KIMI_LOG.read_text(encoding="utf-8")
             starts = re.findall(
                 r"^([\d\-T:.Z]+)\s+.*kimi-code starting\s+version=(\S+)",
                 text,
@@ -331,7 +342,10 @@ def api_kimi_quota():
 # ---------------------------------------------------------------------------
 # Version check & one-click update
 # ---------------------------------------------------------------------------
-_version_cache: dict = {"data": None, "at": 0.0, "ok": False}
+_version_cache: dict = {
+    "kimi": {"data": None, "at": 0.0, "ok": False},
+    "dashboard": {"data": None, "at": 0.0, "ok": False},
+}
 
 
 def _get_kimi_version_cli() -> str:
@@ -348,13 +362,14 @@ def _get_kimi_version_cli() -> str:
     return ""
 
 
-def _fetch_latest_release() -> dict | None:
+def _fetch_latest_release(api_url: str, repo: str, releases_page: str) -> dict | None:
+    """Fetch the latest release from GitHub API, falling back to `gh` CLI on rate limits."""
     body = None
     rate_limited = False
 
     try:
         req = urllib.request.Request(
-            KIMI_GITHUB_LATEST,
+            api_url,
             headers={
                 "Accept": "application/vnd.github+json",
                 "User-Agent": "kimi-code-dashboard",
@@ -366,6 +381,8 @@ def _fetch_latest_release() -> dict | None:
     except urllib.error.HTTPError as e:
         if e.code in (403, 429):
             rate_limited = True
+        elif e.code == 404:
+            return {"error": "no_releases", "message": "暂无发布版本"}
         else:
             return {"error": f"HTTP {e.code}"}
     except Exception:
@@ -374,7 +391,7 @@ def _fetch_latest_release() -> dict | None:
     if body is None and rate_limited:
         try:
             result = subprocess.run(
-                ["gh", "release", "view", "--repo", "MoonshotAI/kimi-code",
+                ["gh", "release", "view", "--repo", repo,
                  "--json", "tagName,name,publishedAt,url,body"],
                 capture_output=True, text=True, timeout=15,
                 **no_window_kwargs(),
@@ -385,7 +402,7 @@ def _fetch_latest_release() -> dict | None:
                     "tag_name": gh_body.get("tagName", ""),
                     "name": gh_body.get("name", ""),
                     "published_at": gh_body.get("publishedAt", ""),
-                    "html_url": gh_body.get("url", KIMI_RELEASES_PAGE),
+                    "html_url": gh_body.get("url", releases_page),
                     "body": gh_body.get("body", ""),
                 }
         except Exception as e:
@@ -405,7 +422,7 @@ def _fetch_latest_release() -> dict | None:
         "tagName": tag,
         "name": body.get("name", ""),
         "publishedAt": body.get("published_at", ""),
-        "url": body.get("html_url", KIMI_RELEASES_PAGE),
+        "url": body.get("html_url", releases_page),
         "notes": notes,
     }
 
@@ -435,35 +452,34 @@ def _compare_versions(a: str, b: str) -> int:
     return 0
 
 
-@bp.route("/api/kimi-update")
-def api_kimi_update_check():
-    current = _get_kimi_version_cli() or "unknown"
+def _get_cached_latest(product: str, api_url: str, repo: str, releases_page: str) -> dict:
+    """Return cached or freshly fetched latest-release info for a product."""
     now_ts = datetime.now(timezone.utc).timestamp()
-    cached = _version_cache["data"]
-    cache_ttl = VERSION_CACHE_TTL_OK if _version_cache["ok"] else VERSION_CACHE_TTL_ERR
-    if cached is None or now_ts - _version_cache["at"] > cache_ttl:
-        latest_info = _fetch_latest_release()
+    cache = _version_cache[product]
+    cache_ttl = VERSION_CACHE_TTL_OK if cache["ok"] else VERSION_CACHE_TTL_ERR
+    if cache["data"] is None or now_ts - cache["at"] > cache_ttl:
+        latest_info = _fetch_latest_release(api_url, repo, releases_page)
         if latest_info is None:
             latest_info = {"error": "查询失败"}
-        _version_cache["data"] = latest_info
-        _version_cache["at"] = now_ts
-        _version_cache["ok"] = "error" not in latest_info
-    else:
-        latest_info = cached
+        cache["data"] = latest_info
+        cache["at"] = now_ts
+        cache["ok"] = "error" not in latest_info
+    return cache["data"]
 
+
+def _build_version_response(current: str, latest_info: dict) -> dict:
+    """Build version-check response for a single product."""
     if "error" in latest_info:
-        return jsonify({
+        return {
             "current": current,
             "latest": None,
             "updateAvailable": False,
             "error": latest_info["error"],
             "message": latest_info.get("message", ""),
-        })
-
+        }
     latest = latest_info.get("version", "")
     update_available = bool(current != "unknown" and latest and _compare_versions(current, latest) < 0)
-
-    return jsonify({
+    return {
         "current": current,
         "latest": latest,
         "updateAvailable": update_available,
@@ -471,10 +487,39 @@ def api_kimi_update_check():
         "publishedAt": latest_info.get("publishedAt", ""),
         "releaseUrl": latest_info.get("url", ""),
         "releaseNotes": latest_info.get("notes", ""),
+    }
+
+
+@bp.route("/api/kimi-update")
+def api_kimi_update_check():
+    # Check both products in parallel to keep the click-to-check snappy.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        kimi_future = executor.submit(
+            _get_cached_latest,
+            "kimi",
+            KIMI_GITHUB_LATEST,
+            "MoonshotAI/kimi-code",
+            KIMI_RELEASES_PAGE,
+        )
+        dashboard_future = executor.submit(
+            _get_cached_latest,
+            "dashboard",
+            DASHBOARD_GITHUB_LATEST,
+            "perinchiang/kimi-code-dashboard",
+            DASHBOARD_RELEASES_PAGE,
+        )
+        kimi_info = kimi_future.result()
+        dashboard_info = dashboard_future.result()
+
+    return jsonify({
+        "kimi": _build_version_response(_get_kimi_version_cli() or "unknown", kimi_info),
+        "dashboard": _build_version_response(DASHBOARD_VERSION, dashboard_info),
     })
 
 
-_upgrade_state: dict = {"proc": None, "log_path": None, "started_at": 0.0}
+_upgrade_state: dict = {"proc": None, "log_path": None, "started_at": 0.0, "manual": False}
+
+_MANUAL_INSTALL_URL = "https://code.kimi.com/kimi-code/install.ps1"
 
 
 @bp.route("/api/kimi-update/run", methods=["POST"])
@@ -503,6 +548,44 @@ def api_kimi_update_run():
     _upgrade_state["proc"] = proc
     _upgrade_state["log_path"] = log_path
     _upgrade_state["started_at"] = datetime.now(timezone.utc).timestamp()
+    _upgrade_state["manual"] = False
+    return jsonify({"status": "started"})
+
+
+@bp.route("/api/kimi-update/manual-run", methods=["POST"])
+def api_kimi_update_manual_run():
+    """POST-only: run the official PowerShell installer for Windows native installs."""
+    proc = _upgrade_state.get("proc")
+    if proc is not None and proc.poll() is None:
+        return jsonify({"status": "already_running"})
+
+    import tempfile
+    log_fd, log_path = tempfile.mkstemp(suffix=".log", prefix="kimi_manual_upgrade_")
+    os.close(log_fd)
+    try:
+        logf = open(log_path, "w", encoding="utf-8")
+        cmd = [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-Command",
+            f"irm {_MANUAL_INSTALL_URL} | iex",
+        ]
+        kwargs = {
+            "stdout": logf,
+            "stderr": subprocess.STDOUT,
+        }
+        kwargs.update(no_window_kwargs())
+        proc = subprocess.Popen(cmd, **kwargs)
+        log.info("Started manual Kimi Code install via PowerShell")
+    except Exception as e:
+        log.error("Failed to start manual kimi install: %s", e)
+        return jsonify({"status": "error", "error": str(e)})
+
+    _upgrade_state["proc"] = proc
+    _upgrade_state["log_path"] = log_path
+    _upgrade_state["started_at"] = datetime.now(timezone.utc).timestamp()
+    _upgrade_state["manual"] = True
     return jsonify({"status": "started"})
 
 
@@ -523,9 +606,20 @@ def api_kimi_update_status():
             log_text = ""
 
     status = "running" if running else ("success" if exit_code == 0 else "failed")
+    manual_update = False
+    manual_command = ""
+    if not running and "Auto-update is not supported" in log_text:
+        status = "manual_update"
+        manual_update = True
+        m = re.search(r"To update manually, run:\s*(.+)", log_text)
+        manual_command = m.group(1).strip() if m else "irm https://code.kimi.com/kimi-code/install.ps1 | iex"
+
     return jsonify({
         "status": status,
         "running": running,
         "exitCode": exit_code,
         "log": log_text[-4000:] if len(log_text) > 4000 else log_text,
+        "manualUpdate": manual_update,
+        "manualCommand": manual_command,
+        "manual": bool(_upgrade_state.get("manual")),
     })

@@ -102,12 +102,24 @@ def _pid_alive(pid: int) -> bool:
 
 
 def _build_url(cfg):
-    """根据配置生成访问 URL。仅外网模式才使用自定义 URL。"""
+    """根据配置生成访问 URL。仅外网模式才使用自定义 URL。
+
+    支持 public_urls 列表，返回第一个有效 URL；兼容旧版 public_url 字符串。
+    """
     bind = cfg.get("bind", "127.0.0.1")
     port = cfg.get("port", 5494)
     if bind == "0.0.0.0":
-        pub = (cfg.get("public_url") or "").strip()
-        if pub:
+        pubs = cfg.get("public_urls") or []
+        if isinstance(pubs, str):
+            pubs = [pubs]
+        # 兼容旧版单个 public_url
+        legacy = (cfg.get("public_url") or "").strip()
+        if legacy:
+            pubs = [legacy] + [p for p in pubs if p != legacy]
+        for pub in pubs:
+            pub = str(pub or "").strip()
+            if not pub:
+                continue
             pub = pub.rstrip("/")
             if not pub.startswith(("http://", "https://")):
                 pub = "https://" + pub
@@ -170,10 +182,16 @@ def _build_cmd(cfg):
     # 127.0.0.1 时不传 --host
     if cfg.get("bypass_auth", True):
         cmd.append("--dangerous-bypass-auth")
-    # 合并 allowed_hosts 和从 public_url 提取的主机名
+    # 合并 allowed_hosts 和从 public_urls 提取的主机名
     allowed_hosts = list(cfg.get("allowed_hosts_list", []))
-    pub = (cfg.get("public_url") or "").strip()
-    if pub:
+    pubs = cfg.get("public_urls") or []
+    if isinstance(pubs, str):
+        pubs = [pubs]
+    # 兼容旧版单个 public_url
+    legacy = (cfg.get("public_url") or "").strip()
+    if legacy:
+        pubs = [legacy] + [p for p in pubs if p != legacy]
+    for pub in pubs:
         pub_host = _extract_host(pub)
         if pub_host and pub_host not in allowed_hosts:
             allowed_hosts.append(pub_host)
@@ -228,14 +246,20 @@ def api_launch_kimi_web():
     bypass_auth = cfg.get("bypass_auth", True)
     allowed_hosts_raw = cfg.get("allowed_hosts", "") or ""
     allowed_hosts_list = [h.strip() for h in allowed_hosts_raw.split(",") if h.strip()]
-    public_url = (cfg.get("public_url") or "").strip().strip("`'").strip()
+    public_urls = cfg.get("public_urls") or []
+    if isinstance(public_urls, str):
+        public_urls = [public_urls]
+    # 兼容旧版单个 public_url
+    legacy_public_url = (cfg.get("public_url") or "").strip().strip("`'").strip()
+    if legacy_public_url:
+        public_urls = [legacy_public_url] + [p for p in public_urls if p != legacy_public_url]
 
     norm_cfg = {
         "bind": bind,
         "port": port,
         "bypass_auth": bypass_auth,
         "allowed_hosts_list": allowed_hosts_list,
-        "public_url": public_url,
+        "public_urls": public_urls,
     }
     url = _build_url(norm_cfg)
     log.info("launch-kimi-web cfg: %s -> url=%s", norm_cfg, url)
@@ -682,12 +706,19 @@ def api_startup_toggle():
     if service == "kimi":
         allowed_hosts_raw = body.get("allowed_hosts", "") or ""
         allowed_hosts_list = [h.strip() for h in allowed_hosts_raw.split(",") if h.strip()]
+        public_urls = body.get("public_urls") or []
+        if isinstance(public_urls, str):
+            public_urls = [public_urls]
+        # 兼容旧版单个 public_url
+        legacy_public_url = (body.get("public_url") or "").strip()
+        if legacy_public_url:
+            public_urls = [legacy_public_url] + [p for p in public_urls if p != legacy_public_url]
         cfg = {
             "port": int(body.get("port", 5494)),
             "bind": body.get("bind", "0.0.0.0"),
             "bypass_auth": bool(body.get("bypass_auth", True)),
             "allowed_hosts_list": allowed_hosts_list,
-            "public_url": (body.get("public_url") or "").strip(),
+            "public_urls": public_urls,
         }
     result = _set_startup_service(service, enable, cfg)
     return jsonify(result)

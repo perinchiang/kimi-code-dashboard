@@ -6,6 +6,10 @@ var currentTrendUnit = 'daily';
 var pageLoadTime = Date.now();
 var statusData = {};
 var startupServiceState = { supported: false, loaded: false, dashboard: { enabled: false, mode: 'off' }, kimi: { enabled: false } };
+var artifactsData = null;
+var currentArtifactSource = 'all';
+var currentArtifactQuery = '';
+var kimiUpdateState = { checking: false, updateAvailable: false, error: null };
 
 // === Settings ===
 var SETTINGS_KEY = 'kimi_dashboard_settings_v1';
@@ -24,7 +28,7 @@ var SETTINGS_DEFAULTS = {
     kw_port: 5494,               // Kimi Web 端口
     kw_bypass_auth: true,        // 关闭密码认证 (true=无需密码)
     kw_allowed_hosts: '',         // 允许的域名 (逗号分隔)
-    kw_public_url: '',           // 自定义访问URL (留空自动生成)
+    kw_public_urls: [],          // 自定义访问URL列表 (留空自动生成; 多个域名都会加入信任列表)
     default_permission_mode: 'manual', // Kimi Code 默认权限模式 (manual/auto/yolo)
     enable_pwa_icons: false,     // 是否启用 PWA 图标（添加到手机主屏幕）
     __startup_dashboard_mode: 'off', // Dashboard 开机启动模式 (normal/elevated/off)
@@ -42,7 +46,7 @@ var SETTINGS_GROUPS = [
             ]},
             { key: 'kw_port', label: '端口', desc: '默认 5494', type: 'number', row: true },
             { key: 'kw_bypass_auth', label: '关闭密码认证', desc: '无需密码直接访问', row: true },
-            { key: 'kw_public_url', label: '自定义访问 URL', desc: '域名会自动加入信任列表', type: 'text', row: true, wide: true },
+            { key: 'kw_public_urls', label: '自定义访问 URL', desc: '域名会自动加入信任列表，可添加多个；启动 Kimi Web 时默认打开置顶的链接', type: 'public_urls', row: true, wide: true },
             { key: 'default_permission_mode', label: '默认权限模式', desc: 'Kimi Code 新建会话时的默认审批模式；修改后需重启 Kimi Web', type: 'segment', row: true, options: [
                 { v: 'manual', t: '逐条确认' },
                 { v: 'auto', t: '自动模式' },
@@ -77,6 +81,15 @@ var SETTINGS_GROUPS = [
         icon: '<rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>',
         items: [
             { key: 'enable_pwa_icons', label: '启用 PWA 图标', desc: '开启后注入 favicon、apple-touch-icon 和 manifest，方便添加到手机桌面', row: true },
+            { type: 'link', label: '外网访问图片不显示？', desc: 'SakuraFrp / 内网穿透下 Kimi Web 图片裂图问题与 CSP 修复教程', href: '/static/help-csp-images.html', row: true },
+        ]
+    },
+    {
+        title: 'MCP 图床配置',
+        desc: 'S3 兼容对象存储凭证（R2 / S3 / MinIO / OSS 等）',
+        icon: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
+        items: [
+            { key: 'image_bed', label: '图床凭证', desc: '凭证写入 ~/.kimi-code/config.toml 的 [image_bed] 段，image-bed-mcp 也会读这份配置', type: 'image_bed', row: true, wide: true },
         ]
     },
     {
@@ -100,7 +113,20 @@ function loadSettings() {
     try {
         var raw = localStorage.getItem(SETTINGS_KEY);
         var saved = raw ? JSON.parse(raw) : {};
-        return Object.assign({}, SETTINGS_DEFAULTS, saved);
+        var settings = Object.assign({}, SETTINGS_DEFAULTS, saved);
+        // Migrate legacy single public_url to list
+        if (!Array.isArray(settings.kw_public_urls)) {
+            settings.kw_public_urls = [];
+        }
+        if (saved.kw_public_url) {
+            var legacy = normalizePublicUrl(saved.kw_public_url);
+            if (legacy && settings.kw_public_urls.indexOf(legacy) < 0) {
+                settings.kw_public_urls.push(legacy);
+            }
+            delete saved.kw_public_url;
+            saveSettings(settings);
+        }
+        return settings;
     } catch (e) {
         return Object.assign({}, SETTINGS_DEFAULTS);
     }
@@ -147,6 +173,20 @@ function applySettings() {
     setDisplay('section-kimi', s.show_kimi_usage);
     setDisplay('section-memory', s.show_memory);
     setDisplay('section-tool-model', s.show_tool_model_usage);
+
+    // Kimi Usage 卡片点击跳转到 Console
+    var kimiCard = document.getElementById('section-kimi');
+    if (kimiCard) {
+        kimiCard.onclick = function() {
+            var url = (statusData.kimi && statusData.kimi.consoleUrl) || 'https://www.kimi.com/code/console';
+            window.open(url, '_blank');
+        };
+    }
+    // Memory Status 卡片点击跳转到记忆详情页
+    var memCard = document.getElementById('section-memory');
+    if (memCard) {
+        memCard.onclick = function() { location.hash = '#/memory'; };
+    }
     setDisplay('tasksMiniCard', s.show_tasks);
     var kimiWebBtn = document.getElementById('kimiWebBtn');
     if (kimiWebBtn) kimiWebBtn.style.display = s.show_kimi_web_btn ? '' : 'none';
@@ -326,6 +366,13 @@ function formatTokens(n) {
     if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
     return n.toString();
 }
+function formatSize(bytes) {
+    if (bytes === undefined || bytes === null || isNaN(bytes)) return '-';
+    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return bytes + ' B';
+}
 function formatRemaining(resetTime) {
     if (!resetTime) return '';
     var target;
@@ -377,10 +424,10 @@ async function checkKimiWebStatus() {
 async function launchKimiWeb() {
     var btn = document.getElementById('kimiWebBtn');
     var text = document.getElementById('kimiWebBtnText');
-    var publicUrl = normalizePublicUrl(settings.kw_public_url);
+    var publicUrls = (settings.kw_public_urls || []).map(normalizePublicUrl).filter(Boolean);
 
     // 如果没填自定义 URL，提示用户
-    if (!publicUrl) {
+    if (publicUrls.length === 0) {
         if (!confirm('未配置自定义访问 URL，将使用本地地址 http://127.0.0.1:' + (settings.kw_port || 5494) + '\n\n是否继续？\n（点击「取消」去设置页填写自定义 URL）')) {
             window.location.hash = '#/settings';
             return;
@@ -395,7 +442,7 @@ async function launchKimiWeb() {
             bind: settings.kw_bind || '0.0.0.0',
             port: parseInt(settings.kw_port, 10) || 5494,
             bypass_auth: settings.kw_bypass_auth !== false,
-            public_url: publicUrl
+            public_urls: publicUrls
         };
         console.log('[launchKimiWeb] sending cfg:', JSON.stringify(cfg));
         var data = await postJSON('/api/launch-kimi-web', cfg);
@@ -439,29 +486,42 @@ function renderStatusBar() {
     var bar = document.getElementById('statusBar');
     var pills = [];
     if (statusData.kimi) {
-        var cls = statusData.kimi.loggedIn ? 'ok' : 'warn';
-        pills.push('<div class="status-pill ' + cls + '"><span class="dot"></span>Kimi v' + statusData.kimi.version + ' &middot; ' + statusData.kimi.sessionCount + ' sessions</div>');
+        var baseCls = statusData.kimi.loggedIn ? 'ok' : 'warn';
+        var cls = kimiUpdateState.checking ? 'checking' : (kimiUpdateState.updateAvailable ? 'warn' : (kimiUpdateState.error ? 'err' : baseCls));
+        var title = kimiUpdateState.updateAvailable ? '有新版本，点击更新' : (kimiUpdateState.checking ? '检查中…' : '点击检查更新');
+        pills.push('<button class="status-pill ' + cls + '" onclick="onKimiPillClick()" title="' + title + '"><span class="dot"></span>Kimi v' + statusData.kimi.version + ' &middot; ' + statusData.kimi.sessionCount + ' sessions</button>');
     }
     if (statusData.mcp) {
         var cls2 = statusData.mcp.available === statusData.mcp.total ? 'ok' : (statusData.mcp.available > 0 ? 'warn' : 'err');
-        pills.push('<div class="status-pill ' + cls2 + '"><span class="dot"></span>MCP ' + statusData.mcp.available + '/' + statusData.mcp.total + '</div>');
+        pills.push('<button class="status-pill ' + cls2 + '" onclick="location.hash=\'#/mcp\'"><span class="dot"></span>MCP ' + statusData.mcp.available + '/' + statusData.mcp.total + '</button>');
     }
     if (statusData.memory) {
         var cls3 = statusData.memory.gatewayReachable ? 'ok' : 'err';
         var label = statusData.memory.gatewayReachable ? 'Gateway 可达' : 'Gateway 不可达';
-        pills.push('<div class="status-pill ' + cls3 + '"><span class="dot"></span>' + label + '</div>');
+        pills.push('<button class="status-pill ' + cls3 + '" onclick="location.hash=\'#/memory\'"><span class="dot"></span>' + label + '</button>');
     }
     if (statusData.skills) {
-        pills.push('<div class="status-pill ok"><span class="dot"></span>' + statusData.skills.total + ' Skills &middot; ' + statusData.skills.localCount + ' 本地</div>');
+        pills.push('<button class="status-pill ok" onclick="location.hash=\'#/skills\'"><span class="dot"></span>' + statusData.skills.total + ' Skills &middot; ' + statusData.skills.localCount + ' 本地</button>');
     }
     if (statusData.modelConfig) {
         var mc = statusData.modelConfig;
-        pills.push('<div class="status-pill ok"><span class="dot"></span>' + (mc.providers || []).length + ' Providers &middot; ' + (mc.models || []).length + ' Models</div>');
+        pills.push('<button class="status-pill ok" onclick="location.hash=\'#/models\'"><span class="dot"></span>' + (mc.providers || []).length + ' Providers &middot; ' + (mc.models || []).length + ' Models</button>');
     }
     if (statusData.trends && statusData.trends.total) {
-        pills.push('<div class="status-pill ok"><span class="dot"></span>累计 ' + formatTokens(statusData.trends.total.value) + ' tokens</div>');
+        pills.push('<button class="status-pill ok" onclick="location.hash=\'#/\'"><span class="dot"></span>累计 ' + formatTokens(statusData.trends.total.value) + ' tokens</button>');
     }
     bar.innerHTML = pills.join('');
+}
+
+function onKimiPillClick() {
+    if (kimiUpdateState.checking) return;
+    if (kimiUpdateState.updateAvailable) {
+        runKimiUpdate();
+        kimiUpdateState = { checking: false, updateAvailable: false, error: null };
+        renderStatusBar();
+        return;
+    }
+    checkKimiUpdate();
 }
 
 // === Skills ===
@@ -504,12 +564,16 @@ function handleRoute() {
     document.getElementById('view-mcp').style.display = (hash === '#/mcp') ? '' : 'none';
     document.getElementById('view-models').style.display = (hash === '#/models') ? '' : 'none';
     document.getElementById('view-tasks').style.display = (hash === '#/tasks') ? '' : 'none';
+    document.getElementById('view-artifacts').style.display = (hash === '#/artifacts') ? '' : 'none';
+    document.getElementById('view-memory').style.display = (hash === '#/memory') ? '' : 'none';
     document.getElementById('view-settings').style.display = (hash === '#/settings') ? '' : 'none';
     window.scrollTo(0, 0);
     if (hash === '#/skills') renderSkillsDetail();
     else if (hash === '#/mcp') renderMcpDetail();
     else if (hash === '#/models') renderModelConfigDetail();
     else if (hash === '#/tasks') renderTasksDetail();
+    else if (hash === '#/artifacts') renderArtifactsDetail();
+    else if (hash === '#/memory') renderMemoryDetail();
     else if (hash === '#/settings') renderSettings();
 }
 
@@ -699,6 +763,114 @@ async function loadMemory() {
     } catch (e) { setError('memorySummary', '加载失败: ' + e.message); }
 }
 
+// === Memory Detail ===
+var memoryDetailState = { level: 'l0', query: '', data: null };
+
+async function renderMemoryDetail() {
+    var list = document.getElementById('memoryDetailList');
+    var stats = document.getElementById('memoryDetailStats');
+    if (!list) return;
+    list.innerHTML = '<div class="empty">加载中...</div>';
+    if (stats) stats.innerHTML = '';
+    try {
+        var url = '/api/memory/items?level=' + memoryDetailState.level + '&limit=500';
+        if (memoryDetailState.query) url += '&q=' + encodeURIComponent(memoryDetailState.query);
+        var data = await fetchJSON(url);
+        memoryDetailState.data = data;
+        if (!data.gatewayReachable) {
+            list.innerHTML = '<div class="error">Gateway 未连接（127.0.0.1:8420）</div>';
+            return;
+        }
+        if (stats) stats.innerHTML = '<span>共 <strong>' + data.total + '</strong> 条</span>';
+        if (!data.items || data.items.length === 0) {
+            list.innerHTML = '<div class="empty">暂无记忆数据</div>';
+            return;
+        }
+        list.className = 'detail-list';
+        list.innerHTML = data.items.map(renderMemoryItem).join('');
+    } catch (e) {
+        list.innerHTML = '<div class="error">加载失败: ' + escapeHtml(e.message) + '</div>';
+    }
+}
+
+function renderMemoryItem(m, idx) {
+    var title, subtitle, preview, badge;
+    if (memoryDetailState.level === 'l0') {
+        var roleLabel = (m.role || 'user') === 'user' ? '用户' : (m.role === 'assistant' ? 'Kimi' : m.role);
+        var roleClass = m.role === 'user' ? 'mem-role-user' : 'mem-role-ai';
+        title = '<span class="mem-role ' + roleClass + '">' + escapeHtml(roleLabel) + '</span>';
+        subtitle = '<span class="mem-ts">' + escapeHtml(m.timestamp || '') + '</span>' +
+            (m.session ? '<span class="mem-sep">·</span><span class="mem-session" title="' + escapeHtml(m.session) + '">' + escapeHtml(m.session.substring(0, 12)) + (m.session.length > 12 ? '…' : '') + '</span>' : '');
+        preview = (m.content || '').substring(0, 280);
+    } else {
+        var typeMap = { episodic: '情节', instruction: '指令', persona: '人格', semantic: '语义' };
+        var typeLabel = typeMap[m.type] || m.type || '记忆';
+        title = '<span class="mem-type-badge mem-type-' + escapeHtml(m.type || '') + '">' + escapeHtml(typeLabel) + '</span>';
+        subtitle = '<span>优先级 ' + (m.priority || 0) + '</span>';
+        if (m.scene) subtitle += '<span class="mem-sep">·</span><span class="mem-scene">' + escapeHtml(m.scene) + '</span>';
+        subtitle += '<span class="mem-sep">·</span><span class="mem-score">score ' + (m.score || 0).toFixed(2) + '</span>';
+        preview = (m.content || '').substring(0, 280);
+    }
+    var hasMore = m.content && m.content.length > 280;
+    return '<div class="mem-card" onclick="openMemoryModal(' + idx + ')">' +
+        '<div class="mem-card-header">' + title + subtitle + '</div>' +
+        '<div class="mem-card-body">' + escapeHtml(preview) + (hasMore ? '<span class="mem-more">…</span>' : '') + '</div>' +
+    '</div>';
+}
+
+function filterMemoryDetail(q) {
+    memoryDetailState.query = q || '';
+    renderMemoryDetail();
+}
+
+function setMemoryLevel(level) {
+    memoryDetailState.level = level;
+    var buttons = document.querySelectorAll('#memoryLevelFilter .seg-item');
+    buttons.forEach(function(btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-mem-level') === level);
+    });
+    renderMemoryDetail();
+}
+
+function openMemoryModal(idx) {
+    var data = memoryDetailState.data;
+    if (!data || !data.items || !data.items[idx]) return;
+    var m = data.items[idx];
+    var title, metaRows, content;
+    if (memoryDetailState.level === 'l0') {
+        var roleLabel = (m.role || 'user') === 'user' ? '用户' : (m.role === 'assistant' ? 'Kimi' : m.role);
+        title = roleLabel + ' 的对话';
+        metaRows = [
+            ['角色', escapeHtml(m.role || '-')],
+            ['时间', escapeHtml(m.timestamp || '-')],
+            ['Session', escapeHtml(m.session || '-')],
+            ['相似度', (m.score || 0).toFixed(3)],
+        ];
+    } else {
+        var typeMap = { episodic: '情节记忆', instruction: '指令记忆', persona: '人格画像', semantic: '语义记忆' };
+        title = typeMap[m.type] || m.type || '记忆详情';
+        metaRows = [
+            ['类型', escapeHtml(m.type || '-')],
+            ['优先级', m.priority || 0],
+            ['场景', escapeHtml(m.scene || '-')],
+            ['相似度', (m.score || 0).toFixed(3)],
+        ];
+    }
+    var metaHtml = metaRows.map(function(r) {
+        return '<div class="mem-modal-meta-row"><span class="mem-modal-meta-label">' + r[0] + '</span><span class="mem-modal-meta-val">' + r[1] + '</span></div>';
+    }).join('');
+    var body = '<div class="mem-modal-meta">' + metaHtml + '</div>' +
+        '<div class="mem-modal-content">' + escapeHtml(m.content || '') + '</div>';
+    document.getElementById('memoryModalTitle').textContent = title;
+    document.getElementById('memoryModalBody').innerHTML = body;
+    document.getElementById('memoryModal').style.display = '';
+}
+
+function closeMemoryModal() {
+    var modal = document.getElementById('memoryModal');
+    if (modal) modal.style.display = 'none';
+}
+
 // === Kimi Usage + Quota ===
 async function loadKimi() {
     try {
@@ -768,8 +940,14 @@ async function checkKimiUpdate() {
     var box = document.getElementById('kimiVersionCheck');
     setUpdateSlot('<span class="vc-spinner" style="vertical-align:middle"></span><span style="font-size:0.72rem;color:var(--text-secondary);margin-left:0.3rem">检查中…</span>');
     if (box) box.innerHTML = '';
-    try { var r = await fetchJSON('/api/kimi-update'); renderVersionCheck(r); }
-    catch (e) {
+    kimiUpdateState = { checking: true, updateAvailable: false, error: null };
+    renderStatusBar();
+    try {
+        var r = await fetchJSON('/api/kimi-update');
+        renderVersionCheck(r);
+    } catch (e) {
+        kimiUpdateState = { checking: false, updateAvailable: false, error: e.message };
+        renderStatusBar();
         setUpdateSlot('<button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">检查更新</button>');
         if (box) box.innerHTML = '<div class="vc-row vc-error">版本检查失败: ' + e.message + '</div>';
     }
@@ -777,30 +955,37 @@ async function checkKimiUpdate() {
 
 function renderVersionCheck(r) {
     var box = document.getElementById('kimiVersionCheck');
-    if (!box) return;
     if (r && r.error) {
+        kimiUpdateState = { checking: false, updateAvailable: false, error: r.error };
+        renderStatusBar();
         setUpdateSlot('<button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">重试</button>');
-        box.innerHTML = '<div class="vc-row"><span class="vc-error">最新版查询失败: ' + (r.message || r.error) + '</span></div>';
+        if (box) box.innerHTML = '<div class="vc-row"><span class="vc-error">最新版查询失败: ' + (r.message || r.error) + '</span></div>';
         return;
     }
     if (r && r.updateAvailable) {
+        kimiUpdateState = { checking: false, updateAvailable: true, error: null };
+        renderStatusBar();
         var notes = (r.releaseNotes || '').replace(/"/g, '&quot;').replace(/\n/g, ' ');
         setUpdateSlot('<button class="vc-btn vc-btn-sm" onclick="runKimiUpdate()">\u2b07 更新 Kimi Code</button>');
         var html = '<div class="vc-row"><span class="vc-tag">当前 <strong>' + r.current + '</strong></span><span class="vc-tag vc-tag-warn">\u2192 最新 <strong>' + r.latest + '</strong></span>';
         if (notes) html += '<a class="vc-link" href="' + r.releaseUrl + '" target="_blank" rel="noopener" title="' + notes + '">更新内容</a>';
         else if (r.releaseUrl) html += '<a class="vc-link" href="' + r.releaseUrl + '" target="_blank" rel="noopener">Release</a>';
         html += '</div>';
-        box.innerHTML = html;
+        if (box) box.innerHTML = html;
         return;
     }
     if (r && r.current) {
+        kimiUpdateState = { checking: false, updateAvailable: false, error: null };
+        renderStatusBar();
         setUpdateSlot('<span class="vc-tag vc-tag-ok" style="font-size:0.72rem;padding:0.12rem 0.45rem;cursor:pointer" onclick="checkKimiUpdate()" title="点击重新检查">\u2713 已是最新</span>');
-        box.innerHTML = '';
+        if (box) box.innerHTML = '';
         return;
     }
     // 默认/初始状态：手动检查按钮放在 Console 右侧 slot 里
+    kimiUpdateState = { checking: false, updateAvailable: false, error: null };
+    renderStatusBar();
     setUpdateSlot('<button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">检查更新</button>');
-    box.innerHTML = '';
+    if (box) box.innerHTML = '';
 }
 
 async function runKimiUpdate() {
@@ -808,15 +993,23 @@ async function runKimiUpdate() {
     if (!box) return;
     box.innerHTML = '<div class="vc-row"><span class="vc-spinner"></span><span style="font-size:0.78rem;color:var(--text-secondary)">正在下载并更新…</span></div><pre class="vc-log" id="vcLog"></pre>';
     if (updatePollTimer) { clearTimeout(updatePollTimer); updatePollTimer = null; }
+    kimiUpdateState = { checking: true, updateAvailable: false, error: null };
+    renderStatusBar();
     try {
         // POST instead of GET (security fix)
         var r = await postJSON('/api/kimi-update/run');
         if (r.status === 'error') {
+            kimiUpdateState = { checking: false, updateAvailable: false, error: r.error };
+            renderStatusBar();
             box.innerHTML = '<div class="vc-row vc-error">启动更新失败: ' + r.error + '</div><button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">返回</button>';
             return;
         }
         pollUpdateStatus();
-    } catch (e) { box.innerHTML = '<div class="vc-row vc-error">启动更新失败: ' + e.message + '</div>'; }
+    } catch (e) {
+        kimiUpdateState = { checking: false, updateAvailable: false, error: e.message };
+        renderStatusBar();
+        box.innerHTML = '<div class="vc-row vc-error">启动更新失败: ' + e.message + '</div>';
+    }
 }
 
 function pollUpdateStatus() {
@@ -824,8 +1017,14 @@ function pollUpdateStatus() {
     fetchJSON('/api/kimi-update/status').then(function(s) {
         var log = document.getElementById('vcLog');
         if (log && s.log) { log.textContent = s.log.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ''); log.scrollTop = log.scrollHeight; }
-        if (s.running) { updatePollTimer = setTimeout(pollUpdateStatus, 1200); }
+        if (s.running) {
+            kimiUpdateState = { checking: true, updateAvailable: false, error: null };
+            renderStatusBar();
+            updatePollTimer = setTimeout(pollUpdateStatus, 1200);
+        }
         else {
+            kimiUpdateState = { checking: false, updateAvailable: false, error: null };
+            renderStatusBar();
             var box = document.getElementById('kimiVersionCheck');
             if (!box) return;
             if (s.status === 'success') {
@@ -1398,6 +1597,9 @@ function renderSettings() {
     var isLocal = settings.kw_bind === '127.0.0.1';
 
     function buildControl(item) {
+        if (item.type === 'link') {
+            return '<a href="' + escapeHtml(item.href || '#') + '" target="_blank" class="btn-task" style="text-decoration:none;padding:0.45rem 0.75rem;font-size:0.85rem;">🌐 查看教程</a>';
+        }
         if (item.type === 'select') {
             var cur = settings[item.key];
             var opts = item.options.map(function(o) {
@@ -1417,6 +1619,9 @@ function renderSettings() {
         if (item.type === 'text') {
             var val = settings[item.key] || '';
             return '<input type="text" class="search-box" value="' + escapeHtml(val) + '" oninput="setSetting(\'' + item.key + '\', this.value)" onblur="setSetting(\'' + item.key + '\', normalizePublicUrl(this.value))" placeholder="https://your-domain.com:port">';
+        }
+        if (item.type === 'public_urls') {
+            return buildPublicUrlInput();
         }
         if (item.type === 'number') {
             var val = settings[item.key] || 0;
@@ -1444,14 +1649,58 @@ function renderSettings() {
         '</label>';
     }
 
+    function buildPublicUrlInput() {
+        return '<div style="display:flex;align-items:center;justify-content:flex-end;gap:0.4rem;width:100%;">' +
+            '<input type="text" class="public-url-input search-box" style="flex:1;min-width:0;max-width:360px;" placeholder="https://your-domain.com:port" onkeydown="if(event.key===&quot;Enter&quot;){event.preventDefault();addPublicUrlFromEvent(this);}">' +
+            '<button type="button" class="btn-task" style="padding:0.4rem 0.75rem;font-size:0.8rem;" onclick="addPublicUrlFromEvent(this.previousElementSibling)">+</button>' +
+        '</div>';
+    }
+
+    function buildPublicUrlTags() {
+        var urls = Array.isArray(settings.kw_public_urls) ? settings.kw_public_urls : [];
+        if (urls.length === 0) return '';
+        var btnStyle = 'padding:0.15rem 0.35rem;background:transparent;border:none;border-radius:4px;color:var(--text-tertiary);cursor:pointer;font-size:0.75rem;line-height:1;';
+        var tags = urls.map(function(url, idx) {
+            var topBtn = idx === 0 ? '' :
+                '<button type="button" title="置顶" style="' + btnStyle + '" onclick="movePublicUrlToTop(' + idx + ')">置顶</button>';
+            return '<div class="public-url-tag" style="display:flex;align-items:center;gap:0.35rem;padding:0.3rem 0.6rem;background:var(--surface);border:1px solid var(--border);border-radius:999px;font-size:0.78rem;color:var(--text-secondary);">' +
+                '<span style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(url) + '</span>' +
+                topBtn +
+                '<button type="button" title="删除" style="' + btnStyle + '" onclick="removePublicUrl(' + idx + ')">×</button>' +
+            '</div>';
+        }).join('');
+        return '<div class="public-url-tags" style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-top:0.5rem;">' + tags + '</div>';
+    }
+
     function renderItem(item) {
         // 本机模式下隐藏外网专属设置
-        if (isLocal && item.key === 'kw_public_url') return '';
+        if (isLocal && item.key === 'kw_public_urls') return '';
 
         var infoHtml = '<div class="settings-info">' +
             '<div class="config-item-title">' + escapeHtml(item.label) + '</div>' +
             '<div class="config-item-meta">' + escapeHtml(item.desc) + '</div>' +
         '</div>';
+
+        // 自定义访问 URL：标签在左，输入框在右，已添加 URL 在描述下方跨行显示
+        if (item.type === 'public_urls') {
+            return '<div class="settings-item public-urls-item" style="flex-direction:column;align-items:stretch;">' +
+                '<div style="display:flex;align-items:center;justify-content:space-between;gap:1.5rem;width:100%;">' +
+                    infoHtml +
+                    '<div class="settings-control">' + buildPublicUrlInput() + '</div>' +
+                '</div>' +
+                buildPublicUrlTags() +
+            '</div>';
+        }
+
+        // 图床配置：整行表单
+        if (item.type === 'image_bed') {
+            return '<div class="settings-item image-bed-item" style="flex-direction:column;align-items:stretch;">' +
+                infoHtml +
+                '<div class="image-bed-form" id="imageBedForm" style="margin-top:0.5rem;">' +
+                    '<div class="skeleton sk-line" style="width:60%"></div>' +
+                '</div>' +
+            '</div>';
+        }
 
         // 水平布局：标签在左，控件在右
         if (item.row) {
@@ -1491,6 +1740,167 @@ function renderSettings() {
         '<button class="btn-task" onclick="resetSettings()">恢复默认</button>' +
     '</div>';
     document.getElementById('settingsList').innerHTML = html;
+    // 异步加载图床配置表单
+    loadImageBedConfig();
+}
+
+// === 自定义访问 URL 管理（必须为全局函数，供 HTML onclick 调用）===
+function addPublicUrlFromEvent(input) {
+    console.log('[addPublicUrl] input=', input, 'value=', input ? input.value : null);
+    var url = normalizePublicUrl(input && input.value ? input.value : '');
+    if (!url) {
+        console.log('[addPublicUrl] empty url, abort');
+        return;
+    }
+    var urls = Array.isArray(settings.kw_public_urls) ? settings.kw_public_urls.slice() : [];
+    if (urls.indexOf(url) >= 0) {
+        showToast('该 URL 已存在', 3000);
+        return;
+    }
+    urls.push(url);
+    settings.kw_public_urls = urls;
+    saveSettings(settings);
+    renderSettings();
+    console.log('[addPublicUrl] added', url);
+}
+
+function removePublicUrl(idx) {
+    var urls = Array.isArray(settings.kw_public_urls) ? settings.kw_public_urls.slice() : [];
+    urls.splice(idx, 1);
+    settings.kw_public_urls = urls;
+    saveSettings(settings);
+    renderSettings();
+}
+
+function movePublicUrlToTop(idx) {
+    var urls = Array.isArray(settings.kw_public_urls) ? settings.kw_public_urls.slice() : [];
+    if (idx <= 0 || idx >= urls.length) return;
+    var url = urls.splice(idx, 1)[0];
+    urls.unshift(url);
+    settings.kw_public_urls = urls;
+    saveSettings(settings);
+    renderSettings();
+}
+
+// === 图床配置（R2）===
+var imageBedConfig = null;
+
+async function loadImageBedConfig() {
+    var container = document.getElementById('imageBedForm');
+    if (!container) return;
+    try {
+        var data = await fetchJSON('/api/image-bed/config');
+        imageBedConfig = data;
+        renderImageBedForm(data);
+    } catch (e) {
+        container.innerHTML = '<div class="error">加载失败: ' + escapeHtml(e.message) + '</div>';
+    }
+}
+
+function renderImageBedForm(cfg) {
+    var container = document.getElementById('imageBedForm');
+    if (!container) return;
+    var statusBadge = cfg.enabled
+        ? '<span class="src-tag src-ai" style="margin-left:0.5rem;">已启用</span>'
+        : '<span class="src-tag src-user" style="margin-left:0.5rem;">未配置</span>';
+    var inputStyle = 'width:100%;padding:0.35rem 0.6rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:0.82rem;';
+    var labelStyle = 'display:block;font-size:0.75rem;color:var(--text-tertiary);margin-bottom:0.2rem;margin-top:0.5rem;';
+    var field = function(id, label, val, placeholder, type) {
+        return '<div>' +
+            '<label style="' + labelStyle + '">' + label + '</label>' +
+            '<input type="' + (type || 'text') + '" id="' + id + '" style="' + inputStyle + '" value="' + escapeHtml(val || '') + '" placeholder="' + escapeHtml(placeholder || '') + '">' +
+        '</div>';
+    };
+    // Provider 选择 + 对应 endpoint 占位符
+    var providers = [
+        { v: 'r2',   t: 'Cloudflare R2',  endpoint: 'https://<account_id>.r2.cloudflarestorage.com' },
+        { v: 's3',   t: 'AWS S3',          endpoint: 'https://s3.<region>.amazonaws.com' },
+        { v: 'minio',t: 'MinIO',           endpoint: 'http://localhost:9000' },
+        { v: 'oss',  t: '阿里云 OSS',      endpoint: 'https://<region>.aliyuncs.com' },
+        { v: 'cos',  t: '腾讯云 COS',      endpoint: 'https://cos.<region>.myqcloud.com' },
+        { v: 'other',t: '其他（S3 兼容）',  endpoint: '' },
+    ];
+    var currentProvider = cfg.provider || 'r2';
+    var providerOpts = providers.map(function(p) {
+        var sel = p.v === currentProvider ? ' selected' : '';
+        return '<option value="' + p.v + '"' + sel + '>' + escapeHtml(p.t) + '</option>';
+    }).join('');
+    var currentEndpointPlaceholder = (providers.find(function(p){return p.v===currentProvider;})||{}).endpoint || '';
+    var providerField = '<div>' +
+        '<label style="' + labelStyle + '">服务提供商</label>' +
+        '<select id="ib_provider" style="' + inputStyle + '" onchange="onImageBedProviderChange()">' + providerOpts + '</select>' +
+    '</div>';
+    container.innerHTML =
+        '<div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.3rem;">当前状态: ' + (cfg.enabled ? '已启用' : '未配置') + statusBadge + '</div>' +
+        providerField +
+        field('ib_endpoint', 'Endpoint URL', cfg.endpoint_url, currentEndpointPlaceholder) +
+        field('ib_access_key', 'Access Key', cfg.access_key_masked, cfg.has_access_key ? '已配置（留空保留原值）' : '输入 Access Key') +
+        field('ib_secret_key', 'Secret Key', cfg.secret_key_masked, cfg.has_secret_key ? '已配置（留空保留原值）' : '输入 Secret Key', 'password') +
+        field('ib_bucket', 'Bucket', cfg.bucket, 'your-bucket-name') +
+        field('ib_public_url', '公开访问域名', cfg.public_base_url, 'https://cdn.example.com') +
+        field('ib_path_template', '路径模板', cfg.path_template, '{file_id}') +
+        '<div style="display:flex;gap:0.5rem;margin-top:0.8rem;">' +
+            '<button class="btn-task" onclick="saveImageBedConfig()">保存配置</button>' +
+            '<button class="btn-task" onclick="testImageBedConnection()">测试连接</button>' +
+        '</div>' +
+        '<div id="imageBedResult" style="margin-top:0.5rem;font-size:0.78rem;"></div>';
+}
+
+function onImageBedProviderChange() {
+    var sel = document.getElementById('ib_provider');
+    var endpointInput = document.getElementById('ib_endpoint');
+    if (!sel || !endpointInput) return;
+    var providers = {
+        r2:    'https://<account_id>.r2.cloudflarestorage.com',
+        s3:    'https://s3.<region>.amazonaws.com',
+        minio: 'http://localhost:9000',
+        oss:   'https://<region>.aliyuncs.com',
+        cos:   'https://cos.<region>.myqcloud.com',
+        other: ''
+    };
+    var placeholder = providers[sel.value] || '';
+    endpointInput.placeholder = placeholder;
+}
+
+async function saveImageBedConfig() {
+    var resultEl = document.getElementById('imageBedResult');
+    if (resultEl) resultEl.innerHTML = '<span style="color:var(--text-tertiary);">保存中...</span>';
+    try {
+        var body = {
+            provider: document.getElementById('ib_provider').value,
+            endpoint_url: document.getElementById('ib_endpoint').value,
+            access_key: document.getElementById('ib_access_key').value,
+            secret_key: document.getElementById('ib_secret_key').value,
+            bucket: document.getElementById('ib_bucket').value,
+            public_base_url: document.getElementById('ib_public_url').value,
+            path_template: document.getElementById('ib_path_template').value,
+        };
+        var data = await postJSON('/api/image-bed/config', body);
+        if (data.success) {
+            showToast('图床配置已保存', 3000);
+            if (resultEl) resultEl.innerHTML = '<span style="color:var(--accent);">保存成功</span>';
+            await loadImageBedConfig();
+        } else {
+            if (resultEl) resultEl.innerHTML = '<span class="error">保存失败: ' + escapeHtml(data.error || '') + '</span>';
+        }
+    } catch (e) {
+        if (resultEl) resultEl.innerHTML = '<span class="error">保存失败: ' + escapeHtml(e.message) + '</span>';
+    }
+}
+
+async function testImageBedConnection() {
+    var resultEl = document.getElementById('imageBedResult');
+    if (resultEl) resultEl.innerHTML = '<span style="color:var(--text-tertiary);">测试中...</span>';
+    try {
+        var data = await postJSON('/api/image-bed/test');
+        if (data.ok) {
+            if (resultEl) resultEl.innerHTML = '<span style="color:var(--accent);">✓ ' + escapeHtml(data.msg) + '</span>';
+        } else {
+            if (resultEl) resultEl.innerHTML = '<span class="error">✗ ' + escapeHtml(data.msg) + '</span>';
+        }
+    } catch (e) {
+        if (resultEl) resultEl.innerHTML = '<span class="error">测试失败: ' + escapeHtml(e.message) + '</span>';
+    }
 }
 
 // === Scheduled Tasks ===
@@ -2074,7 +2484,7 @@ async function toggleStartupService(service, enable) {
             payload.bind = settings.kw_bind;
             payload.bypass_auth = settings.kw_bypass_auth;
             payload.allowed_hosts = settings.kw_allowed_hosts;
-            payload.public_url = settings.kw_public_url;
+            payload.public_urls = (settings.kw_public_urls || []).map(normalizePublicUrl).filter(Boolean);
         }
         var data = await postJSON('/api/startup-toggle', payload);
         if (data.success) {
@@ -2088,6 +2498,183 @@ async function toggleStartupService(service, enable) {
     } catch (e) {
         showToast('设置失败: ' + e.message, 5000);
         renderSettings();
+    }
+}
+
+// === Artifacts Browser ===
+async function loadArtifacts() {
+    try {
+        var data = await fetchJSON('/api/artifacts/all?limit=500');
+        artifactsData = data;
+        var total = (data.items || []).length;
+        document.getElementById('artifactsMiniMetric').textContent = total;
+        document.getElementById('artifactsMiniLabel').textContent = '本地 + AI';
+        var aiCount = (data.items || []).filter(function(x) { return x.source === 'ai'; }).length;
+        var userCount = total - aiCount;
+        var pills = [];
+        if (aiCount) pills.push('<span class="task-mini-pill"><span class="dot"></span>AI ' + aiCount + '</span>');
+        if (userCount) pills.push('<span class="task-mini-pill"><span class="dot"></span>用户 ' + userCount + '</span>');
+        document.getElementById('artifactsMiniStatus').innerHTML = pills.join('') || '<span class="task-mini-pill">暂无产物</span>';
+        if (location.hash === '#/artifacts') renderArtifactsDetail();
+    } catch (e) {
+        document.getElementById('artifactsMiniMetric').textContent = '!';
+        document.getElementById('artifactsMiniLabel').textContent = '加载失败';
+        document.getElementById('artifactsMiniStatus').innerHTML = '<span class="task-mini-pill">加载失败</span>';
+        artifactsData = null;
+        if (location.hash === '#/artifacts') {
+            var grid = document.getElementById('artifactsGrid');
+            var stats = document.getElementById('artifactsDetailStats');
+            if (grid) grid.innerHTML = '<div class="error">加载失败: ' + escapeHtml(e.message) + '</div>';
+            if (stats) stats.innerHTML = '';
+        }
+    }
+}
+
+function getArtifactContentUrl(id) {
+    var isSha = /^[a-f0-9]{64}$/i.test(id);
+    return isSha ? '/api/artifacts/blobs/' + encodeURIComponent(id) + '/content' : '/api/artifacts/' + encodeURIComponent(id) + '/content';
+}
+
+function getArtifactUploadUrl(id) {
+    var isSha = /^[a-f0-9]{64}$/i.test(id);
+    return isSha ? '/api/artifacts/blobs/' + encodeURIComponent(id) + '/upload' : '/api/artifacts/' + encodeURIComponent(id) + '/upload';
+}
+
+function renderArtifactsDetail() {
+    var data = artifactsData;
+    var grid = document.getElementById('artifactsGrid');
+    var stats = document.getElementById('artifactsDetailStats');
+    if (!data || !data.items) { grid.innerHTML = '<div class="empty">数据加载中...</div>'; return; }
+
+    var items = data.items.filter(function(x) {
+        if (currentArtifactSource !== 'all' && x.source !== currentArtifactSource) return false;
+        var q = currentArtifactQuery.trim().toLowerCase();
+        if (!q) return true;
+        return (x.name || '').toLowerCase().indexOf(q) >= 0 || (x.id || '').toLowerCase().indexOf(q) >= 0 || (x.media_type || '').toLowerCase().indexOf(q) >= 0;
+    });
+
+    if (stats) {
+        var total = data.items.length;
+        var shown = items.length;
+        stats.innerHTML = '<span>共 <strong>' + total + '</strong> 个</span>' + (shown !== total ? '<span>筛选后 <strong>' + shown + '</strong> 个</span>' : '');
+    }
+
+    if (!items.length) { grid.innerHTML = '<div class="empty">没有匹配的产物</div>'; return; }
+    grid.innerHTML = items.map(renderArtifactCard).join('');
+}
+
+function renderArtifactCard(x) {
+    var contentUrl = getArtifactContentUrl(x.id);
+    var isImage = (x.media_type || '').indexOf('image/') === 0;
+    var srcTag = x.source === 'ai' ? '<span class="src-tag src-ai">AI</span>' : '<span class="src-tag src-user">用户</span>';
+    var cloudBadge = x.uploaded_url ?
+        '<span class="artifact-cloud-badge" title="已上传到图床"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>' : '';
+    var thumb;
+    if (isImage) {
+        thumb = '<div class="artifact-thumb"><img src="' + escapeHtml(contentUrl) + '" alt="" loading="lazy">' + cloudBadge + '</div>';
+    } else {
+        var ext = (x.name || '').split('.').pop().toUpperCase() || 'FILE';
+        thumb = '<div class="artifact-thumb"><div class="artifact-thumb-fallback"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg><span>' + escapeHtml(ext) + '</span></div>' + cloudBadge + '</div>';
+    }
+    return '<div class="artifact-card" onclick="openArtifactModal(\'' + escapeHtml(x.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">' +
+        thumb +
+        '<div class="artifact-meta"><div class="artifact-name" title="' + escapeHtml(x.name || x.id) + '">' + escapeHtml(x.name || x.id) + ' ' + srcTag + '</div><div class="artifact-sub">' + escapeHtml(formatSize(x.size)) + ' &middot; ' + escapeHtml(formatDate(x.created_at)) + '</div></div>' +
+        '</div>';
+}
+
+function filterArtifacts(q) {
+    currentArtifactQuery = q || '';
+    renderArtifactsDetail();
+}
+
+function setArtifactSource(source) {
+    currentArtifactSource = source || 'all';
+    var buttons = document.querySelectorAll('#artifactFilter .seg-item');
+    buttons.forEach(function(btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-art-source') === source);
+    });
+    renderArtifactsDetail();
+}
+
+function openArtifactModal(id) {
+    var data = artifactsData;
+    if (!data || !data.items) return;
+    var x = data.items.find(function(item) { return item.id === id; });
+    if (!x) return;
+    var modal = document.getElementById('artifactModal');
+    var title = document.getElementById('artifactModalTitle');
+    var body = document.getElementById('artifactModalBody');
+    var contentUrl = getArtifactContentUrl(x.id);
+    var isImage = (x.media_type || '').indexOf('image/') === 0;
+    var sourceLabel = x.source === 'ai' ? 'AI 生成' : '用户上传';
+    var sourceClass = x.source === 'ai' ? 'pill-ai' : 'pill-user';
+
+    title.textContent = x.name || x.id;
+
+    var preview = '';
+    if (isImage) {
+        preview = '<div style="text-align:center;margin-bottom:1rem;"><a href="' + escapeHtml(contentUrl) + '" target="_blank"><img src="' + escapeHtml(contentUrl) + '" style="max-width:100%;max-height:60vh;border-radius:var(--radius-sm);border:1px solid var(--border);"></a></div>';
+    } else {
+        preview = '<div style="text-align:center;margin-bottom:1rem;padding:2rem;background:var(--bg);border-radius:var(--radius-sm);border:1px solid var(--border);"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg><div style="margin-top:0.5rem;"><a class="btn-task" href="' + escapeHtml(contentUrl) + '" target="_blank" download>下载文件</a></div></div>';
+    }
+
+    var uploadSection;
+    if (x.uploaded_url) {
+        uploadSection = '<div class="artifact-info-row"><span class="info-label">图床 URL</span><input class="info-input" id="artifactUploadedUrl" readonly value="' + escapeHtml(x.uploaded_url) + '"><button class="btn-task" onclick="copyArtifactUrl()">复制</button></div>';
+    } else {
+        uploadSection = '<div class="artifact-info-row"><span class="info-label">图床</span><span style="color:var(--text-secondary);font-size:0.78rem;">尚未上传</span><button class="btn-task" id="artifactUploadBtn" onclick="uploadArtifact(\'' + escapeHtml(x.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">上传到图床</button></div>';
+    }
+
+    body.innerHTML = preview +
+        '<div class="artifact-info-row"><span class="info-label">ID</span><code>' + escapeHtml(x.id) + '</code></div>' +
+        '<div class="artifact-info-row"><span class="info-label">来源</span><span class="pill ' + sourceClass + '">' + sourceLabel + '</span></div>' +
+        '<div class="artifact-info-row"><span class="info-label">类型</span><code>' + escapeHtml(x.media_type || '未知') + '</code></div>' +
+        '<div class="artifact-info-row"><span class="info-label">大小</span><span style="font-size:0.85rem;">' + escapeHtml(formatSize(x.size)) + '</span></div>' +
+        '<div class="artifact-info-row"><span class="info-label">创建时间</span><span style="font-size:0.85rem;">' + escapeHtml(formatDate(x.created_at)) + '</span></div>' +
+        uploadSection +
+        '<div class="artifact-info-row"><span class="info-label">本地链接</span><a class="btn-task" href="' + escapeHtml(contentUrl) + '" target="_blank">' + (isImage ? '查看原图' : '下载文件') + '</a></div>';
+
+    modal.style.display = '';
+}
+
+function closeArtifactModal() {
+    var modal = document.getElementById('artifactModal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function uploadArtifact(id) {
+    var btn = document.getElementById('artifactUploadBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '上传中...'; }
+    try {
+        var data = await postJSON(getArtifactUploadUrl(id));
+        if (data.success) {
+            showToast('上传成功', 3000);
+            // 更新本地缓存数据并刷新弹窗
+            if (artifactsData && artifactsData.items) {
+                var x = artifactsData.items.find(function(item) { return item.id === id; });
+                if (x) { x.uploaded_url = data.url; x.uploaded_at = new Date().toISOString(); }
+            }
+            openArtifactModal(id);
+            renderArtifactsDetail();
+        } else {
+            showToast('上传失败: ' + (data.error || '未知错误'), 5000);
+            if (btn) { btn.disabled = false; btn.textContent = '上传到图床'; }
+        }
+    } catch (e) {
+        showToast('上传失败: ' + e.message, 5000);
+        if (btn) { btn.disabled = false; btn.textContent = '上传到图床'; }
+    }
+}
+
+function copyArtifactUrl() {
+    var input = document.getElementById('artifactUploadedUrl');
+    if (!input) return;
+    input.select();
+    try {
+        document.execCommand('copy');
+        showToast('已复制到剪贴板', 2000);
+    } catch (e) {
+        showToast('复制失败，请手动复制', 3000);
     }
 }
 
@@ -2119,7 +2706,7 @@ async function loadAll() {
     var icon = document.getElementById('refreshIcon');
     btn.disabled = true;
     icon.classList.add('spin');
-    await Promise.all([loadTrends(), loadSkills(), loadMCP(), loadMemory(), loadKimi(), loadToolUsage(), loadModelUsage(), loadTasks(), loadModelConfig()]);
+    await Promise.all([loadTrends(), loadSkills(), loadMCP(), loadMemory(), loadKimi(), loadToolUsage(), loadModelUsage(), loadTasks(), loadModelConfig(), loadArtifacts()]);
     renderStatusBar();
     applySettings();
     document.getElementById('lastUpdated').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN');

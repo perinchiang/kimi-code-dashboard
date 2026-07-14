@@ -31,6 +31,10 @@ KIMI_BIN = KIMI_CODE_DIR / "bin" / ("kimi.exe" if os.name == "nt" else "kimi")
 KIMI_GITHUB_LATEST = "https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest"
 KIMI_RELEASES_PAGE = "https://github.com/MoonshotAI/kimi-code/releases"
 
+# --- Dashboard binary / updates ---
+DASHBOARD_GITHUB_LATEST = "https://api.github.com/repos/perinchiang/kimi-code-dashboard/releases/latest"
+DASHBOARD_RELEASES_PAGE = "https://github.com/perinchiang/kimi-code-dashboard/releases"
+
 # --- Kimi Web ---
 # Pat prefers: bind 0.0.0.0, no auth, allowed reverse-proxy host, keep-alive.
 KIMI_WEB_PORT = int(os.getenv("KIMI_WEB_PORT", "5494"))
