@@ -55,6 +55,9 @@ class ParseResult:
     tool_counts_by_window: dict = field(default_factory=lambda: {"24h": Counter(), "7d": Counter(), "30d": Counter()})
     skill_counts_by_window: dict = field(default_factory=lambda: {"24h": Counter(), "7d": Counter(), "30d": Counter()})
     model_tokens_by_window: dict = field(default_factory=lambda: {"24h": {}, "7d": {}, "30d": {}})
+    # Time-series buckets for model usage charts
+    model_tokens_by_day: dict[str, dict[str, dict[str, int]]] = field(default_factory=dict)   # day -> model -> stats
+    model_tokens_by_week: dict[str, dict[str, dict[str, int]]] = field(default_factory=dict)  # week -> model -> stats
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +200,20 @@ def _parse_file(path: Path, offset: int, result: ParseResult) -> int:
                         wmt["output"] += rec.output
                         wmt["total"] += rec.total
                         wmt["calls"] += 1
+
+                    # Day / week buckets for model trend charts
+                    day_key = dt.strftime("%Y-%m-%d")
+                    week_key = f"{dt.isocalendar().year}-W{dt.isocalendar().week:02d}"
+                    for key, bucket in ((day_key, result.model_tokens_by_day), (week_key, result.model_tokens_by_week)):
+                        if key not in bucket:
+                            bucket[key] = {}
+                        if model not in bucket[key]:
+                            bucket[key][model] = {"input": 0, "output": 0, "total": 0, "calls": 0}
+                        bmt = bucket[key][model]
+                        bmt["input"] += rec.input_total
+                        bmt["output"] += rec.output
+                        bmt["total"] += rec.total
+                        bmt["calls"] += 1
 
                 # --- tool.call (nested inside context.append_loop_event) ---
                 elif event_type == "context.append_loop_event":
@@ -508,6 +525,30 @@ def get_tool_usage() -> dict:
     return _tool_usage_cache["data"]
 
 
+def _build_model_trend_series(bucket_dict: dict, count: int, unit: str) -> list[dict]:
+    """Build a time-series list of the last *count* *unit* buckets.
+
+    unit is 'day' or 'week'. Empty buckets are filled with zero totals.
+    Each item contains: key, label, total, models{model: total}.
+    """
+    now = datetime.now().astimezone()
+    items = []
+    for i in range(count - 1, -1, -1):
+        if unit == "day":
+            d = now - timedelta(days=i)
+            key = d.strftime("%Y-%m-%d")
+            label = d.strftime("%m-%d")
+        else:
+            cal = (now - timedelta(weeks=i)).isocalendar()
+            key = f"{cal.year}-W{cal.week:02d}"
+            label = f"W{cal.week:02d}"
+        bucket = bucket_dict.get(key, {})
+        models = {model: stats["total"] for model, stats in bucket.items()}
+        total = sum(models.values())
+        items.append({"key": key, "label": label, "total": total, "models": models})
+    return items
+
+
 def _update_model_usage_cache(result: ParseResult):
     """Update the model-usage cache from a ParseResult."""
     def _build(model_tokens_dict):
@@ -535,6 +576,10 @@ def _update_model_usage_cache(result: ParseResult):
             "7d":  _build(result.model_tokens_by_window["7d"]),
             "30d": _build(result.model_tokens_by_window["30d"]),
             "all": all_data,
+        },
+        "trends": {
+            "daily": _build_model_trend_series(result.model_tokens_by_day, 30, "day"),
+            "weekly": _build_model_trend_series(result.model_tokens_by_week, 12, "week"),
         },
     }
     _model_usage_cache["at"] = time.time()

@@ -219,30 +219,31 @@ function attachHeatmapHover(data) {
 }
 
 // === Memory Donut ===
-function renderDonut(values, total) {
+function renderDonut(values, total, colorMap) {
     if (total === 0) return '<div class="trend-empty">暂无数据</div>';
     var size = 180, cx = 90, cy = 90, r = 72;
     var circumference = 2 * Math.PI * r;
     var strokeWidth = 20;
-    var colors = ['var(--accent)', 'var(--purple)', 'var(--success)', 'var(--warning)'];
+    var defaultColors = ['var(--accent)', 'var(--purple)', 'var(--success)', 'var(--warning)'];
     var cumulative = 0;
     var segments = values.map(function(v, i) {
         var fraction = v.value / total;
         var length = fraction * circumference;
         var offset = -cumulative * circumference;
         cumulative += fraction;
-        return { label: v.label, value: v.value, color: colors[i], length: length, offset: offset, fraction: fraction };
+        var color = colorMap && colorMap[v.rawModel || v.label] ? colorMap[v.rawModel || v.label] : defaultColors[i % defaultColors.length];
+        return { label: v.label, value: v.value, rawModel: v.rawModel || v.label, color: color, length: length, offset: offset, fraction: fraction };
     });
     var circles = segments.map(function(s) {
         if (s.length <= 0) return '';
         var pct = (s.fraction * 100).toFixed(1);
-        return '<circle class="donut-segment" data-label="' + s.label + '" data-value="' + s.value + '" data-pct="' + pct + '" cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + s.color + '" stroke-width="' + strokeWidth + '" stroke-dasharray="' + s.length + ' ' + (circumference - s.length) + '" stroke-dashoffset="' + s.offset + '" transform="rotate(-90 ' + cx + ' ' + cy + ')" style="transition: stroke-dasharray 0.6s ease; cursor: pointer"/>';
+        return '<circle class="donut-segment" data-label="' + escapeHtml(s.label) + '" data-value="' + s.value + '" data-pct="' + pct + '" cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + s.color + '" stroke-width="' + strokeWidth + '" stroke-dasharray="' + s.length + ' ' + (circumference - s.length) + '" stroke-dashoffset="' + s.offset + '" transform="rotate(-90 ' + cx + ' ' + cy + ')" style="transition: stroke-dasharray 0.6s ease; cursor: pointer"/>';
     }).join('');
     var legend = segments.map(function(s) {
         var pct = (s.fraction * 100).toFixed(1);
-        return '<div class="legend-item"><span class="legend-swatch" style="background:' + s.color + '"></span><div class="legend-text"><div class="legend-name">' + s.label + '</div><div class="legend-meta">' + s.value + ' · ' + pct + '%</div></div></div>';
+        return '<div class="legend-item"><span class="legend-swatch" style="background:' + s.color + '"></span><div class="legend-text"><div class="legend-name">' + escapeHtml(s.label) + '</div><div class="legend-meta">' + formatTokens(s.value) + ' · ' + pct + '%</div></div></div>';
     }).join('');
-    return '<div class="donut-wrap"><div class="donut-container"><svg viewBox="0 0 ' + size + ' ' + size + '" style="width:' + size + 'px;height:' + size + 'px">' + circles + '</svg><div class="donut-center"><div class="donut-total">' + total + '</div><div class="donut-label">总条目</div></div></div><div class="memory-legend">' + legend + '</div></div>';
+    return '<div class="donut-wrap"><div class="donut-container"><svg viewBox="0 0 ' + size + ' ' + size + '" style="width:' + size + 'px;height:' + size + 'px">' + circles + '</svg><div class="donut-center"><div class="donut-total">' + formatTokens(total) + '</div><div class="donut-label">总 Token</div></div></div><div class="memory-legend">' + legend + '</div></div>';
 }
 
 // === Model usage bars ===
@@ -264,9 +265,10 @@ function renderModelBars(models) {
 
 
 // === Donut hover tooltip ===
-function attachDonutHover(containerId, tooltipId) {
+function attachDonutHover(containerId, tooltipId, valueFormatter) {
     containerId = containerId || 'memoryChart';
     tooltipId = tooltipId || 'memoryTooltip';
+    valueFormatter = valueFormatter || function(v) { return v + ' 条'; };
     var svg = document.querySelector('#' + containerId + ' .donut-container svg');
     var tooltip = document.getElementById(tooltipId);
     if (!svg || !tooltip) return;
@@ -282,7 +284,7 @@ function attachDonutHover(containerId, tooltipId) {
             var color = seg.getAttribute('stroke');
             tooltip.innerHTML =
                 '<div class="tt-label">' + label + '</div>' +
-                '<div class="tt-row"><span class="tt-swatch" style="background:' + color + '"></span>' + value + ' 条</div>' +
+                '<div class="tt-row"><span class="tt-swatch" style="background:' + color + '"></span>' + valueFormatter(value) + '</div>' +
                 '<div class="tt-row">占比 ' + pct + '%</div>';
             tooltip.classList.add('show');
         });
@@ -300,4 +302,149 @@ function attachDonutHover(containerId, tooltipId) {
             tooltip.classList.remove('show');
         });
     });
+}
+
+
+// === Stacked Bar Chart (model usage over time) ===
+function renderStackedBarChart(data, modelColors) {
+    if (!data || data.length === 0) return '<div class="trend-empty">暂无数据</div>';
+    // Filter out empty buckets for cleaner charts, but keep at least one
+    var nonEmpty = data.filter(function(d) { return d.total > 0; });
+    if (nonEmpty.length === 0) return '<div class="trend-empty">暂无数据</div>';
+    data = nonEmpty;
+
+    var width = 620, height = 240;
+    var pad = { top: 18, right: 56, bottom: 40, left: 15 };
+    var chartW = width - pad.left - pad.right;
+    var chartH = height - pad.top - pad.bottom;
+    var max = Math.max.apply(null, data.map(function(d) { return d.total; }).concat([1]));
+
+    // Collect all models across data in descending total usage for stacking order
+    var modelTotals = {};
+    data.forEach(function(d) {
+        for (var m in d.models) {
+            modelTotals[m] = (modelTotals[m] || 0) + d.models[m];
+        }
+    });
+    var models = Object.keys(modelTotals).sort(function(a, b) { return modelTotals[b] - modelTotals[a]; });
+    if (models.length === 0) return '<div class="trend-empty">暂无数据</div>';
+
+    var barWidth = Math.min(28, chartW / data.length * 0.6);
+    var xFor = function(i) { return pad.left + (data.length === 1 ? chartW / 2 : (i / (data.length - 1)) * chartW); };
+    var yFor = function(val) { return pad.top + chartH - (val / max) * chartH; };
+
+    var gridLines = [0, 0.25, 0.5, 0.75, 1].map(function(r) {
+        var y = pad.top + chartH - r * chartH;
+        return '<line x1="' + pad.left + '" y1="' + y + '" x2="' + (width - pad.right) + '" y2="' + y + '" stroke="var(--border)" stroke-width="1" stroke-dasharray="4,4" opacity="0.3"/>';
+    }).join('');
+
+    var bars = data.map(function(d, i) {
+        var cx = xFor(i);
+        var x = cx - barWidth / 2;
+        var yBottom = pad.top + chartH;
+        var segs = [];
+        var stackBottom = 0;
+        models.forEach(function(m) {
+            var val = d.models[m] || 0;
+            if (val <= 0) return;
+            var yTop = yFor(stackBottom + val);
+            var yBot = yFor(stackBottom);
+            var h = yBot - yTop;
+            var color = modelColors[m] || 'var(--accent)';
+            segs.push('<rect class="stacked-bar-seg" data-model="' + escapeHtml(m) + '" data-value="' + val + '" x="' + x + '" y="' + yTop + '" width="' + barWidth + '" height="' + h + '" fill="' + color + '" rx="2"/>');
+            stackBottom += val;
+        });
+        return '<g data-key="' + d.key + '" data-total="' + d.total + '">' + segs.join('') + '</g>';
+    }).join('');
+
+    var labelStep = Math.max(1, Math.ceil(data.length / 6));
+    var labels = data.map(function(d, i) {
+        if (i % labelStep !== 0 && i !== data.length - 1) return '';
+        var cx = xFor(i);
+        return '<text x="' + cx + '" y="' + (height - 14) + '" text-anchor="middle" font-size="10" fill="var(--text-secondary)" font-family="var(--mono)">' + d.label + '</text>';
+    }).join('');
+
+    var yLabels = [0, 0.25, 0.5, 0.75, 1].map(function(r) {
+        var y = yFor(max * r);
+        var val = Math.round(max * r);
+        return '<text x="' + (width - pad.right + 5) + '" y="' + (y + 3) + '" font-size="9" fill="var(--text-secondary)" font-family="var(--mono)">' + formatTokens(val) + '</text>';
+    }).join('');
+
+    var overlay = '<rect id="stackedBarOverlay" x="' + pad.left + '" y="' + pad.top + '" width="' + chartW + '" height="' + chartH + '" fill="transparent" style="cursor:crosshair"/>';
+    var crosshair = '<line id="stackedCrosshair" x1="0" y1="' + pad.top + '" x2="0" y2="' + (pad.top + chartH) + '" stroke="var(--text-secondary)" stroke-width="1" stroke-dasharray="3,3" opacity="0" pointer-events="none"/>';
+
+    return '<svg id="stackedBarSvg" viewBox="0 0 ' + width + ' ' + height + '" style="width:100%;height:260px" preserveAspectRatio="xMidYMid meet">' +
+        gridLines + bars + labels + yLabels + crosshair + overlay +
+    '</svg>';
+}
+
+function attachStackedBarHover(data, tooltipId, modelColors) {
+    tooltipId = tooltipId || 'modelTrendTooltip';
+    modelColors = modelColors || {};
+    var svg = document.getElementById('stackedBarSvg');
+    var overlay = document.getElementById('stackedBarOverlay');
+    var crosshair = document.getElementById('stackedCrosshair');
+    var tooltip = document.getElementById(tooltipId);
+    if (!svg || !overlay || !tooltip) return;
+
+    var width = 620, height = 240;
+    var pad = { top: 18, right: 56, bottom: 40, left: 15 };
+    var chartW = width - pad.left - pad.right;
+    var chartH = height - pad.top - pad.bottom;
+
+    overlay.addEventListener('mousemove', function(e) {
+        var ctm = svg.getScreenCTM();
+        if (!ctm) return;
+        var pt = svg.createSVGPoint();
+        pt.x = e.clientX; pt.y = e.clientY;
+        var svgPt = pt.matrixTransform(ctm.inverse());
+        var mouseX = svgPt.x;
+        var crossX = Math.max(pad.left, Math.min(width - pad.right, mouseX));
+
+        var xCoords = data.map(function(d, i) { return pad.left + (data.length === 1 ? chartW / 2 : (i / (data.length - 1)) * chartW); });
+        var minDist = Infinity, idx = 0;
+        for (var i = 0; i < xCoords.length; i++) {
+            var dist = Math.abs(xCoords[i] - mouseX);
+            if (dist < minDist) { minDist = dist; idx = i; }
+        }
+        var d = data[idx];
+
+        crosshair.setAttribute('x1', crossX);
+        crosshair.setAttribute('x2', crossX);
+        crosshair.setAttribute('opacity', '0.6');
+
+        var containerRect = svg.parentElement.getBoundingClientRect();
+        var tipW = 200;
+        var pointScreenX = xCoords[idx] * ctm.a + ctm.e - containerRect.left;
+        var tipX = pointScreenX + 14;
+        if (tipX + tipW > containerRect.width) tipX = pointScreenX - tipW - 10;
+        var tipY = Math.max(8, Math.min(svgPt.y * ctm.d + ctm.f - containerRect.top - 20, containerRect.height - 120));
+
+        // Build tooltip rows sorted by value desc
+        var rows = Object.keys(d.models).map(function(m) {
+            return { model: m, value: d.models[m] };
+        }).sort(function(a, b) { return b.value - a.value; });
+
+        var html = '<div class="tt-label">' + d.key + '</div>';
+        rows.forEach(function(r) {
+            html += '<div class="tt-row"><span class="tt-swatch" style="background:' + (modelColors[r.model] || 'var(--accent)') + '"></span>' + r.model.replace('kimi-code/', '') + ' ' + formatTokens(r.value) + '</div>';
+        });
+        html += '<div class="tt-total">总计 ' + formatTokens(d.total) + ' tokens</div>';
+
+        tooltip.style.left = tipX + 'px';
+        tooltip.style.top = tipY + 'px';
+        tooltip.innerHTML = html;
+        tooltip.classList.add('show');
+    });
+
+    overlay.addEventListener('mouseleave', function() {
+        crosshair.setAttribute('opacity', '0');
+        tooltip.classList.remove('show');
+    });
+}
+
+function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
