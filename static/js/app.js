@@ -14,6 +14,7 @@ var selectedProvider = null;
 var currentSkillStatusFilter = 'all';
 var currentMcpStatusFilter = 'all';
 var currentTaskStatusFilter = 'all';
+var _currentSkillDetailId = null;
 
 // === Settings ===
 var SETTINGS_KEY = 'kimi_dashboard_settings_v1';
@@ -609,17 +610,54 @@ function renderSkillsDetail() {
     renderSkillsDetailList(filtered);
 }
 
+function _skillDetailHtml(s) {
+    var lines = [];
+    var desc = s.description || getSkillDesc(s) || '暂无简介';
+    lines.push('<div class="mcp-detail-desc"><div class="label">描述</div><div class="detail-content">' + escapeHtml(desc) + '</div></div>');
+    lines.push('<div class="mcp-detail-meta"><span class="label">状态</span><span class="badge ' + (s.enabled ? (s.local ? 'badge-local' : 'badge-remote') : 'badge-disabled') + '">' + (s.enabled ? (s.local ? '已启用 · 本地' : '已启用 · 仅 lock') : '未启用') + '</span></div>');
+    lines.push('<div class="mcp-detail-meta"><span class="label">ID</span><code>' + escapeHtml(s.id) + '</code></div>');
+    lines.push('<div class="mcp-detail-meta"><span class="label">来源</span><span>' + escapeHtml(s.source || '未知') + '</span></div>');
+    if (s.sourceUrl) lines.push('<div class="mcp-detail-meta"><span class="label">来源 URL</span><a href="' + escapeHtml(s.sourceUrl) + '" target="_blank" style="color:var(--accent);text-decoration:underline;font-size:0.75rem;">' + escapeHtml(s.sourceUrl) + '</a></div>');
+    if (s.installedAt) lines.push('<div class="mcp-detail-meta"><span class="label">安装时间</span><span>' + escapeHtml(s.installedAt.slice(0, 10)) + '</span></div>');
+    return lines.join('');
+}
+
+function openSkillDetail(skillId) {
+    var data = statusData.skills;
+    if (!data) return;
+    var s = data.skills.find(function(x) { return x.id === skillId; });
+    if (!s) return;
+    _currentSkillDetailId = skillId;
+    document.getElementById('skill-detail-name').textContent = s.name;
+    document.getElementById('skill-detail-content').innerHTML = _skillDetailHtml(s);
+    document.getElementById('skillDetailModal').style.display = '';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeSkillDetail() {
+    document.getElementById('skillDetailModal').style.display = 'none';
+    document.body.style.overflow = '';
+    _currentSkillDetailId = null;
+}
+
 function renderSkillCard(s) {
     var enabledChecked = s.enabled ? ' checked' : '';
     var badgeCls = s.enabled ? (s.local ? 'badge-local' : 'badge-remote') : 'badge-disabled';
     var badgeText = s.enabled ? (s.local ? '本地' : '仅 lock') : '已禁用';
     var desc = getSkillDesc(s);
     var actions = '<div class="skill-card-actions">' +
-        '<label class="toggle-switch" title="启用/禁用"><input type="checkbox" onchange="toggleSkillEnabled(\'' + s.id + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label>' +
-        '<button class="btn-task" onclick="openSkillEdit(\'' + s.id + '\')">编辑</button>' +
-        '<button class="btn-task btn-danger" onclick="deleteSkill(\'' + s.id + '\')">卸载</button>' +
+        '<label class="toggle-switch" title="启用/禁用" onclick="event.stopPropagation()"><input type="checkbox" onchange="toggleSkillEnabled(\'' + s.id + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label>' +
+        '<button class="btn-task" onclick="event.stopPropagation();openSkillEdit(\'' + s.id + '\')">编辑</button>' +
+        '<button class="btn-task btn-danger" onclick="event.stopPropagation();deleteSkill(\'' + s.id + '\')">卸载</button>' +
     '</div>';
-    return '<div class="skill-card ' + (s.enabled ? '' : 'disabled') + '" data-skill-id="' + s.id + '"><div class="skill-card-header"><span class="skill-card-name">' + s.name + '</span><span class="badge ' + badgeCls + '">' + badgeText + '</span></div><div class="skill-card-desc">' + desc + '</div><div class="skill-card-meta"><span class="label">ID:</span> ' + s.id + '</div><div class="skill-card-meta"><span class="label">来源:</span> ' + (s.source || '未知') + '</div>' + (s.installedAt ? '<div class="skill-card-meta"><span class="label">安装时间:</span> ' + s.installedAt.slice(0, 10) + '</div>' : '') + actions + '</div>';
+    return '<div class="skill-card ' + (s.enabled ? '' : 'disabled') + '" data-skill-id="' + s.id + '" onclick="openSkillDetail(\'' + s.id + '\')">' +
+        '<div class="skill-card-header"><span class="skill-card-name">' + s.name + '</span><span class="badge ' + badgeCls + '">' + badgeText + '</span></div>' +
+        '<div class="skill-card-desc">' + desc + '</div>' +
+        '<div class="skill-card-meta"><span class="label">ID:</span> ' + s.id + '</div>' +
+        '<div class="skill-card-meta"><span class="label">来源:</span> ' + (s.source || '未知') + '</div>' +
+        (s.installedAt ? '<div class="skill-card-meta"><span class="label">安装时间:</span> ' + s.installedAt.slice(0, 10) + '</div>' : '') +
+        actions +
+    '</div>';
 }
 
 function renderSkillsDetailList(skills) {

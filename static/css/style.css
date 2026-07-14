@@ -1128,10 +1128,12 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 .skill-grid, .mcp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; margin-top: 0.5rem; }
 .skill-card, .mcp-card {
     background: var(--surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm);
-    padding: 1rem; transition: border-color 0.2s, opacity 0.2s; position: relative;
+    padding: 1rem; transition: border-color 0.2s, opacity 0.2s, transform 0.1s; position: relative;
     display: flex; flex-direction: column;
 }
+.skill-card { cursor: pointer; }
 .skill-card:hover, .mcp-card:hover { border-color: rgba(88,166,255,0.3); }
+.skill-card:active { transform: scale(0.99); }
 .skill-card.disabled, .mcp-card.disabled { opacity: 0.65; }
 .skill-card-header, .mcp-card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.5rem; }
 .skill-card-name, .mcp-card-name { font-size: 0.95rem; font-weight: 650; color: var(--text); }
