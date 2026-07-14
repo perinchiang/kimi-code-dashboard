@@ -10,6 +10,7 @@ var artifactsData = null;
 var currentArtifactSource = 'all';
 var currentArtifactQuery = '';
 var kimiUpdateState = { checking: false, updateAvailable: false, error: null };
+var updateRetryCount = 0;
 var selectedProvider = null;
 var currentSkillStatusFilter = 'all';
 var currentSkillSort = 'name';
@@ -152,7 +153,10 @@ function loadSettings() {
 function saveSettings(settings) {
     try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        console.warn('saveSettings failed:', e);
+        showToast('设置保存失败，可能存储空间已满', 5000);
+    }
 }
 
 function normalizePublicUrl(url) {
@@ -168,13 +172,58 @@ function showToast(message, duration) {
     if (existing) existing.remove();
     var el = document.createElement('div');
     el.id = 'kimiToast';
-    el.style.cssText = 'position:fixed;bottom:20px;right:20px;max-width:420px;background:var(--card-bg);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:14px 18px;box-shadow:0 6px 20px rgba(0,0,0,0.35);z-index:10000;font-size:14px;line-height:1.55;transition:opacity .3s;cursor:default;';
+    el.style.cssText = 'position:fixed;bottom:20px;right:20px;max-width:420px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:14px 18px;box-shadow:0 6px 20px rgba(0,0,0,0.35);z-index:10000;font-size:14px;line-height:1.55;transition:opacity .3s;cursor:default;';
     el.innerHTML = message;
     document.body.appendChild(el);
     setTimeout(function() {
         el.style.opacity = '0';
         setTimeout(function() { el.remove(); }, 300);
     }, duration);
+}
+
+// === Confirm Dialog (替代浏览器 confirm/alert) ===
+var _confirmDialogCallback = null;
+var _confirmDialogCancelCallback = null;
+function confirmDialog(msg, onOk, opts) {
+    opts = opts || {};
+    var dlg = document.getElementById('confirmDialog');
+    if (!dlg) { if (typeof onOk === 'function') onOk(); return; }
+    document.getElementById('confirmDialogMsg').textContent = msg;
+    document.getElementById('confirmDialogTitle').textContent = opts.title || '确认';
+    var okBtn = document.getElementById('confirmDialogOk');
+    if (opts.danger === false) {
+        okBtn.style.background = 'var(--surface)';
+        okBtn.style.color = 'var(--text)';
+        okBtn.style.borderColor = 'var(--border)';
+    } else {
+        okBtn.style.background = 'var(--danger)';
+        okBtn.style.color = '#fff';
+        okBtn.style.borderColor = 'var(--danger)';
+    }
+    _confirmDialogCallback = typeof onOk === 'function' ? onOk : null;
+    _confirmDialogCancelCallback = typeof opts.onCancel === 'function' ? opts.onCancel : null;
+    document.body.style.overflow = 'hidden';
+    dlg.style.display = '';
+}
+function closeConfirmDialog() {
+    var dlg = document.getElementById('confirmDialog');
+    if (dlg) dlg.style.display = 'none';
+    var cb = _confirmDialogCallback;
+    var cancelCb = _confirmDialogCancelCallback;
+    _confirmDialogCallback = null;
+    _confirmDialogCancelCallback = null;
+    document.body.style.overflow = '';
+    // 若 ok 回调还在（说明是 cancel/Esc/遮罩点击触发的关闭，非 ok），且 cancel 回调存在，则触发
+    if (cb && typeof cancelCb === 'function') cancelCb();
+}
+function _confirmDialogOk() {
+    var cb = _confirmDialogCallback;
+    _confirmDialogCallback = null;
+    _confirmDialogCancelCallback = null;
+    var dlg = document.getElementById('confirmDialog');
+    if (dlg) dlg.style.display = 'none';
+    document.body.style.overflow = '';
+    if (typeof cb === 'function') cb();
 }
 
 var settings = loadSettings();
@@ -316,6 +365,7 @@ if (window.matchMedia) {
 // 页面加载时立即应用一次
 applyTheme();
 applyPwaIcons();
+applySettings();
 
 // === Skill / MCP descriptions ===
 var SKILL_DESC = {
@@ -434,11 +484,18 @@ async function launchKimiWeb() {
 
     // 如果没填自定义 URL，提示用户
     if (publicUrls.length === 0) {
-        if (!confirm('未配置自定义访问 URL，将使用本地地址 http://127.0.0.1:' + (settings.kw_port || 5494) + '\n\n是否继续？\n（点击「取消」去设置页填写自定义 URL）')) {
-            window.location.hash = '#/settings';
-            return;
-        }
+        confirmDialog('未配置自定义访问 URL，将使用本地地址 http://127.0.0.1:' + (settings.kw_port || 5494) + '\n\n是否继续？\n（点击「取消」去设置页填写自定义 URL）', function() {
+            _launchKimiWebInternal(btn, text, publicUrls);
+        }, {
+            danger: false,
+            onCancel: function() { window.location.hash = '#/settings'; }
+        });
+        return;
     }
+    _launchKimiWebInternal(btn, text, publicUrls);
+}
+
+async function _launchKimiWebInternal(btn, text, publicUrls) {
     btn.disabled = true;
     text.textContent = '启动中...';
     var wasRunning = btn.classList.contains('running');
@@ -450,9 +507,7 @@ async function launchKimiWeb() {
             bypass_auth: settings.kw_bypass_auth !== false,
             public_urls: publicUrls
         };
-        console.log('[launchKimiWeb] sending cfg:', JSON.stringify(cfg));
         var data = await postJSON('/api/launch-kimi-web', cfg);
-        console.log('[launchKimiWeb] response:', JSON.stringify(data));
         if (data.status === 'launched' || data.status === 'already_running') {
             btn.classList.add('running');
             text.textContent = '已启动 \u2713';
@@ -470,12 +525,12 @@ async function launchKimiWeb() {
         } else {
             text.textContent = '启动失败';
             setTimeout(function() { text.textContent = '启动 Kimi Web'; btn.disabled = false; }, 2000);
-            alert('启动失败: ' + (data.error || data.status || '未知错误'));
+            showToast('启动失败: ' + (data.error || data.status || '未知错误'), 5000);
         }
     } catch (e) {
         text.textContent = '启动失败';
         setTimeout(function() { text.textContent = '启动 Kimi Web'; btn.disabled = false; }, 2000);
-        alert('启动失败: ' + e.message);
+        showToast('启动失败: ' + e.message, 5000);
     }
 }
 
@@ -1087,12 +1142,14 @@ function openMemoryModal(idx) {
         '<div class="mem-modal-content">' + escapeHtml(m.content || '') + '</div>';
     document.getElementById('memoryModalTitle').textContent = title;
     document.getElementById('memoryModalBody').innerHTML = body;
+    document.body.style.overflow = 'hidden';
     document.getElementById('memoryModal').style.display = '';
 }
 
 function closeMemoryModal() {
     var modal = document.getElementById('memoryModal');
     if (modal) modal.style.display = 'none';
+    document.body.style.overflow = '';
 }
 
 // === Kimi Usage + Quota ===
@@ -1236,6 +1293,7 @@ function pollUpdateStatus() {
     fetchJSON('/api/kimi-update/status').then(function(s) {
         var log = document.getElementById('vcLog');
         if (log && s.log) { log.textContent = s.log.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ''); log.scrollTop = log.scrollHeight; }
+        updateRetryCount = 0;
         if (s.running) {
             kimiUpdateState = { checking: true, updateAvailable: false, error: null };
             renderStatusBar();
@@ -1252,7 +1310,14 @@ function pollUpdateStatus() {
                 box.innerHTML = '<div class="vc-row vc-error">\u2717 更新未成功 (exit ' + s.exitCode + ')</div><pre class="vc-log">' + (s.log || '').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '') + '</pre><button class="vc-btn vc-btn-sm" style="margin-top:0.4rem" onclick="checkKimiUpdate()">返回</button>';
             }
         }
-    }).catch(function() { updatePollTimer = setTimeout(pollUpdateStatus, 2500); });
+    }).catch(function() {
+        updateRetryCount++;
+        if (updateRetryCount > 10) {
+            showToast('更新状态轮询失败，已停止重试', 5000);
+            return;
+        }
+        updatePollTimer = setTimeout(pollUpdateStatus, 2500 * Math.min(updateRetryCount, 5));
+    });
 }
 
 // === Trend rendering ===
@@ -1444,7 +1509,7 @@ async function loadModelUsage() {
     }
 }
 
-var MODEL_USAGE_COLORS = ['var(--accent)', 'var(--purple)', 'var(--success)', 'var(--warning)', 'var(--danger)', '#ff9f43', '#ee5a6f', '#00d2d3', '#54a0ff', '#5f27cd'];
+var MODEL_USAGE_COLORS = ['var(--accent)', 'var(--purple)', 'var(--success)', 'var(--warning)', 'var(--danger)', 'var(--chart-6)', 'var(--chart-7)', 'var(--chart-8)', 'var(--chart-9)', 'var(--chart-10)'];
 
 function getModelColorMap(models) {
     var map = {};
@@ -1693,13 +1758,13 @@ function renderModelConfigDetail() {
         var protected = isProtectedProvider(p);
         var actionsHtml = protected ? '' :
             '<div class="config-item-actions">' +
-                '<button class="btn-task" onclick="event.stopPropagation(); detectModels(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">探测模型</button>' +
-                '<button class="btn-task" onclick="event.stopPropagation(); editProvider(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">编辑</button>' +
-                '<button class="btn-task" onclick="event.stopPropagation(); deleteProvider(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">删除</button>' +
+                '<button class="btn-task" onclick="event.stopPropagation(); detectModels(\'' + escapeJsString(p.id) + '\')">探测模型</button>' +
+                '<button class="btn-task" onclick="event.stopPropagation(); editProvider(\'' + escapeJsString(p.id) + '\')">编辑</button>' +
+                '<button class="btn-task" onclick="event.stopPropagation(); deleteProvider(\'' + escapeJsString(p.id) + '\')">删除</button>' +
             '</div>';
         var badgeHtml = '<span class="badge badge-local">' + escapeHtml(MODEL_CONFIG_TYPE_LABEL[p.type] || p.type) + '</span>' +
             (protected ? '<span class="badge badge-remote">内置</span>' : '');
-        return '<div class="config-item provider-selectable' + (isSelected ? ' selected' : '') + '" id="provider-row-' + escapeHtml(p.id) + '" onclick="selectProvider(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">' +
+        return '<div class="config-item provider-selectable' + (isSelected ? ' selected' : '') + '" id="provider-row-' + escapeHtml(p.id) + '" onclick="selectProvider(\'' + escapeJsString(p.id) + '\')">' +
             '<div class="config-item-title"><span>' + escapeHtml(p.id) + '</span>' + badgeHtml + '</div>' +
             '<div class="config-item-meta">' + escapeHtml(p.base_url) + '</div>' +
             actionsHtml +
@@ -1720,11 +1785,11 @@ function renderModelConfigDetail() {
         if (m.max_tokens) meta += ' &middot; max_tokens=' + m.max_tokens.toLocaleString();
         var defaultBtn = isDefault
             ? '<span class="badge badge-local">默认</span>'
-            : '<button class="btn-task btn-sm" onclick="setDefaultModel(\'' + escapeHtml(m.id).replace(/'/g, "\\'") + '\')">设为默认</button>';
+            : '<button class="btn-task btn-sm" onclick="setDefaultModel(\'' + escapeJsString(m.id) + '\')">设为默认</button>';
         var modelActionsHtml = providerProtected ? '' :
             '<div class="config-item-actions">' +
-                '<button class="btn-task" onclick="editModel(\'' + escapeHtml(m.id).replace(/'/g, "\\'") + '\')">编辑</button>' +
-                '<button class="btn-task" onclick="deleteModel(\'' + escapeHtml(m.id).replace(/'/g, "\\'") + '\')">删除</button>' +
+                '<button class="btn-task" onclick="editModel(\'' + escapeJsString(m.id) + '\')">编辑</button>' +
+                '<button class="btn-task" onclick="deleteModel(\'' + escapeJsString(m.id) + '\')">删除</button>' +
             '</div>';
         return '<div class="config-item" id="model-row-' + escapeHtml(m.id) + '">' +
             '<div class="config-item-title"><span>' + escapeHtml(m.id) + '</span>' + defaultBtn + '</div>' +
@@ -1785,7 +1850,7 @@ function editProvider(id) {
 async function saveProvider() {
     var idInput = document.getElementById('provider-id');
     var id = idInput ? idInput.value.trim() : '';
-    if (!id) return alert('Provider ID 不能为空');
+    if (!id) { showToast('Provider ID 不能为空', 5000); return; }
     var body = {
         id: id,
         type: document.getElementById('provider-type').value,
@@ -1795,15 +1860,18 @@ async function saveProvider() {
     try {
         await fetchJSON('/api/model-config/provider', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         await loadModelConfig();
-    } catch (e) { alert('保存失败: ' + e.message); }
+    } catch (e) { showToast('保存失败: ' + e.message, 5000); }
 }
 
 async function deleteProvider(id) {
-    if (!confirm('确定删除 provider "' + id + '"？引用它的 model 将失效。')) return;
-    try {
-        await fetchJSON('/api/model-config/provider/' + encodeURIComponent(id), { method: 'DELETE' });
-        await loadModelConfig();
-    } catch (e) { alert('删除失败: ' + e.message); }
+    confirmDialog('确定删除 provider "' + id + '"？引用它的 model 将失效。', function() {
+        (async function() {
+            try {
+                await fetchJSON('/api/model-config/provider/' + encodeURIComponent(id), { method: 'DELETE' });
+                await loadModelConfig();
+            } catch (e) { showToast('删除失败: ' + e.message, 5000); }
+        })();
+    });
 }
 
 function toggleDetectedBubble(el) {
@@ -1830,7 +1898,7 @@ async function detectModels(id) {
             '<label>探测到 ' + models.length + ' 个模型，点击泡泡选择（provider: ' + escapeHtml(id) + '）</label>' +
             '<div class="detect-bubble-group">' + bubbles + '</div>' +
             '<div class="config-form-actions">' +
-                '<button class="btn-task" onclick="addDetectedModels(\'' + escapeHtml(id).replace(/'/g, "\\'") + '\')">添加选中模型</button>' +
+                '<button class="btn-task" onclick="addDetectedModels(\'' + escapeJsString(id) + '\')">添加选中模型</button>' +
                 '<button class="btn-task" onclick="renderModelConfigDetail()">取消</button>' +
             '</div>' +
         '</div>';
@@ -1849,7 +1917,7 @@ async function addDetectedModels(id) {
             caps: (el.getAttribute('data-caps') || '').split(',').filter(function(c) { return c; }),
         });
     });
-    if (!selected.length) return alert('请至少选择一个模型');
+    if (!selected.length) { showToast('请至少选择一个模型', 5000); return; }
     var errors = [];
     for (var i = 0; i < selected.length; i++) {
         var m = selected[i];
@@ -1872,7 +1940,7 @@ async function addDetectedModels(id) {
         }
     }
     if (errors.length) {
-        alert('部分模型添加失败:\n' + errors.join('\n'));
+        showToast('部分模型添加失败:\n' + errors.join('\n'), 8000);
     }
     await loadModelConfig();
 }
@@ -1943,7 +2011,7 @@ async function saveModel() {
     var apiModelInput = document.getElementById('model-api_model');
     var apiModel = apiModelInput ? apiModelInput.value.trim() : '';
     var id = idInput ? idInput.value.trim() : apiModel;
-    if (!id || !apiModel) return alert('API Model 不能为空');
+    if (!id || !apiModel) { showToast('API Model 不能为空', 5000); return; }
 
     var ctxEl = document.querySelector('.ctx-bubble-group .option-bubble.selected');
     var maxTokensEl = document.querySelector('.maxtokens-bubble-group .option-bubble.selected');
@@ -1962,15 +2030,18 @@ async function saveModel() {
     try {
         await fetchJSON('/api/model-config/model', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         await loadModelConfig();
-    } catch (e) { alert('保存失败: ' + e.message); }
+    } catch (e) { showToast('保存失败: ' + e.message, 5000); }
 }
 
 async function deleteModel(id) {
-    if (!confirm('确定删除 model "' + id + '"？')) return;
-    try {
-        await fetchJSON('/api/model-config/model/' + encodeURIComponent(id), { method: 'DELETE' });
-        await loadModelConfig();
-    } catch (e) { alert('删除失败: ' + e.message); }
+    confirmDialog('确定删除 model "' + id + '"？', function() {
+        (async function() {
+            try {
+                await fetchJSON('/api/model-config/model/' + encodeURIComponent(id), { method: 'DELETE' });
+                await loadModelConfig();
+            } catch (e) { showToast('删除失败: ' + e.message, 5000); }
+        })();
+    });
 }
 
 async function setDefaultModel(id) {
@@ -1978,7 +2049,7 @@ async function setDefaultModel(id) {
     try {
         await fetchJSON('/api/model-config/default-model', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) });
         await loadModelConfig();
-    } catch (e) { alert('设置默认模型失败: ' + e.message); }
+    } catch (e) { showToast('设置默认模型失败: ' + e.message, 5000); }
 }
 
 // === Settings ===
@@ -2014,7 +2085,7 @@ function renderSettings() {
         }
         if (item.type === 'number') {
             var val = settings[item.key] || 0;
-            return '<input type="number" class="search-box" style="width:100px" value="' + escapeHtml(String(val)) + '" oninput="setSetting(\'' + item.key + '\', parseInt(this.value,10)||5494)">';
+            return '<input type="number" class="search-box" style="width:100px" value="' + escapeHtml(String(val)) + '" onchange="setSetting(\'' + item.key + '\', parseInt(this.value,10) || 5494)">';
         }
         if (item.type === 'startup_toggle') {
             if (!startupServiceState.loaded) {
@@ -2135,10 +2206,8 @@ function renderSettings() {
 
 // === 自定义访问 URL 管理（必须为全局函数，供 HTML onclick 调用）===
 function addPublicUrlFromEvent(input) {
-    console.log('[addPublicUrl] input=', input, 'value=', input ? input.value : null);
     var url = normalizePublicUrl(input && input.value ? input.value : '');
     if (!url) {
-        console.log('[addPublicUrl] empty url, abort');
         return;
     }
     var urls = Array.isArray(settings.kw_public_urls) ? settings.kw_public_urls.slice() : [];
@@ -2150,7 +2219,6 @@ function addPublicUrlFromEvent(input) {
     settings.kw_public_urls = urls;
     saveSettings(settings);
     renderSettings();
-    console.log('[addPublicUrl] added', url);
 }
 
 function removePublicUrl(idx) {
@@ -2619,18 +2687,21 @@ async function deleteTask(taskId) {
     var data = statusData.tasks;
     var t = data && data.tasks.find(function(x) { return x.id === taskId; });
     var name = t ? t.name : taskId;
-    if (!confirm('确定删除任务 "' + name + '"？\n这会同时删除 Windows 任务计划程序中的对应任务。')) return;
-    try {
-        var res = await postJSON('/api/tasks/' + taskId + '/delete');
-        if (res.warning) {
-            showToast('任务配置已删除，但计划任务未移除: ' + res.warning, 7000);
-        } else {
-            showToast('任务已删除', 3000);
-        }
-        await loadTasks();
-    } catch (e) {
-        showToast('删除失败: ' + e.message, 5000);
-    }
+    confirmDialog('确定删除任务 "' + name + '"？\n这会同时删除 Windows 任务计划程序中的对应任务。', function() {
+        (async function() {
+            try {
+                var res = await postJSON('/api/tasks/' + taskId + '/delete');
+                if (res.warning) {
+                    showToast('任务配置已删除，但计划任务未移除: ' + res.warning, 7000);
+                } else {
+                    showToast('任务已删除', 3000);
+                }
+                await loadTasks();
+            } catch (e) {
+                showToast('删除失败: ' + e.message, 5000);
+            }
+        })();
+    });
 }
 
 async function toggleTaskEnabled(taskId, enabled) {
@@ -2807,19 +2878,22 @@ async function deleteHook(hookId) {
     var data = statusData.hooks;
     var h = data && data.hooks.find(function(x) { return x.id === hookId; });
     var label = h ? h.event + (h.matcher ? ' (' + h.matcher + ')' : '') : hookId;
-    if (!confirm('确定删除 Hook "' + label + '"？')) return;
-    try {
-        var res = await postJSON('/api/hooks/' + hookId + '/delete');
-        if (res.success) {
-            showToast('Hook 已删除', 3000);
-            await loadHooks();
-            if (location.hash === '#/hooks') renderHooksDetail();
-        } else {
-            showToast('删除失败: ' + (res.error || '未知错误'), 5000);
-        }
-    } catch (e) {
-        showToast('删除失败: ' + e.message, 5000);
-    }
+    confirmDialog('确定删除 Hook "' + label + '"？', function() {
+        (async function() {
+            try {
+                var res = await postJSON('/api/hooks/' + hookId + '/delete');
+                if (res.success) {
+                    showToast('Hook 已删除', 3000);
+                    await loadHooks();
+                    if (location.hash === '#/hooks') renderHooksDetail();
+                } else {
+                    showToast('删除失败: ' + (res.error || '未知错误'), 5000);
+                }
+            } catch (e) {
+                showToast('删除失败: ' + e.message, 5000);
+            }
+        })();
+    });
 }
 
 // === Task Log Modal ===
@@ -2906,14 +2980,17 @@ async function deleteSkill(skillId) {
     var data = statusData.skills;
     var s = data && data.skills.find(function(x) { return x.id === skillId; });
     var name = s ? s.name : skillId;
-    if (!confirm('确定卸载 Skill "' + name + '"？\n这会删除本地 skill 目录。')) return;
-    try {
-        await postJSON('/api/skills/' + skillId + '/delete');
-        showToast('Skill 已卸载', 3000);
-        await loadSkills();
-    } catch (e) {
-        showToast('卸载失败: ' + e.message, 5000);
-    }
+    confirmDialog('确定卸载 Skill "' + name + '"？\n这会删除本地 skill 目录。', function() {
+        (async function() {
+            try {
+                await postJSON('/api/skills/' + skillId + '/delete');
+                showToast('Skill 已卸载', 3000);
+                await loadSkills();
+            } catch (e) {
+                showToast('卸载失败: ' + e.message, 5000);
+            }
+        })();
+    });
 }
 
 async function toggleSkillEnabled(skillId, enabled) {
@@ -3002,21 +3079,24 @@ async function saveMcp() {
 async function deleteMcp(mcpId) {
     var data = statusData.mcp;
     var s = data && data.servers.find(function(x) { return x.name === mcpId; });
-    if (!confirm('确定删除 MCP Server "' + (s ? s.name : mcpId) + '"？\n这会从配置中移除，不会删除实际文件。')) return;
-    try {
-        await postJSON('/api/mcp/' + mcpId + '/delete');
-        showToast('MCP Server 已删除', 3000);
-        await loadMCP();
-    } catch (e) {
-        showToast('删除失败: ' + e.message, 5000);
-    }
+    confirmDialog('确定删除 MCP Server "' + (s ? s.name : mcpId) + '"？\n这会从配置中移除，不会删除实际文件。', function() {
+        (async function() {
+            try {
+                await postJSON('/api/mcp/' + mcpId + '/delete');
+                showToast('MCP Server 已删除', 3000);
+                await loadMCP();
+            } catch (e) {
+                showToast('删除失败: ' + e.message, 5000);
+            }
+        })();
+    });
 }
 
 async function toggleMcpEnabled(mcpId, enabled) {
     try {
         var data = await postJSON('/api/mcp/' + mcpId + '/toggle', { enabled: enabled });
         if (data.success) {
-            showToast('MCP Server 已' + (data.enabled ? '启用' : '禁用'), 3000);
+            showToast('MCP Server 已' + (data.enabled ? '启用' : '禁用') + '，需要重启 Kimi Code 才能生效', 4000);
             await loadMCP();
         } else {
             showToast('设置失败: ' + (data.error || '未知错误'), 5000);
@@ -3170,7 +3250,7 @@ function renderArtifactCard(x) {
         var ext = (x.name || '').split('.').pop().toUpperCase() || 'FILE';
         thumb = '<div class="artifact-thumb"><div class="artifact-thumb-fallback"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg><span>' + escapeHtml(ext) + '</span></div>' + cloudBadge + '</div>';
     }
-    return '<div class="artifact-card" onclick="openArtifactModal(\'' + escapeHtml(x.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">' +
+    return '<div class="artifact-card" onclick="openArtifactModal(\'' + escapeJsString(x.id) + '\')">' +
         thumb +
         '<div class="artifact-meta"><div class="artifact-name" title="' + escapeHtml(x.name || x.id) + '">' + escapeHtml(x.name || x.id) + ' ' + srcTag + '</div><div class="artifact-sub">' + escapeHtml(formatSize(x.size)) + ' &middot; ' + escapeHtml(formatDate(x.created_at)) + '</div></div>' +
         '</div>';
@@ -3216,7 +3296,7 @@ function openArtifactModal(id) {
     if (x.uploaded_url) {
         uploadSection = '<div class="artifact-info-row"><span class="info-label">图床 URL</span><input class="info-input" id="artifactUploadedUrl" readonly value="' + escapeHtml(x.uploaded_url) + '"><button class="btn-task" onclick="copyArtifactUrl()">复制</button></div>';
     } else {
-        uploadSection = '<div class="artifact-info-row"><span class="info-label">图床</span><span style="color:var(--text-secondary);font-size:0.78rem;">尚未上传</span><button class="btn-task" id="artifactUploadBtn" onclick="uploadArtifact(\'' + escapeHtml(x.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">上传到图床</button></div>';
+        uploadSection = '<div class="artifact-info-row"><span class="info-label">图床</span><span style="color:var(--text-secondary);font-size:0.78rem;">尚未上传</span><button class="btn-task" id="artifactUploadBtn" onclick="uploadArtifact(\'' + escapeJsString(x.id) + '\')">上传到图床</button></div>';
     }
 
     body.innerHTML = preview +
@@ -3228,12 +3308,14 @@ function openArtifactModal(id) {
         uploadSection +
         '<div class="artifact-info-row"><span class="info-label">本地链接</span><a class="btn-task" href="' + escapeHtml(contentUrl) + '" target="_blank">' + (isImage ? '查看原图' : '下载文件') + '</a></div>';
 
+    document.body.style.overflow = 'hidden';
     modal.style.display = '';
 }
 
 function closeArtifactModal() {
     var modal = document.getElementById('artifactModal');
     if (modal) modal.style.display = 'none';
+    document.body.style.overflow = '';
 }
 
 async function uploadArtifact(id) {
@@ -3306,10 +3388,38 @@ async function loadAll() {
 // === Init ===
 Promise.all([loadDashboardVersion(), loadStartupServiceStatus(), loadKimiConfig()]).then(loadAll);
 checkKimiWebStatus();
-setInterval(checkKimiWebStatus, 10000);
+var kimiWebTimer = setInterval(checkKimiWebStatus, 10000);
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        if (kimiWebTimer) { clearInterval(kimiWebTimer); kimiWebTimer = null; }
+    } else if (!kimiWebTimer) {
+        checkKimiWebStatus();
+        kimiWebTimer = setInterval(checkKimiWebStatus, 10000);
+    }
+});
 window.addEventListener('hashchange', handleRoute);
 document.addEventListener('click', function(e) {
     var dd = document.getElementById('skillSortDropdown');
     if (dd && !dd.contains(e.target)) closeSkillSortDropdown();
 });
+document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    var modals = document.querySelectorAll('.modal-overlay');
+    for (var i = modals.length - 1; i >= 0; i--) {
+        if (modals[i].style.display !== 'none') {
+            var closeBtn = modals[i].querySelector('.modal-close');
+            if (closeBtn) closeBtn.click();
+            return;
+        }
+    }
+});
+// confirmDialog 按钮事件绑定
+(function() {
+    var okBtn = document.getElementById('confirmDialogOk');
+    var cancelBtn = document.getElementById('confirmDialogCancel');
+    var dlg = document.getElementById('confirmDialog');
+    if (okBtn) okBtn.addEventListener('click', _confirmDialogOk);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeConfirmDialog);
+    if (dlg) dlg.addEventListener('click', function(e) { if (e.target === dlg) closeConfirmDialog(); });
+})();
 handleRoute();

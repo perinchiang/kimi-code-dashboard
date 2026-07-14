@@ -7,6 +7,8 @@
       "description": "Replace with your own scheduled task",
       "script": "example.py",
       "schedule": "每日 08:00",
+      "trigger": {"type": "daily", "time": "08:00"},
+      "enabled": true,
       "logFile": "example.log",
       "sources": [],
       "taskName": "ExampleTask"

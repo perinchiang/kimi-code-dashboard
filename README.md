@@ -169,7 +169,7 @@ dashboard/
 
 - 所有状态变更接口（启动 Kimi Web、触发任务、一键更新）均使用 **POST** 方法
 - PowerShell 命令中的任务名通过 `ps_escape_single_quote()` 转义，防止注入
-- Kimi Web 默认绑定 `127.0.0.1`（非 `0.0.0.0`），仅本机可访问
+- Kimi Web 默认绑定 `0.0.0.0`（可通过设置页或环境变量 `KIMI_WEB_HOST` 切换为 `127.0.0.1`）
 - `.env` 在 `.gitignore` 中，不会被提交
 
 ## 性能优化

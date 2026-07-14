@@ -429,7 +429,7 @@
             <div class="modal modal-lg" onclick="event.stopPropagation()">
                 <div class="modal-header">
                     <h3 id="artifactModalTitle">产物详情</h3>
-                    <button class="modal-close" onclick="closeArtifactModal()">×</button>
+                    <button class="modal-close" onclick="closeArtifactModal()" aria-label="关闭">×</button>
                 </div>
                 <div id="artifactModalBody" class="modal-body"></div>
             </div>
@@ -458,7 +458,7 @@
             <div class="modal modal-lg" onclick="event.stopPropagation()">
                 <div class="modal-header">
                     <h3 id="memoryModalTitle">记忆详情</h3>
-                    <button class="modal-close" onclick="closeMemoryModal()">×</button>
+                    <button class="modal-close" onclick="closeMemoryModal()" aria-label="关闭">×</button>
                 </div>
                 <div id="memoryModalBody" class="modal-body"></div>
             </div>
@@ -757,7 +757,24 @@
         </div>
     </div>
 
+    <!-- Confirm Dialog -->
+    <div id="confirmDialog" class="modal-overlay" style="display:none">
+        <div class="modal modal-sm" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="confirmDialogTitle">确认</h3>
+                <button class="modal-close" onclick="closeConfirmDialog()" aria-label="关闭">×</button>
+            </div>
+            <div class="modal-body">
+                <div id="confirmDialogMsg" style="white-space:pre-wrap;line-height:1.6;"></div>
+            </div>
+            <div class="modal-footer" style="padding:0.75rem 1.25rem;display:flex;justify-content:flex-end;gap:0.5rem;border-top:1px solid var(--border);">
+                <button class="btn-task" id="confirmDialogCancel">取消</button>
+                <button class="btn-task" id="confirmDialogOk" style="background:var(--danger);color:#fff;border-color:var(--danger);">确定</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/js/charts.js?v=19"></script>
-    <script src="/static/js/app.js?v=93"></script>
+    <script src="/static/js/app.js?v=94"></script>
 </body>
 </html>
