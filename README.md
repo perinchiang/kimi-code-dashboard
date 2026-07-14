@@ -30,8 +30,6 @@ Kimi Code CLI 的本地可视化面板，展示 Skill、MCP、记忆状态、Kim
 
 面板右上角「启动 Kimi Web」按钮可直接拉起本地 Kimi Web 服务，所有启动参数都可在「面板设置」页中可视化配置：
 
-![Kimi Web 服务设置](docs/images/settings-kimi-web.png)
-
 - **绑定地址**：`127.0.0.1`（仅本机）或 `0.0.0.0`（外网可访问），切换时自动重启服务
 - **端口**：默认 5494，可自定义
 - **密码认证**：开启时无需密码直接访问；关闭时自动从进程 stdout 捕获 bearer token 并拼接到访问 URL
