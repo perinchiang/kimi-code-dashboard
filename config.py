@@ -1,6 +1,7 @@
 """Central configuration: paths, constants, and app-wide settings."""
 
 import logging
+import logging.handlers
 import os
 from pathlib import Path
 
@@ -57,7 +58,9 @@ def setup_logging() -> logging.Logger:
     logger = logging.getLogger("kimi_dashboard")
     if not logger.handlers:
         logger.setLevel(logging.DEBUG)
-        handler = logging.FileHandler(APP_DIR / "dashboard.log", encoding="utf-8")
+        handler = logging.handlers.RotatingFileHandler(
+            APP_DIR / "dashboard.log", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8"
+        )
         handler.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
             "%(asctime)s [%(levelname)s] %(name)s: %(message)s",

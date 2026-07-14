@@ -6,6 +6,8 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
+from services.helpers import atomic_write_text
+
 FILES_DIR = Path.home() / ".kimi-code" / "files"
 INDEX_PATH = FILES_DIR / "index.json"
 FILE_PATH = FILES_DIR / "dashboard-arch-flowchart.png"
@@ -39,7 +41,7 @@ def main():
     })
     index["files"] = files_list
 
-    INDEX_PATH.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_text(INDEX_PATH, json.dumps(index, ensure_ascii=False, indent=2))
     print(file_id)
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request
 
 from config import GATEWAY_BASE, KIMI_CODE_DIR, MCP_CONFIG, log
-from services.helpers import http_get, safe_json_load
+from services.helpers import atomic_write_text, config_lock, http_get, lock_for, safe_json_load
 
 bp = Blueprint("mcp", __name__)
 
@@ -24,7 +24,7 @@ def _load_mcp_config() -> dict:
 
 def _save_mcp_config(cfg: dict) -> bool:
     try:
-        MCP_CONFIG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_text(MCP_CONFIG, json.dumps(cfg, ensure_ascii=False, indent=2))
         return True
     except Exception as e:
         log.error("Failed to write %s: %s", MCP_CONFIG, e)
@@ -37,7 +37,7 @@ def _load_disabled_config() -> dict:
 
 def _save_disabled_config(cfg: dict) -> bool:
     try:
-        MCP_DISABLED_CONFIG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_text(MCP_DISABLED_CONFIG, json.dumps(cfg, ensure_ascii=False, indent=2))
         return True
     except Exception as e:
         log.error("Failed to write %s: %s", MCP_DISABLED_CONFIG, e)
@@ -127,35 +127,37 @@ def api_mcp():
 @bp.route("/api/mcp/<server_id>/toggle", methods=["POST"])
 def api_mcp_toggle(server_id: str):
     """Enable or disable an MCP server by moving it between configs."""
-    cfg = _load_mcp_config()
-    disabled_cfg = _load_disabled_config()
     body = request.get_json(silent=True) or {}
     enabled = bool(body.get("enabled", True))
 
-    enabled_servers = cfg.setdefault("mcpServers", {})
-    disabled_servers = disabled_cfg.setdefault("mcpServers", {})
+    with config_lock(lock_for(MCP_CONFIG)):
+        cfg = _load_mcp_config()
+        disabled_cfg = _load_disabled_config()
 
-    currently_enabled = server_id in enabled_servers
-    target_enabled = enabled
+        enabled_servers = cfg.setdefault("mcpServers", {})
+        disabled_servers = disabled_cfg.setdefault("mcpServers", {})
 
-    if currently_enabled == target_enabled:
-        return jsonify({"success": True, "enabled": target_enabled})
+        currently_enabled = server_id in enabled_servers
+        target_enabled = enabled
 
-    if target_enabled:
-        if server_id in disabled_servers:
-            enabled_servers[server_id] = disabled_servers.pop(server_id)
+        if currently_enabled == target_enabled:
+            return jsonify({"success": True, "enabled": target_enabled})
+
+        if target_enabled:
+            if server_id in disabled_servers:
+                enabled_servers[server_id] = disabled_servers.pop(server_id)
+            else:
+                return jsonify({"success": False, "error": "Server not found in disabled list"}), 404
         else:
-            return jsonify({"success": False, "error": "Server not found in disabled list"}), 404
-    else:
-        if server_id in enabled_servers:
-            disabled_servers[server_id] = enabled_servers.pop(server_id)
-        else:
-            return jsonify({"success": False, "error": "Server not found"}), 404
+            if server_id in enabled_servers:
+                disabled_servers[server_id] = enabled_servers.pop(server_id)
+            else:
+                return jsonify({"success": False, "error": "Server not found"}), 404
 
-    if not _save_mcp_config(cfg):
-        return jsonify({"success": False, "error": "保存 mcp.json 失败"}), 500
-    if not _save_disabled_config(disabled_cfg):
-        return jsonify({"success": False, "error": "保存 .mcp-disabled.json 失败"}), 500
+        if not _save_mcp_config(cfg):
+            return jsonify({"success": False, "error": "保存 mcp.json 失败"}), 500
+        if not _save_disabled_config(disabled_cfg):
+            return jsonify({"success": False, "error": "保存 .mcp-disabled.json 失败"}), 500
 
     return jsonify({"success": True, "enabled": target_enabled})
 
@@ -163,35 +165,37 @@ def api_mcp_toggle(server_id: str):
 @bp.route("/api/mcp/<server_id>/save", methods=["POST"])
 def api_mcp_save(server_id: str):
     """Save MCP server configuration."""
-    cfg = _load_mcp_config()
-    disabled_cfg = _load_disabled_config()
     body = request.get_json(silent=True) or {}
 
-    enabled_servers = cfg.setdefault("mcpServers", {})
-    disabled_servers = disabled_cfg.setdefault("mcpServers", {})
+    with config_lock(lock_for(MCP_CONFIG)):
+        cfg = _load_mcp_config()
+        disabled_cfg = _load_disabled_config()
 
-    srv = enabled_servers.get(server_id) or disabled_servers.get(server_id)
-    if not srv:
-        return jsonify({"success": False, "error": "Server not found"}), 404
+        enabled_servers = cfg.setdefault("mcpServers", {})
+        disabled_servers = disabled_cfg.setdefault("mcpServers", {})
 
-    new_srv = {
-        "command": str(body.get("command", srv.get("command", ""))).strip(),
-        "args": list(body.get("args", srv.get("args", []))),
-        "cwd": str(body.get("cwd", srv.get("cwd", ""))).strip(),
-        "description": str(body.get("description", srv.get("description", ""))).strip(),
-    }
-    if "env" in body or "env" in srv:
-        new_srv["env"] = dict(body.get("env", srv.get("env", {})))
+        srv = enabled_servers.get(server_id) or disabled_servers.get(server_id)
+        if not srv:
+            return jsonify({"success": False, "error": "Server not found"}), 404
 
-    if server_id in enabled_servers:
-        enabled_servers[server_id] = new_srv
-    else:
-        disabled_servers[server_id] = new_srv
+        new_srv = {
+            "command": str(body.get("command", srv.get("command", ""))).strip(),
+            "args": list(body.get("args", srv.get("args", []))),
+            "cwd": str(body.get("cwd", srv.get("cwd", ""))).strip(),
+            "description": str(body.get("description", srv.get("description", ""))).strip(),
+        }
+        if "env" in body or "env" in srv:
+            new_srv["env"] = dict(body.get("env", srv.get("env", {})))
 
-    if not _save_mcp_config(cfg):
-        return jsonify({"success": False, "error": "保存 mcp.json 失败"}), 500
-    if not _save_disabled_config(disabled_cfg):
-        return jsonify({"success": False, "error": "保存 .mcp-disabled.json 失败"}), 500
+        if server_id in enabled_servers:
+            enabled_servers[server_id] = new_srv
+        else:
+            disabled_servers[server_id] = new_srv
+
+        if not _save_mcp_config(cfg):
+            return jsonify({"success": False, "error": "保存 mcp.json 失败"}), 500
+        if not _save_disabled_config(disabled_cfg):
+            return jsonify({"success": False, "error": "保存 .mcp-disabled.json 失败"}), 500
 
     return jsonify({"success": True})
 
@@ -199,21 +203,22 @@ def api_mcp_save(server_id: str):
 @bp.route("/api/mcp/<server_id>/delete", methods=["POST"])
 def api_mcp_delete(server_id: str):
     """Remove an MCP server from both enabled and disabled configs."""
-    cfg = _load_mcp_config()
-    disabled_cfg = _load_disabled_config()
+    with config_lock(lock_for(MCP_CONFIG)):
+        cfg = _load_mcp_config()
+        disabled_cfg = _load_disabled_config()
 
-    enabled_servers = cfg.setdefault("mcpServers", {})
-    disabled_servers = disabled_cfg.setdefault("mcpServers", {})
+        enabled_servers = cfg.setdefault("mcpServers", {})
+        disabled_servers = disabled_cfg.setdefault("mcpServers", {})
 
-    if server_id not in enabled_servers and server_id not in disabled_servers:
-        return jsonify({"success": False, "error": "Server not found"}), 404
+        if server_id not in enabled_servers and server_id not in disabled_servers:
+            return jsonify({"success": False, "error": "Server not found"}), 404
 
-    enabled_servers.pop(server_id, None)
-    disabled_servers.pop(server_id, None)
+        enabled_servers.pop(server_id, None)
+        disabled_servers.pop(server_id, None)
 
-    if not _save_mcp_config(cfg):
-        return jsonify({"success": False, "error": "保存 mcp.json 失败"}), 500
-    if not _save_disabled_config(disabled_cfg):
-        return jsonify({"success": False, "error": "保存 .mcp-disabled.json 失败"}), 500
+        if not _save_mcp_config(cfg):
+            return jsonify({"success": False, "error": "保存 mcp.json 失败"}), 500
+        if not _save_disabled_config(disabled_cfg):
+            return jsonify({"success": False, "error": "保存 .mcp-disabled.json 失败"}), 500
 
     return jsonify({"success": True})

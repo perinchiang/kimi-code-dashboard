@@ -28,6 +28,7 @@ except ImportError:
     HAS_BOTO3 = False
 
 from config import log
+from services.helpers import atomic_write_text, config_lock, lock_for
 
 KIMI_CODE_DIR = Path.home() / ".kimi-code"
 CONFIG_PATH = KIMI_CODE_DIR / "config.toml"
@@ -63,8 +64,7 @@ def load_image_bed_config() -> dict:
     if not CONFIG_PATH.exists():
         return defaults
     try:
-        with open(CONFIG_PATH, "rb") as f:
-            cfg = tomllib.load(f)
+        cfg = tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
         ib = cfg.get("image_bed", {})
         # 合并：以 defaults 为底，覆盖已配置字段
         result = dict(defaults)
@@ -109,29 +109,37 @@ def save_image_bed_config(new_cfg: dict) -> None:
     except Exception as e:
         log.warning("Could not backup config.toml: %s", e)
 
-    # 读取现有配置
-    try:
-        with open(CONFIG_PATH, "rb") as f:
-            cfg = tomllib.load(f)
-    except FileNotFoundError:
-        cfg = {}
-    except Exception as e:
-        log.error("config.toml 解析失败,中止写入以防止数据丢失: %s", e)
-        raise
+    # 清理旧 .bak 文件（保留最近 10 个）
+    baks = sorted(glob.glob(str(CONFIG_PATH) + ".*.bak"), key=lambda p: Path(p).stat().st_mtime, reverse=True)
+    for old in baks[10:]:
+        try:
+            Path(old).unlink()
+        except OSError:
+            pass
 
-    # 更新 image_bed 段
-    cfg["image_bed"] = {
-        "provider": new_cfg.get("provider", "r2"),
-        "endpoint_url": new_cfg.get("endpoint_url", "").strip().rstrip("/"),
-        "access_key": new_cfg.get("access_key", "").strip(),
-        "secret_key": new_cfg.get("secret_key", "").strip(),
-        "bucket": new_cfg.get("bucket", "").strip(),
-        "public_base_url": new_cfg.get("public_base_url", "").strip().rstrip("/"),
-        "path_template": (new_cfg.get("path_template", "").strip() or "{file_id}"),
-    }
+    with config_lock(lock_for(CONFIG_PATH)):
+        # 读取现有配置（utf-8-sig 透明跳过 BOM）
+        try:
+            cfg = tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
+        except FileNotFoundError:
+            cfg = {}
+        except Exception as e:
+            log.error("config.toml 解析失败,中止写入以防止数据丢失: %s", e)
+            raise
 
-    with open(CONFIG_PATH, "wb") as f:
-        tomli_w.dump(cfg, f)
+        # 更新 image_bed 段
+        cfg["image_bed"] = {
+            "provider": new_cfg.get("provider", "r2"),
+            "endpoint_url": new_cfg.get("endpoint_url", "").strip().rstrip("/"),
+            "access_key": new_cfg.get("access_key", "").strip(),
+            "secret_key": new_cfg.get("secret_key", "").strip(),
+            "bucket": new_cfg.get("bucket", "").strip(),
+            "public_base_url": new_cfg.get("public_base_url", "").strip().rstrip("/"),
+            "path_template": (new_cfg.get("path_template", "").strip() or "{file_id}"),
+        }
+
+        with open(CONFIG_PATH, "wb") as f:
+            tomli_w.dump(cfg, f)
 
 
 def mask_secret(s: str) -> str:
@@ -157,8 +165,7 @@ def _load_cache() -> dict:
 
 
 def _save_cache(cache: dict) -> None:
-    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CACHE_PATH.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_text(CACHE_PATH, json.dumps(cache, ensure_ascii=False, indent=2))
 
 
 def get_uploaded_url(file_id: str) -> str | None:
@@ -265,14 +272,15 @@ def upload_file(file_id: str, cfg: dict | None = None) -> dict:
             url = f"{cfg.get('endpoint_url','').rstrip('/')}/{cfg['bucket']}/{key}"
 
         # 写缓存
-        cache = _load_cache()
-        cache[file_id] = {
-            "url": url,
-            "uploaded_at": datetime.now().isoformat(),
-            "name": name,
-            "key": key,
-        }
-        _save_cache(cache)
+        with config_lock(lock_for(CACHE_PATH)):
+            cache = _load_cache()
+            cache[file_id] = {
+                "url": url,
+                "uploaded_at": datetime.now().isoformat(),
+                "name": name,
+                "key": key,
+            }
+            _save_cache(cache)
         log.info("Uploaded %s to R2: %s", file_id, url)
         return {"success": True, "url": url, "name": name, "key": key}
     except Exception as e:
@@ -324,7 +332,7 @@ def _render_path_template(template: str, file_id: str, name: str, media_type: st
             day=dt.strftime("%d"),
             media=media_sub,
         )
-    except (KeyError, IndexError):
+    except (KeyError, IndexError, ValueError):
         # 模板里有未知占位符，回退到 file_id
         return file_id
 
@@ -362,6 +370,14 @@ def list_artifacts(file_type: str = "all", keyword: str = "", limit: int = 100, 
     # 过滤
     kw = (keyword or "").strip().lower()
     upload_map = get_uploaded_map()
+    # GC: 清理缓存中已不存在的 file_id（不影响 blob: 前缀的条目）
+    valid_ids = {f.get("id") for f in files_list if f.get("id")}
+    cache = dict(upload_map)
+    cache_dirty = False
+    for cached_id in list(cache.keys()):
+        if not cached_id.startswith("blob:") and cached_id not in valid_ids:
+            del cache[cached_id]
+            cache_dirty = True
     result = []
     for f in files_list:
         media = f.get("media_type", "")
@@ -375,7 +391,7 @@ def list_artifacts(file_type: str = "all", keyword: str = "", limit: int = 100, 
             continue
         # 附加上传状态
         item = dict(f)
-        cache_entry = upload_map.get(f.get("id"), {})
+        cache_entry = cache.get(f.get("id"), {})
         item["uploaded_url"] = cache_entry.get("url", "")
         item["uploaded_at"] = cache_entry.get("uploaded_at", "")
         result.append(item)
@@ -384,6 +400,8 @@ def list_artifacts(file_type: str = "all", keyword: str = "", limit: int = 100, 
     result.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     total = len(result)
     page = result[offset: offset + limit]
+    if cache_dirty:
+        _save_cache(cache)
     return {
         "files": page,
         "total": total,
@@ -562,7 +580,7 @@ def list_blobs(keyword: str = "", limit: int = 200, offset: int = 0) -> dict:
     """扫描所有会话的 blobs/ 目录，列出 AI 生成/引用的图片。
 
     返回 {
-        "blobs": [{sha256, mime_type, size, mtime, session_id, uploaded_url, uploaded_at}],
+        "blobs": [{sha256, media_type, size, mtime, session_id, uploaded_url, uploaded_at}],
         "total": int,
         "image_bed_enabled": bool
     }
@@ -597,7 +615,7 @@ def list_blobs(keyword: str = "", limit: int = 200, offset: int = 0) -> dict:
                     break
             all_blobs[sha] = {
                 "sha256": sha,
-                "mime_type": mime,
+                "media_type": mime,
                 "size": stat.st_size,
                 "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(),
                 "session_id": session_id,
@@ -695,14 +713,16 @@ def upload_blob(sha256: str, cfg: dict | None = None) -> dict:
             url = f"{cfg.get('endpoint_url','').rstrip('/')}/{cfg['bucket']}/{key}"
 
         # 写缓存
-        cache[cache_key] = {
-            "url": url,
-            "uploaded_at": datetime.now().isoformat(),
-            "name": sha256[:16],
-            "key": key,
-            "sha256": sha256,
-        }
-        _save_cache(cache)
+        with config_lock(lock_for(CACHE_PATH)):
+            cache = _load_cache()
+            cache[cache_key] = {
+                "url": url,
+                "uploaded_at": datetime.now().isoformat(),
+                "name": sha256[:16],
+                "key": key,
+                "sha256": sha256,
+            }
+            _save_cache(cache)
         log.info("Uploaded blob %s to R2: %s", sha256[:12], url)
         return {"success": True, "url": url, "sha256": sha256, "key": key}
     except Exception as e:

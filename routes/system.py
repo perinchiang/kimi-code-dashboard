@@ -14,7 +14,7 @@ from pathlib import Path
 from flask import Blueprint, jsonify, render_template, request
 
 from config import APP_DIR, DASHBOARD_VERSION, KIMI_BIN, KIMI_CODE_DIR, log
-from services.helpers import no_window_kwargs, tcp_open
+from services.helpers import atomic_write_text, config_lock, lock_for, no_window_kwargs, tcp_open
 
 bp = Blueprint("system", __name__)
 
@@ -40,7 +40,7 @@ WINDOWS_ELEVATED_TASK_NAME = "KimiCodeDashboardAdmin"
 def _read_default_permission_mode() -> str:
     """Read default_permission_mode from Kimi config.toml."""
     try:
-        text = KIMI_CONFIG.read_text(encoding="utf-8")
+        text = KIMI_CONFIG.read_text(encoding="utf-8-sig")
         m = re.search(r'^default_permission_mode\s*=\s*"([^"]+)"', text, re.MULTILINE)
         if m:
             return m.group(1)
@@ -52,18 +52,19 @@ def _read_default_permission_mode() -> str:
 def _write_default_permission_mode(mode: str) -> bool:
     """Write default_permission_mode to Kimi config.toml, preserving other content."""
     try:
-        text = KIMI_CONFIG.read_text(encoding="utf-8")
-        new_line = f'default_permission_mode = "{mode}"'
-        if re.search(r'^default_permission_mode\s*=\s*"', text, re.MULTILINE):
-            text = re.sub(
-                r'^default_permission_mode\s*=.*$',
-                new_line,
-                text,
-                flags=re.MULTILINE,
-            )
-        else:
-            text = new_line + "\n" + text
-        KIMI_CONFIG.write_text(text, encoding="utf-8")
+        with config_lock(lock_for(KIMI_CONFIG)):
+            text = KIMI_CONFIG.read_text(encoding="utf-8-sig")
+            new_line = f'default_permission_mode = "{mode}"'
+            if re.search(r'^default_permission_mode\s*=\s*"', text, re.MULTILINE):
+                text = re.sub(
+                    r'^default_permission_mode\s*=.*$',
+                    new_line,
+                    text,
+                    flags=re.MULTILINE,
+                )
+            else:
+                text = new_line + "\n" + text
+            atomic_write_text(KIMI_CONFIG, text)
         return True
     except Exception as e:
         log.error("Failed to write %s: %s", KIMI_CONFIG, e)
@@ -84,6 +85,15 @@ def _clean_stale_lock():
                 os.chmod(str(lock_path), 0o777)
             except Exception:
                 pass
+            # Re-verify before unlink (kimi server may have restarted)
+            try:
+                data2 = json.loads(lock_path.read_text(encoding="utf-8"))
+                pid2 = data2.get("pid")
+                if pid2 != pid or _pid_alive(pid2):
+                    log.info("Lock file pid changed or still alive, skipping removal")
+                    return
+            except Exception:
+                return  # File may have been removed already
             lock_path.unlink(missing_ok=True)
     except Exception as e:
         log.debug("Failed to check stale lock: %s", e)
@@ -572,6 +582,7 @@ def _windows_elevated_task_ps(enable: bool) -> str:
 def _windows_run_elevated_ps(ps_code: str) -> tuple[bool, str]:
     """Run PowerShell code with UAC elevation (shows prompt)."""
     import tempfile
+    script_path = None
     try:
         with tempfile.NamedTemporaryFile("w", suffix=".ps1", delete=False, encoding="utf-8") as f:
             f.write(ps_code)
@@ -581,14 +592,15 @@ def _windows_run_elevated_ps(ps_code: str) -> tuple[bool, str]:
              f'Start-Process powershell -Verb runAs -Wait -ArgumentList \'-NoProfile -ExecutionPolicy Bypass -File "{script_path}"\''],
             capture_output=True, text=True, timeout=60, **no_window_kwargs()
         )
-        # Clean up script after execution
-        try:
-            Path(script_path).unlink(missing_ok=True)
-        except Exception:
-            pass
         return True, ""
     except Exception as e:
         return False, str(e)
+    finally:
+        if script_path:
+            try:
+                Path(script_path).unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 # Cross-platform status/toggle

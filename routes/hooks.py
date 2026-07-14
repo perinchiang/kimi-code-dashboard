@@ -6,6 +6,7 @@ Active hooks live under the top-level `hooks` array; disabled hooks live under
 store any dashboard-only metadata inside individual hook entries.
 """
 
+import glob
 import hashlib
 import json
 import shutil
@@ -17,6 +18,7 @@ import tomli_w
 from flask import Blueprint, jsonify, request
 
 from config import KIMI_CODE_DIR, KIMI_CONFIG, log
+from services.helpers import atomic_write_text, config_lock, lock_for
 
 bp = Blueprint("hooks", __name__)
 
@@ -47,14 +49,24 @@ def _save_descriptions(descriptions: dict) -> bool:
     """Save the dashboard-only hook descriptions mapping."""
     try:
         HOOK_DESCRIPTIONS_DIR.mkdir(parents=True, exist_ok=True)
-        HOOK_DESCRIPTIONS_FILE.write_text(
+        atomic_write_text(
+            HOOK_DESCRIPTIONS_FILE,
             json.dumps(descriptions, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
         return True
     except Exception as e:
         log.error("Failed to save hook descriptions: %s", e)
         return False
+
+
+def _cleanup_old_backups(max_keep: int = 10) -> None:
+    """Keep only the most recent *max_keep* .bak files for config.toml."""
+    baks = sorted(glob.glob(str(KIMI_CONFIG) + ".*.bak"), key=lambda p: Path(p).stat().st_mtime, reverse=True)
+    for old in baks[max_keep:]:
+        try:
+            Path(old).unlink()
+        except OSError:
+            pass
 
 
 def _backup_config() -> Path:
@@ -66,12 +78,13 @@ def _backup_config() -> Path:
         log.info("Backed up %s to %s", KIMI_CONFIG, backup_path)
     except Exception as e:
         log.error("Failed to backup %s: %s", KIMI_CONFIG, e)
+    _cleanup_old_backups()
     return backup_path
 
 
 def _load_config() -> dict:
     try:
-        return tomllib.loads(KIMI_CONFIG.read_text(encoding="utf-8"))
+        return tomllib.loads(KIMI_CONFIG.read_text(encoding="utf-8-sig"))
     except FileNotFoundError:
         log.warning("%s not found, returning empty config", KIMI_CONFIG)
         return {}
@@ -89,7 +102,7 @@ def _save_config(data: dict) -> bool:
             data.pop("hooks", None)
         if not data.get("disabled_hooks"):
             data.pop("disabled_hooks", None)
-        KIMI_CONFIG.write_text(tomli_w.dumps(data), encoding="utf-8")
+        atomic_write_text(KIMI_CONFIG, tomli_w.dumps(data))
         log.info("Updated %s", KIMI_CONFIG)
         return True
     except Exception as e:
@@ -207,14 +220,15 @@ def api_hook_create():
         "timeout": timeout,
     })
 
-    data = _load_config()
-    enabled = bool(body.get("enabled", True))
-    key = "hooks" if enabled else "disabled_hooks"
-    data.setdefault(key, [])
-    data[key].append(new_hook)
+    with config_lock(lock_for(KIMI_CONFIG)):
+        data = _load_config()
+        enabled = bool(body.get("enabled", True))
+        key = "hooks" if enabled else "disabled_hooks"
+        data.setdefault(key, [])
+        data[key].append(new_hook)
 
-    if not _save_config(data):
-        return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
+        if not _save_config(data):
+            return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
 
     # Save dashboard-only description.
     description = str(body.get("description", "")).strip()
@@ -229,11 +243,6 @@ def api_hook_create():
 @bp.route("/api/hooks/<hook_id>", methods=["POST"])
 def api_hook_update(hook_id: str):
     body = request.get_json(silent=True) or {}
-    data = _load_config()
-    key, idx = _locate_hook(data, hook_id)
-    if key is None:
-        return jsonify({"success": False, "error": "Hook 不存在"}), 404
-
     event = str(body.get("event", "")).strip()
     command = str(body.get("command", "")).strip()
     if not event or not command:
@@ -257,21 +266,27 @@ def api_hook_update(hook_id: str):
         "timeout": timeout,
     })
 
-    old_hash = _hook_hash(_clean_hook(data[key][idx]))
-    target_enabled = bool(body.get("enabled", key == "hooks"))
-    current_enabled = key == "hooks"
+    with config_lock(lock_for(KIMI_CONFIG)):
+        data = _load_config()
+        key, idx = _locate_hook(data, hook_id)
+        if key is None:
+            return jsonify({"success": False, "error": "Hook 不存在"}), 404
 
-    if target_enabled == current_enabled:
-        data[key][idx] = updated
-    else:
-        # Move between arrays.
-        data[key].pop(idx)
-        new_key = "hooks" if target_enabled else "disabled_hooks"
-        data.setdefault(new_key, [])
-        data[new_key].append(updated)
+        old_hash = _hook_hash(_clean_hook(data[key][idx]))
+        target_enabled = bool(body.get("enabled", key == "hooks"))
+        current_enabled = key == "hooks"
 
-    if not _save_config(data):
-        return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
+        if target_enabled == current_enabled:
+            data[key][idx] = updated
+        else:
+            # Move between arrays.
+            data[key].pop(idx)
+            new_key = "hooks" if target_enabled else "disabled_hooks"
+            data.setdefault(new_key, [])
+            data[new_key].append(updated)
+
+        if not _save_config(data):
+            return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
 
     # Update dashboard-only description.
     descriptions = _load_descriptions()
@@ -290,33 +305,35 @@ def api_hook_update(hook_id: str):
 
 @bp.route("/api/hooks/<hook_id>/toggle", methods=["POST"])
 def api_hook_toggle(hook_id: str):
-    data = _load_config()
-    key, idx = _locate_hook(data, hook_id)
-    if key is None:
-        return jsonify({"success": False, "error": "Hook 不存在"}), 404
+    with config_lock(lock_for(KIMI_CONFIG)):
+        data = _load_config()
+        key, idx = _locate_hook(data, hook_id)
+        if key is None:
+            return jsonify({"success": False, "error": "Hook 不存在"}), 404
 
-    hook = data[key].pop(idx)
-    new_key = "disabled_hooks" if key == "hooks" else "hooks"
-    data.setdefault(new_key, [])
-    data[new_key].append(hook)
+        hook = data[key].pop(idx)
+        new_key = "disabled_hooks" if key == "hooks" else "hooks"
+        data.setdefault(new_key, [])
+        data[new_key].append(hook)
 
-    if not _save_config(data):
-        return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
+        if not _save_config(data):
+            return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
     return jsonify({"success": True})
 
 
 @bp.route("/api/hooks/<hook_id>/delete", methods=["POST"])
 def api_hook_delete(hook_id: str):
-    data = _load_config()
-    key, idx = _locate_hook(data, hook_id)
-    if key is None:
-        return jsonify({"success": False, "error": "Hook 不存在"}), 404
+    with config_lock(lock_for(KIMI_CONFIG)):
+        data = _load_config()
+        key, idx = _locate_hook(data, hook_id)
+        if key is None:
+            return jsonify({"success": False, "error": "Hook 不存在"}), 404
 
-    removed = _clean_hook(data[key][idx])
-    data[key].pop(idx)
+        removed = _clean_hook(data[key][idx])
+        data[key].pop(idx)
 
-    if not _save_config(data):
-        return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
+        if not _save_config(data):
+            return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
 
     # Clean up dashboard-only description.
     descriptions = _load_descriptions()

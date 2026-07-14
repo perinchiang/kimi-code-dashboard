@@ -7,7 +7,8 @@ import os
 import platform
 import re
 import subprocess
-import urllib.request
+import threading
+import urllib.request, urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from config import (
     DASHBOARD_VERSION,
     KIMI_BIN,
     KIMI_CODE_DIR,
+    KIMI_CONFIG,
     KIMI_CREDENTIALS,
     KIMI_GITHUB_LATEST,
     KIMI_LOG,
@@ -228,11 +230,9 @@ def _get_kimi_api_key() -> str:
     Falls back to KIMI_API_KEY env var for backward compatibility.
     """
     # 1. Prefer the key configured in Kimi Code "第三方模型 - kimi".
-    config_path = KIMI_CODE_DIR / "config.toml"
-    if tomllib and config_path.exists():
+    if tomllib and KIMI_CONFIG.exists():
         try:
-            with open(config_path, "rb") as f:
-                cfg = tomllib.load(f)
+            cfg = tomllib.loads(KIMI_CONFIG.read_text(encoding="utf-8-sig"))
             providers = cfg.get("providers", {})
             for key, value in providers.items():
                 if isinstance(value, dict) and value.get("type") == "kimi":
@@ -423,6 +423,8 @@ def _fetch_latest_release(api_url: str, repo: str, releases_page: str) -> dict |
         return {"error": "rate_limited" if rate_limited else "fetch_failed", "message": msg}
 
     tag = body.get("tag_name", "")
+    if not tag:
+        return {"error": "invalid_response"}
     version = tag.rsplit("@", 1)[-1] if "@" in tag else tag.lstrip("v")
     notes = body.get("body", "") or ""
     if len(notes) > 600:
@@ -528,6 +530,7 @@ def api_kimi_update_check():
 
 
 _upgrade_state: dict = {"proc": None, "log_path": None, "started_at": 0.0, "manual": False}
+_upgrade_lock = threading.Lock()
 
 _MANUAL_INSTALL_URL_PS1 = "https://code.kimi.com/kimi-code/install.ps1"
 _MANUAL_INSTALL_URL_SH = "https://code.kimi.com/kimi-code/install.sh"
@@ -536,32 +539,33 @@ _MANUAL_INSTALL_URL_SH = "https://code.kimi.com/kimi-code/install.sh"
 @bp.route("/api/kimi-update/run", methods=["POST"])
 def api_kimi_update_run():
     """POST-only: triggers `kimi upgrade` as a background subprocess."""
-    proc = _upgrade_state.get("proc")
-    if proc is not None and proc.poll() is None:
-        return jsonify({"status": "already_running"})
-
     import tempfile
-    log_fd, log_path = tempfile.mkstemp(suffix=".log", prefix="kimi_upgrade_")
-    os.close(log_fd)
-    try:
-        logf = open(log_path, "w", encoding="utf-8")
-        kwargs = {
-            "stdout": logf,
-            "stderr": subprocess.STDOUT,
-            "cwd": str(KIMI_BIN.parent.parent),
-        }
-        kwargs.update(no_window_kwargs())
-        proc = subprocess.Popen([str(KIMI_BIN), "upgrade"], **kwargs)
-    except Exception as e:
-        log.error("Failed to start kimi upgrade: %s", e)
-        logf.close()
-        return jsonify({"status": "error", "error": str(e)})
+    with _upgrade_lock:
+        proc = _upgrade_state.get("proc")
+        if proc is not None and proc.poll() is None:
+            return jsonify({"status": "already_running"})
 
-    _upgrade_state["proc"] = proc
-    _upgrade_state["logf"] = logf
-    _upgrade_state["log_path"] = log_path
-    _upgrade_state["started_at"] = datetime.now(timezone.utc).timestamp()
-    _upgrade_state["manual"] = False
+        log_fd, log_path = tempfile.mkstemp(suffix=".log", prefix="kimi_upgrade_")
+        os.close(log_fd)
+        try:
+            logf = open(log_path, "w", encoding="utf-8")
+            kwargs = {
+                "stdout": logf,
+                "stderr": subprocess.STDOUT,
+                "cwd": str(KIMI_BIN.parent.parent),
+            }
+            kwargs.update(no_window_kwargs())
+            proc = subprocess.Popen([str(KIMI_BIN), "upgrade"], **kwargs)
+        except Exception as e:
+            log.error("Failed to start kimi upgrade: %s", e)
+            logf.close()
+            return jsonify({"status": "error", "error": str(e)})
+
+        _upgrade_state["proc"] = proc
+        _upgrade_state["logf"] = logf
+        _upgrade_state["log_path"] = log_path
+        _upgrade_state["started_at"] = datetime.now(timezone.utc).timestamp()
+        _upgrade_state["manual"] = False
     return jsonify({"status": "started"})
 
 
@@ -571,48 +575,50 @@ def api_kimi_update_manual_run():
 
     Windows uses install.ps1 (PowerShell); macOS/Linux uses install.sh (bash).
     """
-    proc = _upgrade_state.get("proc")
-    if proc is not None and proc.poll() is None:
-        return jsonify({"status": "already_running"})
-
     import tempfile
-    log_fd, log_path = tempfile.mkstemp(suffix=".log", prefix="kimi_manual_upgrade_")
-    os.close(log_fd)
-    try:
-        logf = open(log_path, "w", encoding="utf-8")
-        if platform.system() == "Windows":
-            cmd = [
-                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                "-Command", f"irm {_MANUAL_INSTALL_URL_PS1} | iex",
-            ]
-            log.info("Started manual Kimi Code install via PowerShell")
-        else:
-            # macOS / Linux: curl install.sh | bash
-            cmd = ["bash", "-c", f"curl -fsSL {_MANUAL_INSTALL_URL_SH} | bash"]
-            log.info("Started manual Kimi Code install via bash")
-        kwargs = {
-            "stdout": logf,
-            "stderr": subprocess.STDOUT,
-        }
-        kwargs.update(no_window_kwargs())
-        proc = subprocess.Popen(cmd, **kwargs)
-    except Exception as e:
-        log.error("Failed to start manual kimi install: %s", e)
-        logf.close()
-        return jsonify({"status": "error", "error": str(e)})
+    with _upgrade_lock:
+        proc = _upgrade_state.get("proc")
+        if proc is not None and proc.poll() is None:
+            return jsonify({"status": "already_running"})
 
-    _upgrade_state["proc"] = proc
-    _upgrade_state["logf"] = logf
-    _upgrade_state["log_path"] = log_path
-    _upgrade_state["started_at"] = datetime.now(timezone.utc).timestamp()
-    _upgrade_state["manual"] = True
+        log_fd, log_path = tempfile.mkstemp(suffix=".log", prefix="kimi_manual_upgrade_")
+        os.close(log_fd)
+        try:
+            logf = open(log_path, "w", encoding="utf-8")
+            if platform.system() == "Windows":
+                cmd = [
+                    "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-Command", f"irm {_MANUAL_INSTALL_URL_PS1} | iex",
+                ]
+                log.info("Started manual Kimi Code install via PowerShell")
+            else:
+                # macOS / Linux: curl install.sh | bash
+                cmd = ["bash", "-c", f"curl -fsSL {_MANUAL_INSTALL_URL_SH} | bash"]
+                log.info("Started manual Kimi Code install via bash")
+            kwargs = {
+                "stdout": logf,
+                "stderr": subprocess.STDOUT,
+            }
+            kwargs.update(no_window_kwargs())
+            proc = subprocess.Popen(cmd, **kwargs)
+        except Exception as e:
+            log.error("Failed to start manual kimi install: %s", e)
+            logf.close()
+            return jsonify({"status": "error", "error": str(e)})
+
+        _upgrade_state["proc"] = proc
+        _upgrade_state["logf"] = logf
+        _upgrade_state["log_path"] = log_path
+        _upgrade_state["started_at"] = datetime.now(timezone.utc).timestamp()
+        _upgrade_state["manual"] = True
     return jsonify({"status": "started"})
 
 
 @bp.route("/api/kimi-update/status")
 def api_kimi_update_status():
-    proc = _upgrade_state.get("proc")
-    log_path = _upgrade_state.get("log_path")
+    with _upgrade_lock:
+        proc = _upgrade_state.get("proc")
+        log_path = _upgrade_state.get("log_path")
     if proc is None:
         return jsonify({"status": "idle", "running": False, "log": ""})
 
@@ -634,6 +640,14 @@ def api_kimi_update_status():
                 old_logf.close()
             except Exception:
                 pass
+        # Clean up the temp log file
+        if log_path:
+            try:
+                os.unlink(log_path)
+            except OSError:
+                pass
+        _upgrade_state["log_path"] = None
+        _upgrade_state["proc"] = None
 
     status = "running" if running else ("success" if exit_code == 0 else "failed")
     manual_update = False

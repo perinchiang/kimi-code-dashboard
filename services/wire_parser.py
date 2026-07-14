@@ -68,16 +68,31 @@ def _iter_wire_files() -> list[Path]:
     if not SESSIONS_DIR.exists():
         return []
     files = []
-    for workspace_dir in SESSIONS_DIR.iterdir():
+    try:
+        workspace_iter = list(SESSIONS_DIR.iterdir())
+    except OSError as e:
+        log.warning("Failed to iterate sessions dir: %s", e)
+        return files
+    for workspace_dir in workspace_iter:
         if not workspace_dir.is_dir():
             continue
-        for session_dir in workspace_dir.iterdir():
+        try:
+            session_iter = list(workspace_dir.iterdir())
+        except OSError as e:
+            log.warning("Failed to iterate workspace dir %s: %s", workspace_dir, e)
+            continue
+        for session_dir in session_iter:
             if not session_dir.is_dir() or not session_dir.name.startswith("session_"):
                 continue
             agents_dir = session_dir / "agents"
             if not agents_dir.exists():
                 continue
-            for agent_dir in agents_dir.iterdir():
+            try:
+                agent_iter = list(agents_dir.iterdir())
+            except OSError as e:
+                log.warning("Failed to iterate agents dir %s: %s", agents_dir, e)
+                continue
+            for agent_dir in agent_iter:
                 wire = agent_dir / "wire.jsonl"
                 if wire.is_file():
                     files.append(wire)
@@ -229,9 +244,9 @@ def parse_all_full() -> ParseResult:
 # Cached high-level API
 # ---------------------------------------------------------------------------
 
-_trend_cache: dict = {"data": None, "at": 0.0}
-_tool_usage_cache: dict = {"data": None, "at": 0.0}
-_model_usage_cache: dict = {"data": None, "at": 0.0}
+_trend_cache: dict = {"data": None, "at": 0.0, "date": None}
+_tool_usage_cache: dict = {"data": None, "at": 0.0, "date": None}
+_model_usage_cache: dict = {"data": None, "at": 0.0, "date": None}
 _cache_lock = __import__("threading").Lock()
 
 
@@ -413,11 +428,13 @@ def _compute_active_streak(records: list[UsageRecord]) -> tuple[int, int]:
 def get_trends() -> dict:
     """Get cached trend data, re-parsing if stale."""
     now_ts = time.time()
-    if _trend_cache["data"] is None or now_ts - _trend_cache["at"] > TREND_CACHE_TTL:
+    today = datetime.now().astimezone().date()
+    if _trend_cache["data"] is None or now_ts - _trend_cache["at"] > TREND_CACHE_TTL or _trend_cache.get("date") != today:
         with _cache_lock:
             # Double-checked locking: another thread may have refreshed while we waited
             now_ts = time.time()
-            if _trend_cache["data"] is not None and now_ts - _trend_cache["at"] <= TREND_CACHE_TTL:
+            today = datetime.now().astimezone().date()
+            if _trend_cache["data"] is not None and now_ts - _trend_cache["at"] <= TREND_CACHE_TTL and _trend_cache.get("date") == today:
                 return _trend_cache["data"]
             log.debug("Trend cache miss, parsing wire.jsonl files")
             result = parse_all_full()
@@ -456,6 +473,7 @@ def get_trends() -> dict:
                 },
             }
             _trend_cache["at"] = now_ts
+            _trend_cache["date"] = today
 
             # Also update tool-usage and model-usage caches since we just parsed everything
             _update_tool_usage_cache(result)
@@ -487,19 +505,23 @@ def _update_tool_usage_cache(result: ParseResult):
         },
     }
     _tool_usage_cache["at"] = time.time()
+    _tool_usage_cache["date"] = datetime.now().astimezone().date()
 
 
 def get_tool_usage() -> dict:
     """Get cached tool/skill usage data, re-parsing if stale."""
     now_ts = time.time()
-    if _tool_usage_cache["data"] is None or now_ts - _tool_usage_cache["at"] > TOOL_USAGE_CACHE_TTL:
+    today = datetime.now().astimezone().date()
+    if _tool_usage_cache["data"] is None or now_ts - _tool_usage_cache["at"] > TOOL_USAGE_CACHE_TTL or _tool_usage_cache.get("date") != today:
         with _cache_lock:
             now_ts = time.time()
-            if _tool_usage_cache["data"] is not None and now_ts - _tool_usage_cache["at"] <= TOOL_USAGE_CACHE_TTL:
+            today = datetime.now().astimezone().date()
+            if _tool_usage_cache["data"] is not None and now_ts - _tool_usage_cache["at"] <= TOOL_USAGE_CACHE_TTL and _tool_usage_cache.get("date") == today:
                 return _tool_usage_cache["data"]
             log.debug("Tool-usage cache miss, parsing wire.jsonl files")
             result = parse_all_full()
             _update_tool_usage_cache(result)
+            _tool_usage_cache["date"] = today
             # Also update trend + model caches
             _trend_cache["at"] = 0  # force trend refresh next call
             _update_model_usage_cache(result)
@@ -563,19 +585,23 @@ def _update_model_usage_cache(result: ParseResult):
         },
     }
     _model_usage_cache["at"] = time.time()
+    _model_usage_cache["date"] = datetime.now().astimezone().date()
 
 
 def get_model_usage() -> dict:
     """Get cached model usage distribution, re-parsing if stale."""
     now_ts = time.time()
-    if _model_usage_cache["data"] is None or now_ts - _model_usage_cache["at"] > TOOL_USAGE_CACHE_TTL:
+    today = datetime.now().astimezone().date()
+    if _model_usage_cache["data"] is None or now_ts - _model_usage_cache["at"] > TOOL_USAGE_CACHE_TTL or _model_usage_cache.get("date") != today:
         with _cache_lock:
             now_ts = time.time()
-            if _model_usage_cache["data"] is not None and now_ts - _model_usage_cache["at"] <= TOOL_USAGE_CACHE_TTL:
+            today = datetime.now().astimezone().date()
+            if _model_usage_cache["data"] is not None and now_ts - _model_usage_cache["at"] <= TOOL_USAGE_CACHE_TTL and _model_usage_cache.get("date") == today:
                 return _model_usage_cache["data"]
             log.debug("Model-usage cache miss, parsing wire.jsonl files")
             result = parse_all_full()
             _update_model_usage_cache(result)
+            _model_usage_cache["date"] = today
             # Also update other caches
             _trend_cache["at"] = 0
             _update_tool_usage_cache(result)

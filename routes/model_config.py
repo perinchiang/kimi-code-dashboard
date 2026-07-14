@@ -5,6 +5,7 @@ The rest of the config file is preserved as-is.
 """
 
 import json
+import glob
 import shutil
 import tomllib
 import urllib.error
@@ -16,6 +17,7 @@ import tomli_w
 from flask import Blueprint, jsonify, request
 
 from config import log
+from services.helpers import atomic_write_text, config_lock, lock_for
 
 bp = Blueprint("model_config", __name__, url_prefix="/api/model-config")
 
@@ -29,8 +31,17 @@ def _is_protected_provider(pid: str) -> bool:
 
 
 def _load() -> dict:
-    with open(CONFIG_PATH, "rb") as f:
-        return tomllib.load(f)
+    return tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
+
+
+def _cleanup_old_backups(max_keep: int = 10) -> None:
+    """Keep only the most recent *max_keep* .bak files for config.toml."""
+    baks = sorted(glob.glob(str(CONFIG_PATH) + ".*.bak"), key=lambda p: Path(p).stat().st_mtime, reverse=True)
+    for old in baks[max_keep:]:
+        try:
+            Path(old).unlink()
+        except OSError:
+            pass
 
 
 def _save(cfg: dict) -> None:
@@ -39,8 +50,8 @@ def _save(cfg: dict) -> None:
         shutil.copy2(CONFIG_PATH, backup)
     except Exception as e:
         log.warning("Could not backup config.toml: %s", e)
-    with open(CONFIG_PATH, "wb") as f:
-        tomli_w.dump(cfg, f)
+    _cleanup_old_backups()
+    atomic_write_text(CONFIG_PATH, tomli_w.dumps(cfg))
 
 
 def _mask_key(key: str | None) -> str:
@@ -141,32 +152,33 @@ def api_save_provider():
         return jsonify({"error": "cannot edit built-in provider"}), 403
 
     try:
-        cfg = _load()
-        providers = cfg.setdefault("providers", {})
-        old = providers.get(pid, {})
-        base_url = body.get("base_url") or old.get("base_url", "")
-        entry = {
-            "type": _infer_provider_type(base_url, body.get("type")) or old.get("type", "openai"),
-            "base_url": base_url,
-        }
-        new_key = body.get("api_key", MASK)
-        if new_key != MASK:
-            entry["api_key"] = new_key
-        elif "api_key" in old:
-            entry["api_key"] = old["api_key"]
+        with config_lock(lock_for(CONFIG_PATH)):
+            cfg = _load()
+            providers = cfg.setdefault("providers", {})
+            old = providers.get(pid, {})
+            base_url = body.get("base_url") or old.get("base_url", "")
+            entry = {
+                "type": _infer_provider_type(base_url, body.get("type")) or old.get("type", "openai"),
+                "base_url": base_url,
+            }
+            new_key = body.get("api_key", MASK)
+            if new_key != MASK:
+                entry["api_key"] = new_key
+            elif "api_key" in old:
+                entry["api_key"] = old["api_key"]
 
-        if body.get("custom_headers"):
-            entry["custom_headers"] = body["custom_headers"]
-        elif "custom_headers" in old:
-            entry["custom_headers"] = old["custom_headers"]
+            if body.get("custom_headers"):
+                entry["custom_headers"] = body["custom_headers"]
+            elif "custom_headers" in old:
+                entry["custom_headers"] = old["custom_headers"]
 
-        if body.get("env"):
-            entry["env"] = body["env"]
-        elif "env" in old:
-            entry["env"] = old["env"]
+            if body.get("env"):
+                entry["env"] = body["env"]
+            elif "env" in old:
+                entry["env"] = old["env"]
 
-        providers[pid] = entry
-        _save(cfg)
+            providers[pid] = entry
+            _save(cfg)
         return jsonify({"ok": True, "provider": pid})
     except Exception as e:
         log.error("Failed to save provider: %s", e)
@@ -178,12 +190,13 @@ def api_delete_provider(pid: str):
     if _is_protected_provider(pid):
         return jsonify({"error": "cannot delete built-in provider"}), 403
     try:
-        cfg = _load()
-        providers = cfg.get("providers", {})
-        if pid not in providers:
-            return jsonify({"error": "provider not found"}), 404
-        del providers[pid]
-        _save(cfg)
+        with config_lock(lock_for(CONFIG_PATH)):
+            cfg = _load()
+            providers = cfg.get("providers", {})
+            if pid not in providers:
+                return jsonify({"error": "provider not found"}), 404
+            del providers[pid]
+            _save(cfg)
         return jsonify({"ok": True})
     except Exception as e:
         log.error("Failed to delete provider: %s", e)
@@ -315,34 +328,35 @@ def api_save_model():
         return jsonify({"error": "model id required"}), 400
 
     try:
-        cfg = _load()
-        providers = cfg.get("providers", {})
-        models = cfg.setdefault("models", {})
-        old = models.get(mid, {})
-        provider = body.get("provider") or old.get("provider", "")
-        if _is_protected_provider(provider):
-            return jsonify({"error": "cannot edit model of built-in provider"}), 403
-        if provider and provider not in providers:
-            return jsonify({"error": f"provider '{provider}' not found"}), 400
-        entry = {
-            "provider": provider or old.get("provider", ""),
-            "model": body.get("model") or old.get("model", mid),
-            "max_context_size": int(body.get("max_context_size") or old.get("max_context_size", 128000)),
-            "max_tokens": int(body.get("max_tokens") or old.get("max_tokens", 4096)),
-        }
-        caps = body.get("capabilities")
-        if caps is not None:
-            entry["capabilities"] = list(caps)
-        elif "capabilities" in old:
-            entry["capabilities"] = old["capabilities"]
+        with config_lock(lock_for(CONFIG_PATH)):
+            cfg = _load()
+            providers = cfg.get("providers", {})
+            models = cfg.setdefault("models", {})
+            old = models.get(mid, {})
+            provider = body.get("provider") or old.get("provider", "")
+            if _is_protected_provider(provider):
+                return jsonify({"error": "cannot edit model of built-in provider"}), 403
+            if provider and provider not in providers:
+                return jsonify({"error": f"provider '{provider}' not found"}), 400
+            entry = {
+                "provider": provider or old.get("provider", ""),
+                "model": body.get("model") or old.get("model", mid),
+                "max_context_size": int(body.get("max_context_size") or old.get("max_context_size", 128000)),
+                "max_tokens": int(body.get("max_tokens") or old.get("max_tokens", 4096)),
+            }
+            caps = body.get("capabilities")
+            if caps is not None:
+                entry["capabilities"] = list(caps)
+            elif "capabilities" in old:
+                entry["capabilities"] = old["capabilities"]
 
-        if body.get("display_name"):
-            entry["display_name"] = body["display_name"]
-        elif "display_name" in old:
-            entry["display_name"] = old["display_name"]
+            if body.get("display_name"):
+                entry["display_name"] = body["display_name"]
+            elif "display_name" in old:
+                entry["display_name"] = old["display_name"]
 
-        models[mid] = entry
-        _save(cfg)
+            models[mid] = entry
+            _save(cfg)
         return jsonify({"ok": True, "model": mid})
     except Exception as e:
         log.error("Failed to save model: %s", e)
@@ -352,18 +366,19 @@ def api_save_model():
 @bp.route("/model/<path:mid>", methods=["DELETE"])
 def api_delete_model(mid: str):
     try:
-        cfg = _load()
-        models = cfg.get("models", {})
-        model = models.get(mid)
-        if model and _is_protected_provider(model.get("provider", "")):
-            return jsonify({"error": "cannot delete model of built-in provider"}), 403
-        if mid not in models:
-            return jsonify({"error": "model not found"}), 404
-        del models[mid]
-        # Keep default_model valid.
-        if cfg.get("default_model") == mid:
-            cfg["default_model"] = next(iter(models.keys()), "")
-        _save(cfg)
+        with config_lock(lock_for(CONFIG_PATH)):
+            cfg = _load()
+            models = cfg.get("models", {})
+            model = models.get(mid)
+            if model and _is_protected_provider(model.get("provider", "")):
+                return jsonify({"error": "cannot delete model of built-in provider"}), 403
+            if mid not in models:
+                return jsonify({"error": "model not found"}), 404
+            del models[mid]
+            # Keep default_model valid.
+            if cfg.get("default_model") == mid:
+                cfg["default_model"] = next(iter(models.keys()), "")
+            _save(cfg)
         return jsonify({"ok": True})
     except Exception as e:
         log.error("Failed to delete model: %s", e)
@@ -377,12 +392,13 @@ def api_set_default_model():
     if not mid:
         return jsonify({"error": "model id required"}), 400
     try:
-        cfg = _load()
-        models = cfg.get("models", {})
-        if mid not in models:
-            return jsonify({"error": f"model '{mid}' not found"}), 400
-        cfg["default_model"] = mid
-        _save(cfg)
+        with config_lock(lock_for(CONFIG_PATH)):
+            cfg = _load()
+            models = cfg.get("models", {})
+            if mid not in models:
+                return jsonify({"error": f"model '{mid}' not found"}), 400
+            cfg["default_model"] = mid
+            _save(cfg)
         return jsonify({"ok": True, "default_model": mid})
     except Exception as e:
         log.error("Failed to set default model: %s", e)
