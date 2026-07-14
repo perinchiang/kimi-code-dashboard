@@ -926,6 +926,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
     box-shadow: 0 20px 50px rgba(0,0,0,0.45);
     width: 100%;
     max-height: calc(100vh - 2rem);
+    margin: 0 auto;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -936,6 +937,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 
 .modal-md { max-width: 520px; }
 .modal-lg { max-width: 800px; }
+.modal-mcp { max-width: 640px; }
 
 .modal-header {
     display: flex;
