@@ -847,6 +847,47 @@ function _mcpDetailHtml(s) {
     return lines.join('');
 }
 
+function _buildMcpDiagnosticPrompt(s) {
+    var lines = [
+        '请帮我诊断下面这个 MCP Server 为什么无法启动或处于 offline 状态，并给出修复建议。',
+        '',
+        'MCP 名称: ' + (s.name || ''),
+        '状态: ' + (s.status || 'unknown'),
+        '诊断信息: ' + (s.detail || '无'),
+        '命令: ' + (s.command || ''),
+        '参数: ' + (s.args && s.args.length ? s.args.join(' ') : '无'),
+        '工作目录: ' + (s.cwd || '无'),
+        '环境变量键: ' + (s.env && Object.keys(s.env).length ? Object.keys(s.env).join(', ') : '无'),
+        '',
+        '请检查命令是否存在、参数是否正确、依赖是否安装，并告诉我应该怎么修复。'
+    ];
+    return lines.join('\n');
+}
+
+async function copyMcpDiagnosticPrompt(mcpName) {
+    var data = statusData.mcp;
+    var s = data && data.servers.find(function(x) { return x.name === mcpName; });
+    if (!s) return;
+    var prompt = _buildMcpDiagnosticPrompt(s);
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(prompt);
+        } else {
+            var ta = document.createElement('textarea');
+            ta.value = prompt;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
+        showToast('已复制到剪贴板，去告诉kimi code诊断一下吧！', 3000);
+    } catch (e) {
+        showToast('复制失败，请手动复制', 3000);
+    }
+}
+
 var _currentMcpDetailId = null;
 
 function openMcpDetail(mcpId) {
@@ -872,12 +913,14 @@ function renderMcpCard(s) {
     var statusCls = s.status;
     var desc = s.description || getMcpDesc(s.name) || s.detail || '';
     var isOffline = s.status === 'offline';
-    return '<div class="mcp-card ' + (s.enabled ? '' : 'disabled') + (isOffline ? ' offline' : '') + '" data-mcp-id="' + s.name + '" onclick="if(!event.target.closest(\'.toggle-switch\'))openMcpDetail(\'' + s.name + '\')">' +
+    var diagBtn = isOffline ? '<button class="btn-task mcp-diag-btn" title="复制诊断 prompt 给 AI" onclick="event.stopPropagation();copyMcpDiagnosticPrompt(\'' + s.name + '\')">诊断</button>' : '';
+    return '<div class="mcp-card ' + (s.enabled ? '' : 'disabled') + (isOffline ? ' offline' : '') + '" data-mcp-id="' + s.name + '" onclick="if(!event.target.closest(\'.toggle-switch\') && !event.target.closest(\'.mcp-diag-btn\'))openMcpDetail(\'' + s.name + '\')">' +
         '<div class="mcp-card-header"><span class="mcp-card-name">' + s.name + '</span><span class="status ' + statusCls + '"><span class="status-dot"></span>' + s.status + '</span></div>' +
         (desc ? '<div class="mcp-card-desc">' + desc + '</div>' : '') +
         (isOffline && s.detail ? '<div class="mcp-card-error">' + escapeHtml(s.detail) + '</div>' : '') +
         '<div class="mcp-card-actions">' +
             '<label class="toggle-switch" title="启用/禁用" onclick="event.stopPropagation()"><input type="checkbox" onchange="toggleMcpEnabled(\'' + s.name + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label>' +
+            diagBtn +
         '</div>' +
     '</div>';
 }
