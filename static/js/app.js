@@ -1297,22 +1297,10 @@ async function loadTrends() {
         renderTrend(currentTrendUnit);
         if (trendData.total) {
             var activeDaysEl = document.getElementById('trendActiveDays');
-            var activeDaysEvalEl = document.getElementById('trendActiveDaysEval');
             var streakDaysEl = document.getElementById('trendStreakDays');
-            var activeEv = trendData.total.activeEvaluation;
             if (activeDaysEl) {
                 activeDaysEl.textContent = trendData.total.activeDays || 0;
                 activeDaysEl.className = 'metric';
-            }
-            if (activeDaysEvalEl) {
-                if (activeEv && activeEv.level !== 'none') {
-                    activeDaysEvalEl.textContent = activeEv.label;
-                    activeDaysEvalEl.className = 'cache-eval-badge cache-eval-' + activeEv.level;
-                    activeDaysEvalEl.title = '活跃天数 ' + (trendData.total.activeDays || 0) + ' 天';
-                } else {
-                    activeDaysEvalEl.textContent = '';
-                    activeDaysEvalEl.className = 'cache-eval-badge';
-                }
             }
             if (streakDaysEl) {
                 streakDaysEl.textContent = trendData.total.streakDays || 0;
