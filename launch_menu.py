@@ -9,6 +9,7 @@
 4. 停止 Kimi Code Web（kimi server kill）
 5. 更新 Kimi Code
 6. 更新 Dashboard
+7. 完全卸载 Dashboard
 
 也可以直接传入选项数字跳过菜单，例如 `kimi dashboard 1`。
 """
@@ -262,6 +263,57 @@ def update_dashboard() -> None:
         print(f"更新命令返回非零退出码: {result.returncode}")
 
 
+def uninstall_dashboard() -> None:
+    """完全卸载 Dashboard：删除 wrapper 和 dashboard 目录。
+
+    由于脚本本身在 dashboard 目录中运行，采用延迟子进程删除策略。
+    Kimi Code CLI 本身不受影响，如需卸载请另行处理。
+    """
+    bin_dir = Path.home() / ".kimi-code" / "bin"
+    wrappers = [bin_dir / "kimi-dashboard.bat", bin_dir / "kimi-dashboard"]
+
+    print("\n===== 完全卸载 Dashboard =====")
+    print(f"将删除:")
+    for w in wrappers:
+        if w.exists():
+            print(f"  - {w}")
+    print(f"  - {DASHBOARD_DIR}")
+    print("\n注意:")
+    print("  - Kimi Code CLI 本身不会被卸载")
+    print("  - 正在运行的 Dashboard 进程需先手动关闭（任务管理器结束 pythonw.exe）")
+
+    confirm = input("\n确认卸载？输入 yes 继续，其他取消: ").strip().lower()
+    if confirm != "yes":
+        print("已取消")
+        return
+
+    # 1. 立即删除 wrapper（不在运行目录中，可安全删除）
+    for w in wrappers:
+        if w.exists():
+            try:
+                w.unlink()
+                print(f"已删除: {w}")
+            except OSError as exc:
+                print(f"删除失败 {w}: {exc}")
+
+    # 2. 延迟 3 秒删除 dashboard 目录（脚本本身正在其中运行）
+    if sys.platform == "win32":
+        cmd = f'timeout /t 3 /nobreak >nul & rmdir /s /q "{DASHBOARD_DIR}"'
+        subprocess.Popen(
+            ["cmd", "/c", cmd],
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+        )
+    else:
+        cmd = f'sleep 3 && rm -rf "{DASHBOARD_DIR}"'
+        subprocess.Popen(["bash", "-c", cmd], start_new_session=True)
+
+    print(f"\n将在 3 秒后删除目录: {DASHBOARD_DIR}")
+    print("卸载已启动，请关闭此窗口。")
+    print("\n如需重新安装：")
+    print("  Windows:  irm https://raw.githubusercontent.com/perinchiang/kimi-code-dashboard/master/install.ps1 | iex")
+    print("  macOS/Linux:  curl -fsSL https://raw.githubusercontent.com/perinchiang/kimi-code-dashboard/master/install.sh | bash")
+
+
 def show_menu() -> str:
     print("\n===== Kimi Code 启动菜单 =====")
     print("1. 启动 Dashboard")
@@ -270,6 +322,7 @@ def show_menu() -> str:
     print("4. 停止 Kimi Code Web（kimi server kill）")
     print("5. 更新 Kimi Code")
     print("6. 更新 Dashboard")
+    print("7. 完全卸载 Dashboard")
     print("0. 退出")
     print("==============================")
     return input("请输入数字选项: ").strip()
@@ -290,10 +343,12 @@ def main() -> None:
         update_kimi_code()
     elif choice == "6":
         update_dashboard()
+    elif choice == "7":
+        uninstall_dashboard()
     elif choice in ("0", "q", "quit", "exit"):
         print("已取消")
     else:
-        print("无效选项，请输入 1/2/3/4/5/6/0。")
+        print("无效选项，请输入 1/2/3/4/5/6/7/0。")
         sys.exit(1)
 
 

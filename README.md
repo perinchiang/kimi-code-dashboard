@@ -64,6 +64,7 @@ kimi-dashboard 3        # 启动外网访问 Kimi Code Web
 kimi-dashboard 4        # 停止 Kimi Code Web
 kimi-dashboard 5        # 更新 Kimi Code CLI
 kimi-dashboard 6        # 更新 Dashboard（git pull）
+kimi-dashboard 7        # 完全卸载 Dashboard（删除 wrapper + 目录）
 ```
 
 > **PATH 提示**：如果你已安装 Kimi Code CLI，`~/.kimi-code/bin/` 已在 PATH 中，`kimi-dashboard` 开箱即用。否则脚本会提示你将该目录加入 PATH。
@@ -102,6 +103,7 @@ python -m venv .venv
 4. 停止 Kimi Code Web（kimi server kill）
 5. 更新 Kimi Code
 6. 更新 Dashboard
+7. 完全卸载 Dashboard
 0. 退出
 ==============================
 ```
@@ -112,6 +114,7 @@ python -m venv .venv
 - 选项 4：执行 `kimi server kill` 停止所有 Kimi Code Web 进程。
 - 选项 5：执行 `kimi upgrade` 更新 Kimi Code CLI。
 - 选项 6：在 Dashboard 目录执行 `git pull origin master` 更新面板代码。
+- 选项 7：删除 wrapper 和 dashboard 目录（需输入 yes 确认，Kimi Code CLI 不受影响）。
 
 也可以直接传入选项数字跳过菜单，例如 `kimi-dashboard 2`。
 
