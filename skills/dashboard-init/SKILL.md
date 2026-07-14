@@ -1,11 +1,11 @@
 ---
 name: dashboard-init
-description: 初始化 Kimi Code Dashboard：为 Skills / MCP Servers 生成中文描述，并教 AI 如何创建定时任务。当用户安装新 skill/MCP、发现卡片没有中文说明、或说"补齐描述""初始化 dashboard""给 skill/mcp 加描述""帮我加个定时任务""教 AI 生成定时任务"时调用。
+description: 初始化并教学 Kimi Code Dashboard：为 Skills / MCP Servers 生成中文描述、教 AI 创建定时任务，并说明 Dashboard 的启动/更新/重启等日常操作。当用户安装新 skill/MCP、发现卡片没有中文说明、或说"补齐描述""初始化 dashboard""给 skill/mcp 加描述""帮我加个定时任务""教 AI 生成定时任务""怎么启动 dashboard""怎么更新 dashboard"时调用。
 ---
 
-# Dashboard 初始化 Skill
+# Dashboard 初始化与使用教学 Skill
 
-本 skill 用于让 Kimi Code Dashboard 的 Skills / MCP 卡片对中文用户更友好。
+本 skill 用于让 Kimi Code Dashboard 的 Skills / MCP 卡片对中文用户更友好，并指导 AI 如何回答 Dashboard 的日常使用问题。
 
 ## 触发场景
 
@@ -186,9 +186,45 @@ print(r.json())
 - `script`：与 `id` 对应，例如 `garmin-sync-daily.py`
 - `logFile`：与 `id` 对应，例如 `garmin-sync-daily.log`
 
+## 4. Dashboard 启动、更新与重启
+
+当用户问"怎么启动 Dashboard""怎么更新 Dashboard""Dashboard 为什么没生效"时，按下面说明回答。
+
+### 4.1 启动菜单
+
+在终端输入 `kimi dashboard` 会弹出数字菜单（Windows 依赖 PowerShell Profile 包装；macOS/Linux 可用别名）：
+
+```text
+===== Kimi Code 启动菜单 =====
+1. 启动 Dashboard
+2. 启动本地 Kimi Code Web
+3. 启动外网访问 Kimi Code Web
+4. 停止 Kimi Code Web（kimi server kill）
+5. 更新 Kimi Code
+6. 更新 Dashboard
+0. 退出
+==============================
+```
+
+- **选项 1**：后台启动 Dashboard，默认打开 `http://127.0.0.1:8080`。
+- **选项 6**：在 Dashboard 目录执行 `git pull origin master`，更新面板代码。
+
+### 4.2 更新后何时重启
+
+- 修改了 `static/js/app.js`、`static/css/style.css`、`templates/index.html` 等前端文件：刷新浏览器即可（建议 `Ctrl + F5` 硬刷新，模板里的 `?v=N` 会强制客户端加载新版本）。
+- 修改了 `routes/`、`config.py`、`services/` 等后端文件：必须重启 Dashboard 进程才能生效。选项 1 会先检测 8080 端口是否被占用，如果旧进程还在，只会打开浏览器而不会重启；此时需要先结束旧进程，再选 1 启动。
+
+### 4.3 快速重启方法
+
+如果用户发现更新没生效，可以：
+
+1. 结束占用 8080 端口的进程（Windows 可用 `netstat -ano | findstr :8080` 找 PID，然后 `taskkill /F /PID <PID>`）。
+2. 再执行 `kimi dashboard 1` 重新启动。
+
 ## 注意事项
 
 - 修改前先看一眼现有内容，避免覆盖用户手写的优质描述
 - YAML frontmatter 编辑时要保留 `---` 分隔符和原有字段
 - `mcp.json` 写入时要保持 JSON 格式，`description` 放在 `command`/`args`/`cwd`/`env` 附近即可
 - 本 skill 不直接操作 Dashboard 进程，只修改数据文件；定时任务除外，可直接改 `tasks.json` 或调用 `/api/tasks/create`
+- 涉及 Dashboard 进程的操作（启动、更新后重启）通过 `kimi dashboard` 菜单完成，不需要 AI 手动起 Flask 进程
