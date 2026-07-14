@@ -883,18 +883,9 @@ async function loadKimi() {
         statusData.kimi = data;
 
         var deviceLabel = data.deviceLabel || '本地';
-        var dashboardVer = (window.dashboardVersion || '1.0.0');
         document.getElementById('kimiSummary').innerHTML =
             '<div class="metric">' + data.sessionCount + '</div>' +
-            '<div class="metric-label">本地会话数量 &middot; ' + escapeHtml(deviceLabel) + '</div>' +
-            '<div class="kimi-meta-row">' +
-                '<span>Dashboard v' + escapeHtml(dashboardVer) + '</span>' +
-                '<span class="sep">·</span>' +
-                '<span>' + (data.loggedIn ? '已登录' : '未登录') + '</span>' +
-                '<span class="sep">·</span>' +
-                '<a class="console-link-inline" href="' + data.consoleUrl + '" target="_blank" rel="noopener">Console</a>' +
-                '<span id="kimiUpdateBtnSlot" style="margin-left:0.4rem"></span>' +
-            '</div>';
+            '<div class="metric-label">本地会话数量 &middot; ' + escapeHtml(deviceLabel) + '</div>';
 
         var quotaHtml = '';
         if (!quota.configured) {
@@ -961,6 +952,7 @@ function renderVersionCheck(r) {
         renderStatusBar();
         setUpdateSlot('<button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">重试</button>');
         if (box) box.innerHTML = '<div class="vc-row"><span class="vc-error">最新版查询失败: ' + (r.message || r.error) + '</span></div>';
+        showToast('版本检查失败: ' + escapeHtml(r.message || r.error), 5000);
         return;
     }
     if (r && r.updateAvailable) {
@@ -973,6 +965,7 @@ function renderVersionCheck(r) {
         else if (r.releaseUrl) html += '<a class="vc-link" href="' + r.releaseUrl + '" target="_blank" rel="noopener">Release</a>';
         html += '</div>';
         if (box) box.innerHTML = html;
+        showToast('发现新版本 <strong>' + escapeHtml(r.latest) + '</strong>，点击状态栏 Kimi pill 即可更新', 6000);
         return;
     }
     if (r && r.current) {
@@ -980,6 +973,7 @@ function renderVersionCheck(r) {
         renderStatusBar();
         setUpdateSlot('<span class="vc-tag vc-tag-ok" style="font-size:0.72rem;padding:0.12rem 0.45rem;cursor:pointer" onclick="checkKimiUpdate()" title="点击重新检查">\u2713 已是最新</span>');
         if (box) box.innerHTML = '';
+        showToast('当前已是最新版本 <strong>' + escapeHtml(r.current) + '</strong>', 3000);
         return;
     }
     // 默认/初始状态：手动检查按钮放在 Console 右侧 slot 里
@@ -2451,6 +2445,8 @@ async function loadDashboardVersion() {
     try {
         var data = await fetchJSON('/api/dashboard-version');
         window.dashboardVersion = data.version || '1.0.0';
+        var el = document.getElementById('headerDashboardVersion');
+        if (el) el.textContent = 'v' + (data.version || '1.0.0');
     } catch (e) {
         window.dashboardVersion = '1.0.0';
     }
