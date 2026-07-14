@@ -1585,15 +1585,31 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 }
 .hook-card-desc .text-secondary { color: var(--text-tertiary); font-style: italic; }
 
-/* === 后台任务中心 === */
+/* === 后台任务中心（极简版：只看 running） === */
 .tasks-tabs { margin-bottom: 0.5rem; }
+
+/* 工具条：历史开关 + 状态筛选 + 统计 */
+.bg-task-toolbar {
+    display: flex; align-items: center; gap: 1rem;
+    flex-wrap: wrap; margin-bottom: 0.75rem;
+}
+.bg-task-toolbar #bgTaskStatusFilter { margin: 0; }
+.bg-history-toggle {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    font-size: 0.8rem; color: var(--text-secondary);
+    cursor: pointer; user-select: none;
+}
+.bg-history-toggle input { cursor: pointer; }
+.bg-history-toggle:hover { color: var(--text); }
+
+/* 卡片极简：单行 meta + 状态徽章 + 查看日志按钮 */
 .bg-task-card {
     background: var(--surface-hover);
     border: 1px solid var(--border);
     border-left: 3px solid var(--text-tertiary);
     border-radius: var(--radius-sm);
-    padding: 1rem;
-    display: flex; flex-direction: column;
+    padding: 0.75rem 1rem;
+    display: flex; flex-direction: column; gap: 0.5rem;
     transition: border-color 0.2s;
 }
 .bg-task-card:hover { border-color: rgba(88,166,255,0.3); }
@@ -1602,18 +1618,13 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 .bg-task-card.failed { border-left-color: var(--danger); }
 
 .bg-task-card-header {
-    display: flex; align-items: center; gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    display: flex; align-items: center; gap: 0.75rem;
 }
-.bg-task-kind-icon {
-    display: inline-flex; align-items: center;
-    color: var(--text-secondary); flex-shrink: 0;
-}
-.bg-task-card-desc {
-    flex: 1; font-size: 0.85rem; color: var(--text);
-    font-weight: 500; line-height: 1.5;
-    overflow: hidden; text-overflow: ellipsis;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+.bg-task-card-meta {
+    flex: 1;
+    font-family: var(--mono); font-size: 0.78rem;
+    color: var(--text-secondary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 .bg-task-status-badge {
@@ -1636,32 +1647,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
     50% { opacity: 0.4; transform: scale(0.8); }
 }
 
-.bg-task-meta {
-    font-size: 0.72rem; color: var(--text-tertiary);
-    font-family: var(--mono); line-height: 1.7;
-    display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 0.6rem;
-    margin-bottom: 0.4rem;
-}
-.bg-task-meta .label { color: var(--text-secondary); font-weight: 500; }
-
-.bg-task-command {
-    font-family: var(--mono); font-size: 0.72rem;
-    background: var(--bg-tertiary); color: var(--text-secondary);
-    border-radius: calc(var(--radius-sm) - 2px);
-    white-space: pre-wrap; word-break: break-all;
-    overflow: hidden;
-    transition: max-height 0.2s, padding 0.2s, margin 0.2s, border 0.2s;
-}
-.bg-task-command-collapsed {
-    max-height: 0; padding: 0 0.65rem; margin: 0; border: none;
-}
-.bg-task-command-expanded {
-    max-height: 500px; padding: 0.5rem 0.65rem; margin: 0.5rem 0;
-    border: 1px solid var(--border);
-}
-
 .bg-task-card-actions {
-    display: flex; gap: 0.5rem; margin-top: auto; padding-top: 0.6rem;
+    display: flex; gap: 0.5rem; justify-content: flex-end;
 }
 
 /* mini card 后台 pill 变体 */
@@ -1671,17 +1658,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
     background: rgba(88,166,255,0.1);
 }
 .task-mini-pill.bg-running .dot { animation: bg-pulse 1.5s infinite ease-in-out; }
-.task-mini-pill.bg-idle {
-    color: var(--text-tertiary);
-    background: rgba(255,255,255,0.03);
-}
-
-@media (prefers-color-scheme: light) {
-    .task-mini-pill.bg-idle { background: rgba(0,0,0,0.03); }
-}
 
 @media (max-width: 768px) {
     .bg-task-card-header { flex-wrap: wrap; }
-    .bg-task-card-desc { -webkit-line-clamp: 3; }
-    .bg-task-meta { grid-template-columns: 1fr; }
 }

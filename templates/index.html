@@ -19,7 +19,7 @@
         } catch (e) {}
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=64">
+    <link rel="stylesheet" href="/static/css/style.css?v=65">
 </head>
 <body>
     <header>
@@ -396,11 +396,17 @@
             <div id="tasksDetailGrid" class="tasks-grid"></div>
         </div>
         <div id="backgroundTasksPanel" style="display:none">
-            <div class="seg-filter" id="bgTaskStatusFilter">
-                <button class="seg-item active" data-bg-status="all" onclick="setBgTaskStatusFilter('all')">全部</button>
-                <button class="seg-item" data-bg-status="running" onclick="setBgTaskStatusFilter('running')">运行中</button>
-                <button class="seg-item" data-bg-status="completed" onclick="setBgTaskStatusFilter('completed')">已完成</button>
-                <button class="seg-item" data-bg-status="failed" onclick="setBgTaskStatusFilter('failed')">已失败</button>
+            <div class="seg-filter bg-task-toolbar">
+                <label class="bg-history-toggle" title="开启后显示已完成的 historical 任务">
+                    <input type="checkbox" id="bgShowHistory" onchange="toggleBgTaskHistory(this.checked)">
+                    <span>显示历史</span>
+                </label>
+                <div class="seg-filter" id="bgTaskStatusFilter" style="display:none">
+                    <button class="seg-item" data-bg-status="all" onclick="setBgTaskStatusFilter('all')">全部</button>
+                    <button class="seg-item active" data-bg-status="running" onclick="setBgTaskStatusFilter('running')">运行中</button>
+                    <button class="seg-item" data-bg-status="completed" onclick="setBgTaskStatusFilter('completed')">已完成</button>
+                    <button class="seg-item" data-bg-status="failed" onclick="setBgTaskStatusFilter('failed')">已失败</button>
+                </div>
                 <span class="seg-stats" id="bgTasksDetailStats"></span>
             </div>
             <div id="bgTasksGrid" class="tasks-grid"></div>
@@ -815,6 +821,6 @@
     </div>
 
     <script src="/static/js/charts.js?v=19"></script>
-    <script src="/static/js/app.js?v=99"></script>
+    <script src="/static/js/app.js?v=100"></script>
 </body>
 </html>
