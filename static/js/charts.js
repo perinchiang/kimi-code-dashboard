@@ -306,22 +306,84 @@ function attachDonutHover(containerId, tooltipId, valueFormatter) {
 
 
 // === Stacked Bar Chart (model usage over time) ===
-function renderStackedBarChart(data, modelColors) {
-    if (!data || data.length === 0) return '<div class="trend-empty">暂无数据</div>';
-    // Filter out empty buckets for cleaner charts, but keep at least one
-    var nonEmpty = data.filter(function(d) { return d.total > 0; });
-    if (nonEmpty.length === 0) return '<div class="trend-empty">暂无数据</div>';
-    data = nonEmpty;
+function formatNumberPlain(n) {
+    if (n >= 100000000) return (n / 100000000).toFixed(1) + '亿';
+    if (n >= 10000) return (n / 10000).toFixed(1) + '万';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+    return n.toLocaleString('zh-CN');
+}
 
-    var width = 620, height = 240;
-    var pad = { top: 18, right: 56, bottom: 40, left: 15 };
+function _prepareModelTrendData(data) {
+    if (!data || data.length === 0) return [];
+
+    // Build a lookup by key
+    var map = {};
+    data.forEach(function(d) { map[d.key] = d; });
+
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    function makeDayKey(d) {
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    function makeLabel(d) {
+        return String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+
+    // Try last 7 days first
+    var last7 = [];
+    for (var i = 6; i >= 0; i--) {
+        var d = new Date(today);
+        d.setDate(d.getDate() - i);
+        var key = makeDayKey(d);
+        var existing = map[key];
+        last7.push(existing || { key: key, label: makeLabel(d), total: 0, models: {} });
+    }
+    var hasLast7 = last7.some(function(d) { return d.total > 0; });
+    if (hasLast7) return last7;
+
+    // No data in last 7 days: find date range with data and center it in 7-day window
+    var nonEmpty = data.filter(function(d) { return d.total > 0; });
+    if (nonEmpty.length === 0) return last7;
+
+    // Parse keys to dates
+    function parseKey(key) {
+        var parts = key.split('-');
+        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    }
+    var dates = nonEmpty.map(function(d) { return parseKey(d.key); }).sort(function(a, b) { return a - b; });
+    var firstDate = dates[0];
+    var lastDate = dates[dates.length - 1];
+    var midDate = new Date(firstDate.getTime() + (lastDate.getTime() - firstDate.getTime()) / 2);
+
+    // Center the midDate in a 7-day window
+    var windowStart = new Date(midDate);
+    windowStart.setDate(windowStart.getDate() - 3);
+
+    var centered = [];
+    for (var j = 0; j < 7; j++) {
+        var dd = new Date(windowStart);
+        dd.setDate(dd.getDate() + j);
+        var k = makeDayKey(dd);
+        var ex = map[k];
+        centered.push(ex || { key: k, label: makeLabel(dd), total: 0, models: {} });
+    }
+    return centered;
+}
+
+function renderStackedBarChart(data, modelColors) {
+    var chartData = data;
+    if (chartData.length === 0) return '<div class="trend-empty">暂无数据</div>';
+
+    var width = 620, height = 220;
+    var pad = { top: 14, right: 56, bottom: 36, left: 12 };
     var chartW = width - pad.left - pad.right;
     var chartH = height - pad.top - pad.bottom;
-    var max = Math.max.apply(null, data.map(function(d) { return d.total; }).concat([1]));
+    var max = Math.max.apply(null, chartData.map(function(d) { return d.total; }).concat([1]));
 
     // Collect all models across data in descending total usage for stacking order
     var modelTotals = {};
-    data.forEach(function(d) {
+    chartData.forEach(function(d) {
         for (var m in d.models) {
             modelTotals[m] = (modelTotals[m] || 0) + d.models[m];
         }
@@ -329,19 +391,19 @@ function renderStackedBarChart(data, modelColors) {
     var models = Object.keys(modelTotals).sort(function(a, b) { return modelTotals[b] - modelTotals[a]; });
     if (models.length === 0) return '<div class="trend-empty">暂无数据</div>';
 
-    var barWidth = Math.min(28, chartW / data.length * 0.6);
-    var xFor = function(i) { return pad.left + (data.length === 1 ? chartW / 2 : (i / (data.length - 1)) * chartW); };
+    var barGap = chartW / chartData.length;
+    var barWidth = Math.min(32, barGap * 0.55);
+    var xFor = function(i) { return pad.left + (i + 0.5) * barGap; };
     var yFor = function(val) { return pad.top + chartH - (val / max) * chartH; };
 
     var gridLines = [0, 0.25, 0.5, 0.75, 1].map(function(r) {
         var y = pad.top + chartH - r * chartH;
-        return '<line x1="' + pad.left + '" y1="' + y + '" x2="' + (width - pad.right) + '" y2="' + y + '" stroke="var(--border)" stroke-width="1" stroke-dasharray="4,4" opacity="0.3"/>';
+        return '<line x1="' + pad.left + '" y1="' + y + '" x2="' + (width - pad.right) + '" y2="' + y + '" stroke="var(--border)" stroke-width="1" stroke-dasharray="4,4" opacity="0.25"/>';
     }).join('');
 
-    var bars = data.map(function(d, i) {
+    var bars = chartData.map(function(d, i) {
         var cx = xFor(i);
         var x = cx - barWidth / 2;
-        var yBottom = pad.top + chartH;
         var segs = [];
         var stackBottom = 0;
         models.forEach(function(m) {
@@ -351,29 +413,30 @@ function renderStackedBarChart(data, modelColors) {
             var yBot = yFor(stackBottom);
             var h = yBot - yTop;
             var color = modelColors[m] || 'var(--accent)';
-            segs.push('<rect class="stacked-bar-seg" data-model="' + escapeHtml(m) + '" data-value="' + val + '" x="' + x + '" y="' + yTop + '" width="' + barWidth + '" height="' + h + '" fill="' + color + '" rx="2"/>');
+            segs.push('<rect class="stacked-bar-seg" data-model="' + escapeHtml(m) + '" data-value="' + val + '" x="' + x + '" y="' + yTop + '" width="' + barWidth + '" height="' + h + '" fill="' + color + '" rx="3"/>');
             stackBottom += val;
         });
-        return '<g data-key="' + d.key + '" data-total="' + d.total + '">' + segs.join('') + '</g>';
+        // Add subtle total label on top of bar if enough space
+        var topY = yFor(d.total);
+        var totalLabel = d.total > 0 ? '<text x="' + cx + '" y="' + (topY - 4) + '" text-anchor="middle" font-size="9" fill="var(--text-secondary)" font-family="var(--mono)">' + formatNumberPlain(d.total) + '</text>' : '';
+        return '<g data-key="' + d.key + '" data-total="' + d.total + '">' + segs.join('') + totalLabel + '</g>';
     }).join('');
 
-    var labelStep = Math.max(1, Math.ceil(data.length / 6));
-    var labels = data.map(function(d, i) {
-        if (i % labelStep !== 0 && i !== data.length - 1) return '';
+    var labels = chartData.map(function(d, i) {
         var cx = xFor(i);
-        return '<text x="' + cx + '" y="' + (height - 14) + '" text-anchor="middle" font-size="10" fill="var(--text-secondary)" font-family="var(--mono)">' + d.label + '</text>';
+        return '<text x="' + cx + '" y="' + (height - 10) + '" text-anchor="middle" font-size="10" fill="var(--text-secondary)" font-family="var(--mono)">' + d.label + '</text>';
     }).join('');
 
     var yLabels = [0, 0.25, 0.5, 0.75, 1].map(function(r) {
         var y = yFor(max * r);
         var val = Math.round(max * r);
-        return '<text x="' + (width - pad.right + 5) + '" y="' + (y + 3) + '" font-size="9" fill="var(--text-secondary)" font-family="var(--mono)">' + formatTokens(val) + '</text>';
+        return '<text x="' + (width - pad.right + 5) + '" y="' + (y + 3) + '" font-size="9" fill="var(--text-tertiary)" font-family="var(--mono)">' + formatNumberPlain(val) + '</text>';
     }).join('');
 
     var overlay = '<rect id="stackedBarOverlay" x="' + pad.left + '" y="' + pad.top + '" width="' + chartW + '" height="' + chartH + '" fill="transparent" style="cursor:crosshair"/>';
     var crosshair = '<line id="stackedCrosshair" x1="0" y1="' + pad.top + '" x2="0" y2="' + (pad.top + chartH) + '" stroke="var(--text-secondary)" stroke-width="1" stroke-dasharray="3,3" opacity="0" pointer-events="none"/>';
 
-    return '<svg id="stackedBarSvg" viewBox="0 0 ' + width + ' ' + height + '" style="width:100%;height:260px" preserveAspectRatio="xMidYMid meet">' +
+    return '<svg id="stackedBarSvg" viewBox="0 0 ' + width + ' ' + height + '" style="width:100%;height:220px" preserveAspectRatio="xMidYMid meet">' +
         gridLines + bars + labels + yLabels + crosshair + overlay +
     '</svg>';
 }

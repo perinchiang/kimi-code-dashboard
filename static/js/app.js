@@ -1349,7 +1349,7 @@ async function loadTrends() {
 
 // === Tool Usage ===
 var toolSortState = { tool: false, skill: false, model: false }; // false=desc, true=asc
-var modelUsageTrendUnit = 'weekly'; // weekly | daily
+// Model usage trend is fixed to last 7 days (centered if sparse)
 
 async function loadToolUsage() {
     try {
@@ -1477,24 +1477,6 @@ function _getModelDistributionData() {
     });
 }
 
-function _getModelTrendData() {
-    var data = statusData.modelUsage;
-    if (!data || !data.trends) return [];
-    return data.trends[modelUsageTrendUnit] || [];
-}
-
-function setModelTrendUnit(unit) {
-    modelUsageTrendUnit = unit;
-    var filter = document.getElementById('modelTrendUnitFilter');
-    if (filter) {
-        Array.from(filter.querySelectorAll('.seg-item')).forEach(function(btn) {
-            if (btn.dataset.unit === unit) btn.classList.add('active');
-            else btn.classList.remove('active');
-        });
-    }
-    renderModelUsageDetail();
-}
-
 // === Tool Usage mini card ===
 function renderToolUsageMiniCard() {
     var metricEl = document.getElementById('toolModelMiniMetric');
@@ -1585,15 +1567,15 @@ function renderModelUsageDetail() {
 
     var modelColorMap = getModelColorMap(data.models);
 
-    // Trend stacked bar chart
+    // Trend stacked bar chart (last 7 days, centered if sparse)
     var trendChartEl = document.getElementById('modelTrendChart');
-    var trendData = _getModelTrendData();
+    var rawTrendData = data.trends && data.trends.daily ? data.trends.daily : [];
+    var trendData = _prepareModelTrendData(rawTrendData);
     if (trendChartEl) {
-        if (trendData.length > 0) {
-            trendChartEl.innerHTML = renderStackedBarChart(trendData, modelColorMap);
+        var chartHtml = renderStackedBarChart(trendData, modelColorMap);
+        trendChartEl.innerHTML = chartHtml;
+        if (chartHtml.indexOf('stackedBarSvg') >= 0) {
             attachStackedBarHover(trendData, 'modelTrendTooltip', modelColorMap);
-        } else {
-            trendChartEl.innerHTML = '<div class="empty">暂无趋势数据</div>';
         }
     }
 

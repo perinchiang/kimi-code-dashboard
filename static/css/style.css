@@ -483,11 +483,12 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 .model-usage-chart-section:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
 .model-usage-chart-section .lb-subheader { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
 .model-usage-chart-section .lb-subheader .seg-filter { margin: 0; }
-.model-trend-chart { position: relative; min-height: 260px; }
-.model-distribution-chart { position: relative; min-height: 220px; }
+.model-trend-chart { position: relative; min-height: 220px; }
+.model-distribution-chart { position: relative; min-height: 200px; }
 .model-distribution-chart .donut-wrap { justify-content: flex-start; gap: 2rem; }
-.model-distribution-chart .donut-container { width: 200px; height: 200px; }
-.model-distribution-chart .donut-total { font-size: 1.6rem; }
+.model-distribution-chart .donut-container { width: 170px; height: 170px; }
+.model-distribution-chart .donut-total { font-size: 1.25rem; line-height: 1.2; }
+.model-distribution-chart .donut-label { font-size: 0.65rem; }
 .model-distribution-chart .memory-legend { max-width: 420px; grid-template-columns: repeat(2, minmax(140px, 1fr)); }
 .model-usage-item { flex-wrap: wrap; }
 .model-usage-meta { width: 100%; display: flex; gap: 0.75rem; padding-left: calc(20px + 0.5rem + 200px); font-size: 0.72rem; color: var(--text-tertiary); font-family: var(--mono); }
