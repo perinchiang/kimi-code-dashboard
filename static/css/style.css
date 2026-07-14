@@ -108,7 +108,7 @@ h1 { margin: 0; font-size: 1.2rem; font-weight: 700; color: var(--text); letter-
 .clock-time { font-size: 1.1rem; font-weight: 600; color: var(--text); letter-spacing: 0.03em; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .clock-uptime { font-size: 0.7rem; color: var(--text-secondary); font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
-#lastUpdated { font-size: 0.75rem; color: var(--text-tertiary); font-family: var(--sans); font-weight: 450; font-variant-numeric: tabular-nums; }
+#lastUpdated { font-size: 0.75rem; color: var(--text-tertiary); font-family: var(--sans); font-weight: 450; font-variant-numeric: tabular-nums; margin-top: 0.15rem; }
 
 .header-version { font-size: 0.7rem; color: var(--text-tertiary); font-weight: 450; margin-left: 0.35rem; vertical-align: middle; font-family: var(--mono); }
 
