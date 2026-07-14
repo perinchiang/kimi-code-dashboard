@@ -679,7 +679,6 @@ function renderSkillCard(s) {
     var callCount = s.callCount || 0;
     var actions = '<div class="skill-card-actions">' +
         '<label class="toggle-switch" title="启用/禁用" onclick="event.stopPropagation()"><input type="checkbox" onchange="toggleSkillEnabled(\'' + s.id + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label>' +
-        '<button class="btn-task" onclick="event.stopPropagation();openSkillEdit(\'' + s.id + '\')">编辑</button>' +
         '<button class="btn-task btn-danger" onclick="event.stopPropagation();deleteSkill(\'' + s.id + '\')">卸载</button>' +
     '</div>';
     return '<div class="skill-card ' + (s.enabled ? '' : 'disabled') + '" data-skill-id="' + s.id + '" onclick="openSkillDetail(\'' + s.id + '\')">' +
