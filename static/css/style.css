@@ -185,6 +185,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 
 /* === Metrics === */
 .metric { font-size: 2.2rem; font-weight: 700; color: var(--accent); margin: 0.25rem 0; letter-spacing: -0.03em; font-family: var(--mono); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.metric .token-unit { font-size: 0.5em; font-weight: 600; opacity: 0.75; margin-left: 0.08em; vertical-align: super; }
 .metric-label { color: var(--text-secondary); font-size: 0.82rem; font-weight: 450; }
 
 /* === Status badges === */

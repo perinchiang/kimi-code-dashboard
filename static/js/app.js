@@ -369,10 +369,13 @@ function formatDate(iso) {
     return isNaN(d) ? iso : d.toLocaleString('zh-CN');
 }
 function formatTokens(n) {
-    if (n >= 100000000) return (n / 100000000).toFixed(2) + '亿';
-    if (n >= 10000) return (n / 10000).toFixed(1) + '万';
-    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
-    return n.toString();
+    var unit = '';
+    var value = n;
+    if (n >= 100000000) { value = (n / 100000000).toFixed(2); unit = '亿'; }
+    else if (n >= 10000) { value = (n / 10000).toFixed(1); unit = '万'; }
+    else if (n >= 1000) { value = (n / 1000).toFixed(1); unit = 'k'; }
+    else { return n.toString(); }
+    return value + '<span class="token-unit">' + unit + '</span>';
 }
 function formatSize(bytes) {
     if (bytes === undefined || bytes === null || isNaN(bytes)) return '-';
@@ -1245,7 +1248,7 @@ function renderTrend(unit) {
     if (unit === 'yearly') { chartEl.innerHTML = renderHeatmap(data); attachHeatmapHover(data); }
     else { chartEl.innerHTML = renderLineChart(data); attachChartHover(data); }
     var total = data.reduce(function(a, b) { return a + b.value; }, 0);
-    document.getElementById('trendTotal').textContent = formatTokens(total);
+    document.getElementById('trendTotal').innerHTML = formatTokens(total);
     document.querySelectorAll('.trend-tab').forEach(function(btn) { btn.classList.toggle('active', btn.dataset.unit === unit); });
     // Update legend bar
     var legendEl = document.getElementById('trendLegend');
@@ -1268,7 +1271,7 @@ async function loadTrends() {
         statusData.trends = trendData;
         renderTrend(currentTrendUnit);
         if (trendData.total) {
-            document.getElementById('trendGrandTotal').textContent = formatTokens(trendData.total.value);
+            document.getElementById('trendGrandTotal').innerHTML = formatTokens(trendData.total.value);
             var rateEl = document.getElementById('trendCacheRate');
             var evalEl = document.getElementById('trendCacheRateEval');
             var ev = trendData.total.cacheEvaluation;
@@ -1409,7 +1412,7 @@ function renderModelLeaderboard(suffix) {
     var totalEl = document.getElementById('modelTotalCalls' + suffix);
     var chartEl = document.getElementById('modelChart' + suffix);
     if (!chartEl) return;
-    if (totalEl) totalEl.textContent = formatTokens(data.totalCalls || 0);
+    if (totalEl) totalEl.innerHTML = formatTokens(data.totalCalls || 0);
     if (!data.models || data.models.length === 0) {
         chartEl.innerHTML = '<div class="empty">暂无模型用量数据</div>';
         return;
