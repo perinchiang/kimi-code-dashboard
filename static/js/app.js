@@ -12,6 +12,7 @@ var currentArtifactQuery = '';
 var kimiUpdateState = { checking: false, updateAvailable: false, error: null };
 var selectedProvider = null;
 var currentSkillStatusFilter = 'all';
+var currentSkillSort = 'name';
 var currentMcpStatusFilter = 'all';
 var currentTaskStatusFilter = 'all';
 var _currentSkillDetailId = null;
@@ -103,10 +104,10 @@ var SETTINGS_GROUPS = [
         icon: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
         items: [
             { key: 'show_trends', label: 'Token 用量趋势', desc: '首页顶部的用量趋势图表', row: true },
-            { key: 'show_minicards', label: '快捷入口卡片', desc: 'Skills / MCP / 定时任务 / 第三方模型', row: true },
+            { key: 'show_minicards', label: '快捷入口卡片', desc: 'Skills / MCP / 定时任务 / 第三方模型 / 产物浏览器 / 工具调用 & 模型用量', row: true },
             { key: 'show_kimi_usage', label: 'Kimi Usage', desc: '登录状态、版本检查、额度信息', row: true },
             { key: 'show_memory', label: 'Memory Status', desc: 'TencentDB 记忆统计与 Gateway 健康', row: true },
-            { key: 'show_tool_model_usage', label: '工具调用 & 模型用量', desc: '工具/Skill/模型调用排行榜', row: true },
+            { key: 'show_tool_model_usage', label: '工具调用 & 模型用量', desc: '工具/Skill/模型调用详情页与首页快捷入口卡片', row: true },
             { key: 'show_tasks', label: '定时任务看板', desc: '快捷入口中的定时任务卡片', row: true },
             { key: 'show_kimi_web_btn', label: '启动 Kimi Web 按钮', desc: '右上角启动 Kimi Web 的按钮', row: true },
             { key: 'show_status_bar', label: '顶部状态栏', desc: 'Skills / MCP / Gateway 等状态 pill', row: true },
@@ -177,7 +178,7 @@ function applySettings() {
     setDisplay('section-minicards', s.show_minicards);
     setDisplay('section-kimi', s.show_kimi_usage);
     setDisplay('section-memory', s.show_memory);
-    setDisplay('section-tool-model', s.show_tool_model_usage);
+    setDisplay('toolModelMiniCard', s.show_tool_model_usage);
 
     // Kimi Usage 卡片点击跳转到 Console
     var kimiCard = document.getElementById('section-kimi');
@@ -572,6 +573,7 @@ function handleRoute() {
     document.getElementById('view-artifacts').style.display = (hash === '#/artifacts') ? '' : 'none';
     document.getElementById('view-memory').style.display = (hash === '#/memory') ? '' : 'none';
     document.getElementById('view-settings').style.display = (hash === '#/settings') ? '' : 'none';
+    document.getElementById('view-tool-model').style.display = (hash === '#/tool-model') ? '' : 'none';
     window.scrollTo(0, 0);
     if (hash === '#/skills') renderSkillsDetail();
     else if (hash === '#/mcp') renderMcpDetail();
@@ -580,12 +582,35 @@ function handleRoute() {
     else if (hash === '#/artifacts') renderArtifactsDetail();
     else if (hash === '#/memory') renderMemoryDetail();
     else if (hash === '#/settings') renderSettings();
+    else if (hash === '#/tool-model') renderToolModelDetail();
 }
 
 function _filterSkillsByStatus(skills) {
     if (currentSkillStatusFilter === 'enabled') return skills.filter(function(s) { return s.enabled; });
     if (currentSkillStatusFilter === 'disabled') return skills.filter(function(s) { return !s.enabled; });
     return skills;
+}
+
+function _sortSkills(skills) {
+    var sorted = skills.slice();
+    if (currentSkillSort === 'calls-desc') {
+        sorted.sort(function(a, b) {
+            var diff = (b.callCount || 0) - (a.callCount || 0);
+            if (diff !== 0) return diff;
+            return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+        });
+    } else if (currentSkillSort === 'calls-asc') {
+        sorted.sort(function(a, b) {
+            var diff = (a.callCount || 0) - (b.callCount || 0);
+            if (diff !== 0) return diff;
+            return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+        });
+    } else {
+        sorted.sort(function(a, b) {
+            return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+        });
+    }
+    return sorted;
 }
 
 function setSkillStatusFilter(status) {
@@ -607,14 +632,21 @@ function renderSkillsDetail() {
     if (!data) { list.innerHTML = '<div class="empty">数据加载中...</div>'; return; }
     stats.innerHTML = '<span>共 <strong>' + data.total + '</strong> 个</span><span>已启用 <strong>' + data.enabledCount + '</strong></span>' + (data.disabledCount ? '<span>已禁用 <strong>' + data.disabledCount + '</strong></span>' : '') + '<span>本地可用 <strong>' + data.localCount + '</strong></span>';
     var filtered = _filterSkillsByStatus(data.skills);
-    renderSkillsDetailList(filtered);
+    var sorted = _sortSkills(filtered);
+    renderSkillsDetailList(sorted);
+
+    // sync sort select
+    var sortSelect = document.getElementById('skillSortSelect');
+    if (sortSelect) sortSelect.value = currentSkillSort;
 }
 
 function _skillDetailHtml(s) {
     var lines = [];
     var desc = s.description || getSkillDesc(s) || '暂无简介';
+    var callCount = s.callCount || 0;
     lines.push('<div class="mcp-detail-desc"><div class="label">描述</div><div class="detail-content">' + escapeHtml(desc) + '</div></div>');
     lines.push('<div class="mcp-detail-meta"><span class="label">状态</span><span class="badge ' + (s.enabled ? (s.local ? 'badge-local' : 'badge-remote') : 'badge-disabled') + '">' + (s.enabled ? (s.local ? '已启用 · 本地' : '已启用 · 仅 lock') : '未启用') + '</span></div>');
+    lines.push('<div class="mcp-detail-meta"><span class="label">调用次数</span><span class="skill-call-count">' + callCount + ' 次</span></div>');
     lines.push('<div class="mcp-detail-meta"><span class="label">ID</span><code>' + escapeHtml(s.id) + '</code></div>');
     lines.push('<div class="mcp-detail-meta"><span class="label">来源</span><span>' + escapeHtml(s.source || '未知') + '</span></div>');
     if (s.sourceUrl) lines.push('<div class="mcp-detail-meta"><span class="label">来源 URL</span><a href="' + escapeHtml(s.sourceUrl) + '" target="_blank" style="color:var(--accent);text-decoration:underline;font-size:0.75rem;">' + escapeHtml(s.sourceUrl) + '</a></div>');
@@ -645,6 +677,7 @@ function renderSkillCard(s) {
     var badgeCls = s.enabled ? (s.local ? 'badge-local' : 'badge-remote') : 'badge-disabled';
     var badgeText = s.enabled ? (s.local ? '本地' : '仅 lock') : '已禁用';
     var desc = getSkillDesc(s);
+    var callCount = s.callCount || 0;
     var actions = '<div class="skill-card-actions">' +
         '<label class="toggle-switch" title="启用/禁用" onclick="event.stopPropagation()"><input type="checkbox" onchange="toggleSkillEnabled(\'' + s.id + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label>' +
         '<button class="btn-task" onclick="event.stopPropagation();openSkillEdit(\'' + s.id + '\')">编辑</button>' +
@@ -653,6 +686,7 @@ function renderSkillCard(s) {
     return '<div class="skill-card ' + (s.enabled ? '' : 'disabled') + '" data-skill-id="' + s.id + '" onclick="openSkillDetail(\'' + s.id + '\')">' +
         '<div class="skill-card-header"><span class="skill-card-name">' + s.name + '</span><span class="badge ' + badgeCls + '">' + badgeText + '</span></div>' +
         '<div class="skill-card-desc">' + desc + '</div>' +
+        '<div class="skill-card-meta"><span class="label">调用:</span> <span class="skill-call-count">' + callCount + ' 次</span></div>' +
         '<div class="skill-card-meta"><span class="label">ID:</span> ' + s.id + '</div>' +
         '<div class="skill-card-meta"><span class="label">来源:</span> ' + (s.source || '未知') + '</div>' +
         (s.installedAt ? '<div class="skill-card-meta"><span class="label">安装时间:</span> ' + s.installedAt.slice(0, 10) + '</div>' : '') +
@@ -673,8 +707,17 @@ function filterSkillsDetail(q) {
     var filtered = ql ? skills.filter(function(s) {
         return (s.name || '').toLowerCase().indexOf(ql) !== -1 || (s.description || '').toLowerCase().indexOf(ql) !== -1 || (s.id || '').toLowerCase().indexOf(ql) !== -1;
     }) : skills;
-    if (!filtered.length) { document.getElementById('skillsDetailList').innerHTML = '<div class="empty">未找到匹配的 Skill</div>'; return; }
-    renderSkillsDetailList(filtered);
+    var sorted = _sortSkills(filtered);
+    if (!sorted.length) { document.getElementById('skillsDetailList').innerHTML = '<div class="empty">未找到匹配的 Skill</div>'; return; }
+    renderSkillsDetailList(sorted);
+}
+
+function setSkillSort(sort) {
+    currentSkillSort = sort || 'name';
+    var sortSelect = document.getElementById('skillSortSelect');
+    if (sortSelect) sortSelect.value = currentSkillSort;
+    var q = document.getElementById('skillSearchDetail');
+    filterSkillsDetail(q ? q.value : '');
 }
 
 function _filterMcpByStatus(servers) {
@@ -1243,11 +1286,14 @@ async function loadToolUsage() {
     try {
         var data = await fetchJSON('/api/tool-usage');
         statusData.toolUsage = data;
-        document.getElementById('toolCallTotal').textContent = data.totalToolCalls;
-        document.getElementById('skillCallTotal').textContent = data.totalSkillCalls;
-        renderToolLeaderboard();
-        renderSkillLeaderboard();
-    } catch (e) { document.getElementById('toolUsageList').innerHTML = '<div class="error">加载失败: ' + e.message + '</div>'; }
+        renderToolModelMiniCard();
+        renderToolModelDetail();
+    } catch (e) {
+        var toolList = document.getElementById('toolUsageListDetail');
+        if (toolList) toolList.innerHTML = '<div class="error">加载失败: ' + e.message + '</div>';
+        renderToolModelMiniCard();
+        renderToolModelDetail();
+    }
 }
 
 
@@ -1280,21 +1326,24 @@ function renderLeaderboardList(elemId, items, maxVal, totalCount, barClass, getD
     el.innerHTML = html;
 }
 
-function renderToolLeaderboard() {
+function renderToolLeaderboard(listId) {
+    listId = listId || 'toolUsageList';
     var data = statusData.toolUsage;
     if (!data || !data.tools) return;
     var sorted = data.tools.slice().sort(function(a, b) {
         return toolSortState.tool ? a.count - b.count : b.count - a.count;
     });
     var maxTool = data.tools.length > 0 ? data.tools[0].count : 1;
-    renderLeaderboardList('toolUsageList', sorted, maxTool, data.totalToolCalls || 1, 'tool');
+    renderLeaderboardList(listId, sorted, maxTool, data.totalToolCalls || 1, 'tool');
 }
 
-function renderSkillLeaderboard() {
+function renderSkillLeaderboard(listId) {
+    listId = listId || 'skillUsageList';
     var data = statusData.toolUsage;
     if (!data || !data.skills) return;
     if (data.skills.length === 0) {
-        document.getElementById('skillUsageList').innerHTML = '<div class="empty">暂无 Skill 调用记录</div>';
+        var el = document.getElementById(listId);
+        if (el) el.innerHTML = '<div class="empty">暂无 Skill 调用记录</div>';
         return;
     }
     var sorted = data.skills.slice().sort(function(a, b) {
@@ -1302,20 +1351,21 @@ function renderSkillLeaderboard() {
     });
     var maxSkill = data.skills[0].count;
     var descFn = function(s) { return SKILL_DESC[s.name] || ''; };
-    renderLeaderboardList('skillUsageList', sorted, maxSkill, data.totalSkillCalls || 1, 'skill', descFn);
+    renderLeaderboardList(listId, sorted, maxSkill, data.totalSkillCalls || 1, 'skill', descFn);
 }
 
 function toggleSort(type) {
     toolSortState[type] = !toolSortState[type];
     var btnId = type === 'tool' ? 'sortToolBtn' : type === 'skill' ? 'sortSkillBtn' : 'sortModelBtn';
-    var btn = document.getElementById(btnId);
+    var detailBtnId = btnId + 'Detail';
+    var btn = document.getElementById(detailBtnId);
     if (btn) {
         if (toolSortState[type]) btn.classList.add('asc');
         else btn.classList.remove('asc');
     }
-    if (type === 'tool') renderToolLeaderboard();
-    else if (type === 'skill') renderSkillLeaderboard();
-    else if (type === 'model') renderModelLeaderboard();
+    if (type === 'tool') renderToolLeaderboard('toolUsageListDetail');
+    else if (type === 'skill') renderSkillLeaderboard('skillUsageListDetail');
+    else if (type === 'model') renderModelLeaderboard('Detail');
 }
 
 // === Model Usage (new feature) ===
@@ -1323,20 +1373,24 @@ async function loadModelUsage() {
     try {
         var data = await fetchJSON('/api/model-usage');
         statusData.modelUsage = data;
-        renderModelLeaderboard();
+        renderToolModelMiniCard();
+        renderToolModelDetail();
     } catch (e) {
-        var el2 = document.getElementById('modelUsageList');
-        if (el2) el2.innerHTML = '<div class="error">加载失败: ' + e.message + '</div>';
+        var chart = document.getElementById('modelChartDetail');
+        if (chart) chart.innerHTML = '<div class="error">加载失败: ' + e.message + '</div>';
+        renderToolModelMiniCard();
+        renderToolModelDetail();
     }
 }
 
-function renderModelLeaderboard() {
+function renderModelLeaderboard(suffix) {
+    suffix = suffix || '';
     var data = statusData.modelUsage;
     if (!data) return;
-    var totalEl = document.getElementById('modelTotalCalls');
-    var chartEl = document.getElementById('modelChart');
+    var totalEl = document.getElementById('modelTotalCalls' + suffix);
+    var chartEl = document.getElementById('modelChart' + suffix);
     if (!chartEl) return;
-    totalEl.textContent = formatTokens(data.totalCalls || 0);
+    if (totalEl) totalEl.textContent = formatTokens(data.totalCalls || 0);
     if (!data.models || data.models.length === 0) {
         chartEl.innerHTML = '<div class="empty">暂无模型用量数据</div>';
         return;
@@ -1363,8 +1417,55 @@ function renderModelLeaderboard() {
     if (remaining > 0) {
         chartEl.innerHTML += '<div class="lb-more">还有 ' + remaining + ' 个未显示</div>';
     }
-    var tooltip = document.getElementById('modelTooltip');
+    var tooltip = document.getElementById('modelTooltip' + suffix);
     if (tooltip) tooltip.classList.remove('show');
+}
+
+// === Tool & Model Usage mini card ===
+function renderToolModelMiniCard() {
+    var metricEl = document.getElementById('toolModelMiniMetric');
+    var labelEl = document.getElementById('toolModelMiniLabel');
+    var statusEl = document.getElementById('toolModelMiniStatus');
+    if (!metricEl || !labelEl || !statusEl) return;
+
+    var toolData = statusData.toolUsage;
+    var modelData = statusData.modelUsage;
+    var toolCalls = toolData ? Number(toolData.totalToolCalls || 0) : null;
+    var skillCalls = toolData ? Number(toolData.totalSkillCalls || 0) : null;
+    var modelTokens = modelData ? Number(modelData.totalCalls || 0) : null;
+
+    if (toolCalls === null && modelTokens === null) {
+        metricEl.innerHTML = '<div class="skeleton sk-metric"></div>';
+        labelEl.textContent = '加载中';
+        statusEl.innerHTML = '';
+        return;
+    }
+
+    metricEl.textContent = (toolCalls !== null ? toolCalls : '-');
+    labelEl.textContent = '工具调用' + (modelTokens !== null ? ' · ' + formatTokens(modelTokens) + ' Token' : '');
+
+    var pills = [];
+    if (skillCalls !== null && skillCalls > 0) {
+        pills.push('<span class="task-mini-pill"><span class="dot"></span>Skill ' + skillCalls + '</span>');
+    }
+    if (modelTokens !== null && modelTokens > 0) {
+        pills.push('<span class="task-mini-pill"><span class="dot"></span>模型 ' + formatTokens(modelTokens) + '</span>');
+    }
+    statusEl.innerHTML = pills.join('') || '<span class="task-mini-pill">暂无用量</span>';
+}
+
+function renderToolModelDetail() {
+    var toolData = statusData.toolUsage;
+    var modelData = statusData.modelUsage;
+
+    var toolTotalEl = document.getElementById('toolCallTotalDetail');
+    var skillTotalEl = document.getElementById('skillCallTotalDetail');
+    if (toolTotalEl) toolTotalEl.textContent = toolData ? (toolData.totalToolCalls || 0) : '-';
+    if (skillTotalEl) skillTotalEl.textContent = toolData ? (toolData.totalSkillCalls || 0) : '-';
+
+    renderToolLeaderboard('toolUsageListDetail');
+    renderSkillLeaderboard('skillUsageListDetail');
+    renderModelLeaderboard('Detail');
 }
 
 // === Model Config (third-party providers / models) ===
