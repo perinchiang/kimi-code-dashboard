@@ -243,7 +243,7 @@ function renderDonut(values, total, colorMap) {
         var pct = (s.fraction * 100).toFixed(1);
         return '<div class="legend-item"><span class="legend-swatch" style="background:' + s.color + '"></span><div class="legend-text"><div class="legend-name">' + escapeHtml(s.label) + '</div><div class="legend-meta">' + formatTokens(s.value) + ' · ' + pct + '%</div></div></div>';
     }).join('');
-    return '<div class="donut-wrap"><div class="donut-container"><svg viewBox="0 0 ' + size + ' ' + size + '" style="width:' + size + 'px;height:' + size + 'px">' + circles + '</svg><div class="donut-center"><div class="donut-total">' + formatTokens(total) + '</div><div class="donut-label">总 Token</div></div></div><div class="memory-legend">' + legend + '</div></div>';
+    return '<div class="donut-wrap"><div class="donut-container"><svg viewBox="0 0 ' + size + ' ' + size + '" style="width:100%;height:100%">' + circles + '</svg><div class="donut-center"><div class="donut-total">' + formatTokens(total) + '</div><div class="donut-label">总 Token</div></div></div><div class="memory-legend">' + legend + '</div></div>';
 }
 
 // === Model usage bars ===
@@ -438,10 +438,11 @@ function attachStackedBarHover(data, tooltipId, modelColors) {
     var tooltip = document.getElementById(tooltipId);
     if (!svg || !overlay || !tooltip) return;
 
-    var width = 620, height = 240;
-    var pad = { top: 18, right: 56, bottom: 40, left: 15 };
+    var width = 620, height = 220;
+    var pad = { top: 14, right: 56, bottom: 36, left: 12 };
     var chartW = width - pad.left - pad.right;
     var chartH = height - pad.top - pad.bottom;
+    var barGap = chartW / data.length;
 
     overlay.addEventListener('mousemove', function(e) {
         var ctm = svg.getScreenCTM();
@@ -452,7 +453,7 @@ function attachStackedBarHover(data, tooltipId, modelColors) {
         var mouseX = svgPt.x;
         var crossX = Math.max(pad.left, Math.min(width - pad.right, mouseX));
 
-        var xCoords = data.map(function(d, i) { return pad.left + (data.length === 1 ? chartW / 2 : (i / (data.length - 1)) * chartW); });
+        var xCoords = data.map(function(d, i) { return pad.left + (i + 0.5) * barGap; });
         var minDist = Infinity, idx = 0;
         for (var i = 0; i < xCoords.length; i++) {
             var dist = Math.abs(xCoords[i] - mouseX);

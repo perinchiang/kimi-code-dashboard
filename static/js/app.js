@@ -1463,6 +1463,17 @@ function getModelColorMap(models) {
     return map;
 }
 
+function _renderModelColorLegend(models, colorMap) {
+    if (!models || models.length === 0) return '';
+    var items = models.map(function(m) {
+        var name = m.model || m.name || 'unknown';
+        var shortName = name.replace('kimi-code/', '');
+        var color = colorMap[name] || 'var(--accent)';
+        return '<span class="bar-legend-item"><span class="bar-legend-swatch" style="background:' + color + '"></span>' + escapeHtml(shortName) + '</span>';
+    }).join('');
+    return '<div class="bar-chart-legend">' + items + '</div>';
+}
+
 function _getModelDistributionData() {
     var data = statusData.modelUsage;
     if (!data || !data.models) return [];
@@ -1563,11 +1574,13 @@ function renderModelUsageDetail() {
 
     // Trend stacked bar chart (last 7 days, centered if sparse)
     var trendChartEl = document.getElementById('modelTrendChart');
-    var rawTrendData = data.trends && data.trends.daily ? data.trends.daily : [];
+    var rawTrendData = (data.trends && (data.trends.daily || data.trends.last7days)) || [];
     var trendData = _prepareModelTrendData(rawTrendData);
     if (trendChartEl) {
         var chartHtml = renderStackedBarChart(trendData, modelColorMap);
-        trendChartEl.innerHTML = chartHtml;
+        // Add color legend for the bar chart
+        var legendHtml = _renderModelColorLegend(data.models, modelColorMap);
+        trendChartEl.innerHTML = chartHtml + legendHtml;
         if (chartHtml.indexOf('stackedBarSvg') >= 0) {
             attachStackedBarHover(trendData, 'modelTrendTooltip', modelColorMap);
         }
