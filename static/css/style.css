@@ -120,8 +120,6 @@ button {
 button:hover { background: var(--accent-hover); box-shadow: 0 0 14px var(--accent-glow); }
 button:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
 
-.spin { animation: spin 0.8s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
 
 /* === Status Bar === */
 .status-bar { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 0; display: flex; gap: 0.6rem; flex-wrap: wrap; }
@@ -812,19 +810,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
     [data-theme="auto"] .mini-card { box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
     [data-theme="auto"] .mini-card:hover { box-shadow: 0 8px 20px rgba(0,0,0,0.10); }
 }
-
-/* 顶部主题切换按钮 */
-.theme-toggle-btn {
-    background: var(--surface); border: 1px solid var(--border); color: var(--text-secondary);
-    width: 36px; height: 36px; padding: 0; border-radius: var(--radius-sm);
-    display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
-    transition: border-color 0.2s, color 0.2s;
-}
-.theme-toggle-btn:hover {
-    border-color: var(--accent); color: var(--accent); box-shadow: none;
-    background: var(--surface);
-}
-
 
 /* === CJK Font Optimization === */
 /* Windows: "Microsoft YaHei UI" 在小字号下偏细，用 450-500 weight 补偿 */

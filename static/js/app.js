@@ -81,7 +81,8 @@ var SETTINGS_GROUPS = [
         desc: '外观偏好',
         icon: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
         items: [
-            { key: 'follow_system_theme', label: '跟随系统主题', desc: '开启后随系统切换日间/夜间；关闭后用顶部按钮手动切换', row: true },
+            { key: 'follow_system_theme', label: '跟随系统主题', desc: '开启后随系统切换日间/夜间；关闭后使用下方手动主题选项', row: true },
+            { key: 'manual_theme', label: '手动主题', desc: '关闭跟随系统后生效', type: 'segment', options: [{ v: 'dark', t: '暗色' }, { v: 'light', t: '亮色' }] },
         ]
     },
     {
@@ -252,7 +253,7 @@ function setSetting(key, value) {
     settings[key] = value;
     saveSettings(settings);
     applySettings();
-    if (key === 'kw_bind' || key === 'default_permission_mode') renderSettings();
+    if (key === 'kw_bind' || key === 'default_permission_mode' || key === 'follow_system_theme' || key === 'manual_theme') renderSettings();
     if (key === '__startup_dashboard_mode') {
         setDashboardStartupMode(value);
         return;
@@ -288,7 +289,7 @@ function getEffectiveTheme() {
     return settings.manual_theme || 'dark';
 }
 
-// 应用主题到 <html data-theme=...>，并切换顶部图标显示
+// 应用主题到 <html data-theme=...>
 function applyTheme() {
     var effective = getEffectiveTheme();
     document.documentElement.setAttribute('data-theme', effective);
@@ -296,23 +297,6 @@ function applyTheme() {
     var meta = document.querySelector('meta[name="theme-color"]');
     if (!meta) { meta = document.createElement('meta'); meta.name = 'theme-color'; document.head.appendChild(meta); }
     meta.content = effective === 'light' ? '#ffffff' : '#0d1117';
-    // 顶部按钮始终可见：显示当前生效主题的反色图标（暗→显太阳提示可切亮，亮→显月亮提示可切暗）
-    var iconSun  = document.getElementById('themeIconSun');
-    var iconMoon = document.getElementById('themeIconMoon');
-    if (iconSun)  iconSun.style.display  = (effective === 'dark')  ? '' : 'none';
-    if (iconMoon) iconMoon.style.display = (effective === 'light') ? '' : 'none';
-}
-
-// 顶部按钮点击：切换 dark <-> light
-// 若当前处于跟随系统模式，先关闭它，恢复手动模式
-function cycleThemeMode() {
-    var target = (getEffectiveTheme() === 'dark') ? 'light' : 'dark';
-    if (settings.follow_system_theme) {
-        settings.follow_system_theme = false;
-        saveSettings(settings);
-        renderSettings();
-    }
-    setSetting('manual_theme', target);
 }
 
 // 系统主题变化时，若处于跟随系统模式则实时跟随
@@ -2068,6 +2052,8 @@ function renderSettings() {
     function renderItem(item) {
         // 本机模式下隐藏外网专属设置
         if (isLocal && item.key === 'kw_public_urls') return '';
+        // 跟随系统主题开启时隐藏手动主题选项
+        if (item.key === 'manual_theme' && settings.follow_system_theme) return '';
 
         var infoHtml = '<div class="settings-info">' +
             '<div class="config-item-title">' + escapeHtml(item.label) + '</div>' +
@@ -3296,16 +3282,11 @@ async function setDashboardStartupMode(mode) {
 
 // === Load all ===
 async function loadAll() {
-    var btn = document.getElementById('refreshBtn');
-    var icon = document.getElementById('refreshIcon');
-    btn.disabled = true;
-    icon.classList.add('spin');
     await Promise.all([loadTrends(), loadSkills(), loadMCP(), loadHooks(), loadMemory(), loadKimi(), loadToolUsage(), loadModelUsage(), loadTasks(), loadModelConfig(), loadArtifacts()]);
     renderStatusBar();
     applySettings();
     document.getElementById('lastUpdated').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN');
-    btn.disabled = false;
-    icon.classList.remove('spin');
+    showToast('数据已刷新', 2000);
 }
 
 // === Init ===
