@@ -19,7 +19,7 @@
         } catch (e) {}
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=57">
+    <link rel="stylesheet" href="/static/css/style.css?v=58">
 </head>
 <body>
     <header>
@@ -355,11 +355,7 @@
             </div>
             <div class="model-usage-chart-section">
                 <div class="lb-subheader">
-                    <span class="lb-title lb-title-model">模型用量趋势</span>
-                    <div class="seg-filter" id="modelTrendUnitFilter">
-                        <button class="seg-item active" data-unit="weekly" onclick="setModelTrendUnit('weekly')">按周</button>
-                        <button class="seg-item" data-unit="daily" onclick="setModelTrendUnit('daily')">按日</button>
-                    </div>
+                    <span class="lb-title lb-title-model">最近 7 天模型用量</span>
                 </div>
                 <div id="modelTrendChart" class="model-trend-chart"></div>
                 <div id="modelTrendTooltip" class="chart-tooltip"></div>
@@ -771,7 +767,7 @@
         </div>
     </div>
 
-    <script src="/static/js/charts.js?v=14"></script>
-    <script src="/static/js/app.js?v=86"></script>
+    <script src="/static/js/charts.js?v=15"></script>
+    <script src="/static/js/app.js?v=87"></script>
 </body>
 </html>

@@ -619,7 +619,7 @@ def _update_model_usage_cache(result: ParseResult):
             "all": all_data,
         },
         "trends": {
-            "last7days": _build_model_trend_series(result.model_tokens_by_day, 7, "day"),
+            "daily": _build_model_trend_series(result.model_tokens_by_day, 30, "day"),
         },
     }
     _model_usage_cache["at"] = time.time()
