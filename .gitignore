@@ -16,3 +16,4 @@ dashboard.log
 # User-specific
 tasks.json
 *.bak
+.trae/
