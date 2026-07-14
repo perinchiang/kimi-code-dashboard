@@ -6,6 +6,8 @@
 1. 启动 Dashboard
 2. 启动本地 Kimi Code Web
 3. 启动外网访问 Kimi Code Web
+4. 停止 Kimi Code Web（kimi server kill）
+5. 更新 Kimi Code
 
 也可以直接传入选项数字跳过菜单，例如 `kimi dashboard 1`。
 """
@@ -225,12 +227,30 @@ def stop_kimi_web() -> None:
         print(f"停止命令返回非零退出码: {result.returncode}")
 
 
+def update_kimi_code() -> None:
+    """执行 kimi upgrade 更新 Kimi Code CLI。"""
+    kimi_bin = _kimi_bin()
+    if not kimi_bin.exists():
+        print(f"未找到 Kimi CLI: {kimi_bin}")
+        return
+
+    cmd = [str(kimi_bin), "upgrade"]
+    print("正在更新 Kimi Code...")
+    print(" ".join(cmd))
+    result = subprocess.run(cmd)
+    if result.returncode == 0:
+        print("Kimi Code 更新完成。")
+    else:
+        print(f"更新命令返回非零退出码: {result.returncode}")
+
+
 def show_menu() -> str:
     print("\n===== Kimi Code 启动菜单 =====")
     print("1. 启动 Dashboard")
     print("2. 启动本地 Kimi Code Web")
     print("3. 启动外网访问 Kimi Code Web")
     print("4. 停止 Kimi Code Web（kimi server kill）")
+    print("5. 更新 Kimi Code")
     print("0. 退出")
     print("==============================")
     return input("请输入数字选项: ").strip()
@@ -247,10 +267,12 @@ def main() -> None:
         start_kimi_web_external()
     elif choice == "4":
         stop_kimi_web()
+    elif choice == "5":
+        update_kimi_code()
     elif choice in ("0", "q", "quit", "exit"):
         print("已取消")
     else:
-        print("无效选项，请输入 1/2/3/4/0。")
+        print("无效选项，请输入 1/2/3/4/5/0。")
         sys.exit(1)
 
 
