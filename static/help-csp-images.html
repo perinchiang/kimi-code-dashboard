@@ -142,6 +142,7 @@
         <div class="card">
             <h2>现象</h2>
             <p>通过 SakuraFrp、ngrok 等内网穿透访问 Kimi Web 时，消息里的图片显示裂图或 <code>Image failed to load</code>。但在本机直接访问 <code>http://127.0.0.1:5494</code> 时图片完全正常。</p>
+            <p>另外，<strong>AI 发送的本地文件路径图片（如 <code>C:/Users/...</code> 或 <code>file://</code>）在外网也是看不到的</strong>，因为路径指向的是 AI 所在电脑的本地磁盘，不是你的电脑。</p>
         </div>
 
         <div class="card">
@@ -151,6 +152,46 @@
             <p>这表示浏览器<strong>只允许加载和 Kimi Web 同域名的资源</strong>。任何外部图片 URL（如 <code>https://pub-xxx.r2.dev/...</code>、<code>https://image.pathos.dpdns.org/...</code>）都会被浏览器直接拦截。</p>
             <p>在浏览器 DevTools Console 中可以看到类似报错：</p>
             <pre><code>Loading the image 'https://...' violates the following Content Security Policy directive: "default-src 'self'".</code></pre>
+        </div>
+
+        <div class="card">
+            <h2>外网访问必须搭配图床</h2>
+            <p>即使 CSP 头已经修复，<strong>外网访问时 AI 发送的图片也必须是图床 URL，不能是本地文件路径</strong>。</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>图片来源</th>
+                        <th>本机 127.0.0.1</th>
+                        <th>外网穿透后</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>本地文件路径 <code>C:/...</code> / <code>file://</code></td>
+                        <td><span class="tag tag-success">可见</span></td>
+                        <td><span class="tag tag-danger">不可见</span>（指向你的本地磁盘）</td>
+                    </tr>
+                    <tr>
+                        <td>Base64 内嵌 <code>data:image/png;base64,...</code></td>
+                        <td><span class="tag tag-success">可见</span></td>
+                        <td><span class="tag tag-success">可见</span>（需 CSP 允许 <code>data:</code>）</td>
+                    </tr>
+                    <tr>
+                        <td>图床 URL <code>https://image.xxx/...</code></td>
+                        <td><span class="tag tag-success">可见</span></td>
+                        <td><span class="tag tag-success">可见</span>（需 CSP 允许外部图片）</td>
+                    </tr>
+                </tbody>
+            </table>
+            <h3>推荐做法</h3>
+            <ol>
+                <li>在 Dashboard 设置 → <strong>MCP 图床配置</strong> 里填入 R2 / S3 / MinIO / OSS 凭证</li>
+                <li>AI 生成图片后，会自动上传图床，再发送图床外链给你</li>
+                <li>配合本页 CSP 修复方案，外网访问时图片即可正常显示</li>
+            </ol>
+            <div class="note">
+                <strong>注意：</strong>如果不配置图床，AI 只能发送 Base64 内嵌图或本地路径图；本地路径图在外网穿透环境下对方是看不到的。
+            </div>
         </div>
 
         <div class="card">
