@@ -1327,7 +1327,7 @@ async function loadTrends() {
 
 // === Tool Usage ===
 var toolSortState = { tool: false, skill: false, model: false }; // false=desc, true=asc
-var modelUsageWindow = 'all'; // all | 24h | 7d | 30d
+var modelUsageTrendUnit = 'weekly'; // weekly | daily
 
 async function loadToolUsage() {
     try {
@@ -1412,7 +1412,6 @@ function toggleSort(type) {
     }
     if (type === 'tool') renderToolLeaderboard('toolUsageListDetail');
     else if (type === 'skill') renderSkillLeaderboard('skillUsageListDetail');
-    else if (type === 'model') renderModelLeaderboard('Detail', modelUsageWindow);
 }
 
 // === Model Usage (new feature) ===
@@ -1425,8 +1424,10 @@ async function loadModelUsage() {
         renderToolModelDetail();
         renderModelUsageDetail();
     } catch (e) {
-        var chart = document.getElementById('modelChartDetail');
-        if (chart) chart.innerHTML = '<div class="error">加载失败: ' + e.message + '</div>';
+        var trendChart = document.getElementById('modelTrendChart');
+        if (trendChart) trendChart.innerHTML = '<div class="error">加载失败: ' + e.message + '</div>';
+        var distChart = document.getElementById('modelDistributionChart');
+        if (distChart) distChart.innerHTML = '<div class="error">加载失败: ' + e.message + '</div>';
         renderToolUsageMiniCard();
         renderModelUsageMiniCard();
         renderToolModelDetail();
@@ -1434,61 +1435,38 @@ async function loadModelUsage() {
     }
 }
 
-function _getModelUsageDataForWindow() {
-    var data = statusData.modelUsage;
-    if (!data) return null;
-    if (modelUsageWindow === 'all' || !data.windows || !data.windows[modelUsageWindow]) {
-        return { models: data.models, totalCalls: data.totalCalls, totalTokens: data.totalTokens };
-    }
-    var win = data.windows[modelUsageWindow];
-    return { models: win.models, totalCalls: win.totalCalls, totalTokens: win.totalTokens };
+var MODEL_USAGE_COLORS = ['var(--accent)', 'var(--purple)', 'var(--success)', 'var(--warning)', 'var(--danger)', '#ff9f43', '#ee5a6f', '#00d2d3', '#54a0ff', '#5f27cd'];
+
+function getModelColorMap(models) {
+    var map = {};
+    if (!models) return map;
+    models.forEach(function(m, i) {
+        var name = typeof m === 'string' ? m : (m.model || m.name || 'unknown');
+        map[name] = MODEL_USAGE_COLORS[i % MODEL_USAGE_COLORS.length];
+    });
+    return map;
 }
 
-function renderModelLeaderboard(suffix, window) {
-    suffix = suffix || '';
-    window = window || 'all';
+function _getModelDistributionData() {
     var data = statusData.modelUsage;
-    if (!data) return;
-    var chartEl = document.getElementById('modelChart' + suffix);
-    if (!chartEl) return;
-
-    var effective = window === 'all' ? { models: data.models, totalCalls: data.totalCalls, totalTokens: data.totalTokens } : (data.windows && data.windows[window] || { models: [], totalCalls: 0, totalTokens: 0 });
-    var models = effective.models || [];
-    if (models.length === 0) {
-        chartEl.innerHTML = '<div class="empty">暂无模型用量数据</div>';
-        return;
-    }
-    var total = models.reduce(function(s, m) { return s + m.total; }, 0);
-    var sorted = models.slice().sort(function(a, b) {
-        return toolSortState.model ? a.total - b.total : b.total - a.total;
+    if (!data || !data.models) return [];
+    return data.models.map(function(m) {
+        return { label: m.model.replace('kimi-code/', ''), value: m.total, rawModel: m.model };
     });
-    var maxTokens = sorted[0].total || 1;
-    var colors = ['var(--accent)', 'var(--purple)', 'var(--success)', 'var(--warning)', 'var(--danger)'];
-    var items = sorted.map(function(m) {
-        return { name: m.model, count: m.total, input: m.input, output: m.output, calls: m.calls, _color: colors[sorted.indexOf(m) % colors.length] };
-    });
-    var shown = items.slice(0, LB_MAX_ITEMS);
-    var remaining = items.length - shown.length;
-    chartEl.innerHTML = shown.map(function(item, i) {
-        var pct = Math.round(item.count / maxTokens * 100);
-        var sharePct = total > 0 ? (item.count / total * 100).toFixed(1) : '0.0';
-        var shortName = item.name.replace('kimi-code/', '');
-        var top1 = i === 0 ? ' top1' : '';
-        return '<div class="leaderboard-item model-usage-item' + top1 + '"><span class="leaderboard-rank">' + (i+1) + '</span><span class="model-bar-name" title="' + item.name + '">' + shortName + '</span><div class="leaderboard-bar-wrap"><div class="leaderboard-bar" style="width:' + pct + '%;background:' + item._color + '">' + (pct > 15 ? '<span class="leaderboard-bar-pct">' + sharePct + '%</span>' : '') + '</div></div><span class="model-bar-count">' + formatTokens(item.count) + '</span><div class="model-usage-meta"><span>Input ' + formatTokens(item.input) + '</span><span>Output ' + formatTokens(item.output) + '</span><span>Calls ' + item.calls + '</span></div></div>';
-    }).join('');
-    if (remaining > 0) {
-        chartEl.innerHTML += '<div class="lb-more">还有 ' + remaining + ' 个未显示</div>';
-    }
-    var tooltip = document.getElementById('modelTooltip' + suffix);
-    if (tooltip) tooltip.classList.remove('show');
 }
 
-function setModelUsageWindow(window) {
-    modelUsageWindow = window;
-    var filter = document.getElementById('modelUsageWindowFilter');
+function _getModelTrendData() {
+    var data = statusData.modelUsage;
+    if (!data || !data.trends) return [];
+    return data.trends[modelUsageTrendUnit] || [];
+}
+
+function setModelTrendUnit(unit) {
+    modelUsageTrendUnit = unit;
+    var filter = document.getElementById('modelTrendUnitFilter');
     if (filter) {
         Array.from(filter.querySelectorAll('.seg-item')).forEach(function(btn) {
-            if (btn.dataset.window === window) btn.classList.add('active');
+            if (btn.dataset.unit === unit) btn.classList.add('active');
             else btn.classList.remove('active');
         });
     }
@@ -1544,7 +1522,7 @@ function renderModelUsageMiniCard() {
         return;
     }
 
-    metricEl.textContent = formatTokens(modelTokens);
+    metricEl.innerHTML = formatTokens(modelTokens);
     labelEl.textContent = 'Token 用量';
 
     var pills = [];
@@ -1567,23 +1545,48 @@ function renderToolModelDetail() {
 }
 
 function renderModelUsageDetail() {
-    var effective = _getModelUsageDataForWindow();
+    var data = statusData.modelUsage;
     var totalTokensEl = document.getElementById('modelTotalTokens');
     var totalCallsEl = document.getElementById('modelTotalCalls');
     var topModelEl = document.getElementById('modelTopModel');
 
-    if (!effective) {
+    if (!data) {
         if (totalTokensEl) totalTokensEl.textContent = '-';
         if (totalCallsEl) totalCallsEl.textContent = '-';
         if (topModelEl) topModelEl.textContent = '-';
         return;
     }
 
-    if (totalTokensEl) totalTokensEl.textContent = formatTokens(effective.totalTokens || 0);
-    if (totalCallsEl) totalCallsEl.textContent = (effective.totalCalls || 0).toLocaleString();
-    if (topModelEl) topModelEl.textContent = (effective.models && effective.models[0]) ? effective.models[0].model.replace('kimi-code/', '') : '-';
+    if (totalTokensEl) totalTokensEl.innerHTML = formatTokens(data.totalTokens || 0);
+    if (totalCallsEl) totalCallsEl.textContent = (data.totalCalls || 0).toLocaleString();
+    if (topModelEl) topModelEl.textContent = (data.models && data.models[0]) ? data.models[0].model.replace('kimi-code/', '') : '-';
 
-    renderModelLeaderboard('Detail', modelUsageWindow);
+    var modelColorMap = getModelColorMap(data.models);
+
+    // Trend stacked bar chart
+    var trendChartEl = document.getElementById('modelTrendChart');
+    var trendData = _getModelTrendData();
+    if (trendChartEl) {
+        if (trendData.length > 0) {
+            trendChartEl.innerHTML = renderStackedBarChart(trendData, modelColorMap);
+            attachStackedBarHover(trendData, 'modelTrendTooltip', modelColorMap);
+        } else {
+            trendChartEl.innerHTML = '<div class="empty">暂无趋势数据</div>';
+        }
+    }
+
+    // Distribution donut chart
+    var distChartEl = document.getElementById('modelDistributionChart');
+    var distData = _getModelDistributionData();
+    if (distChartEl) {
+        if (distData.length > 0) {
+            var total = distData.reduce(function(s, d) { return s + d.value; }, 0);
+            distChartEl.innerHTML = renderDonut(distData, total, modelColorMap);
+            attachDonutHover('modelDistributionChart', 'modelDistributionTooltip', function(v) { return formatTokens(Number(v)); });
+        } else {
+            distChartEl.innerHTML = '<div class="empty">暂无模型分布数据</div>';
+        }
+    }
 }
 
 // === Model Config (third-party providers / models) ===
@@ -2644,8 +2647,9 @@ function renderHookCard(h) {
     var stateCls = h.enabled ? 'ready' : 'disabled';
     var stateLabel = h.enabled ? '已启用' : '已禁用';
     var timeoutText = h.timeout ? h.timeout + 's' : '默认 30s';
-    var matcherText = h.matcher ? '<div><span class="label">matcher:</span> <code>' + escapeHtml(h.matcher) + '</code></div>' : '';
-    return '<div class="task-card" data-hook-id="' + h.id + '"><div class="task-card-header"><span class="task-card-name">' + escapeHtml(h.event) + '</span><span class="task-state-badge ' + stateCls + '">' + stateLabel + '</span></div><div class="task-card-desc">' + matcherText + '<div style="margin-top:0.4rem;"><span class="label">timeout:</span> ' + timeoutText + '</div></div><div class="task-card-info"><div style="font-family:var(--font-mono);font-size:0.8rem;white-space:pre-wrap;word-break:break-all;background:var(--bg-tertiary);padding:0.5rem;border-radius:6px;">' + escapeHtml(h.command) + '</div></div><div class="task-card-actions"><label class="toggle-switch" title="启用/禁用"><input type="checkbox" onchange="toggleHook(\'' + h.id + '\')"' + (h.enabled ? ' checked' : '') + '><span class="toggle-slider"></span></label><button class="btn-task" onclick="openHookEdit(\'' + h.id + '\')">编辑</button><button class="btn-task btn-danger" onclick="deleteHook(\'' + h.id + '\')">删除</button></div></div>';
+    var matcherText = h.matcher ? '<code>' + escapeHtml(h.matcher) + '</code>' : '<span class="text-secondary">无 matcher</span>';
+    var description = h.description ? escapeHtml(h.description) : '<span class="text-secondary">暂无描述</span>';
+    return '<div class="task-card" data-hook-id="' + h.id + '"><div class="task-card-header"><span class="task-card-name">' + escapeHtml(h.event) + '</span><span class="task-state-badge ' + stateCls + '">' + stateLabel + '</span></div><div class="task-card-desc hook-card-desc">' + description + '</div><div class="task-card-info"><div><span class="label">matcher:</span> ' + matcherText + '</div><div><span class="label">timeout:</span> ' + timeoutText + '</div></div><div class="task-card-actions"><label class="toggle-switch" title="启用/禁用"><input type="checkbox" onchange="toggleHook(\'' + h.id + '\')"' + (h.enabled ? ' checked' : '') + '><span class="toggle-slider"></span></label><button class="btn-task" onclick="openHookEdit(\'' + h.id + '\')">编辑</button><button class="btn-task btn-danger" onclick="deleteHook(\'' + h.id + '\')">删除</button></div></div>';
 }
 
 function _filterHooksByStatus(hooks) {
@@ -2672,7 +2676,8 @@ function filterHooksDetail(q) {
     var filtered = ql ? hooks.filter(function(h) {
         return (h.event || '').toLowerCase().indexOf(ql) !== -1 ||
             (h.matcher || '').toLowerCase().indexOf(ql) !== -1 ||
-            (h.command || '').toLowerCase().indexOf(ql) !== -1;
+            (h.command || '').toLowerCase().indexOf(ql) !== -1 ||
+            (h.description || '').toLowerCase().indexOf(ql) !== -1;
     }) : hooks;
     var grid = document.getElementById('hooksDetailGrid');
     if (!filtered.length) { grid.innerHTML = '<div class="empty">暂无 Hooks</div>'; return; }
@@ -2707,6 +2712,7 @@ function openHookEdit(hookId) {
     document.getElementById('hook-edit-title').textContent = hookId ? '编辑 Hook' : '新建 Hook';
     document.getElementById('hook-edit-id').value = hookId || '';
     document.getElementById('hook-edit-event').value = h ? h.event : 'Stop';
+    document.getElementById('hook-edit-description').value = h ? (h.description || '') : '';
     document.getElementById('hook-edit-matcher').value = h ? (h.matcher || '') : '';
     document.getElementById('hook-edit-command').value = h ? h.command : '';
     document.getElementById('hook-edit-timeout').value = h && h.timeout ? h.timeout : '';
@@ -2732,6 +2738,7 @@ async function saveHook() {
 
     var body = {
         event: document.getElementById('hook-edit-event').value.trim(),
+        description: document.getElementById('hook-edit-description').value.trim(),
         matcher: document.getElementById('hook-edit-matcher').value.trim(),
         command: document.getElementById('hook-edit-command').value.trim(),
         timeout: document.getElementById('hook-edit-timeout').value,

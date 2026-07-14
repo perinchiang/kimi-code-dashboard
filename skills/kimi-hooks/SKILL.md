@@ -85,6 +85,7 @@ timeout = 5
 ```json
 {
   "event": "Stop",
+  "description": "Kimi 会话结束后发送 Bark 通知到手机",
   "command": "curl -s \"https://api.day.app/YOUR_BARK_KEY/Kimi%20Code/%E4%BC%9A%E8%AF%9D%E7%BB%93%E6%9D%9F\"",
   "matcher": "",
   "timeout": 10,
@@ -106,6 +107,25 @@ timeout = 5
 2. 用 Python `tomllib` 读取、`tomli_w` 写回，保留 `providers`、`models`、`services`、`mcp` 等其他字段。
 3. 将 hook 追加到 `[[hooks]]`（启用）或 `[[disabled_hooks]]`（禁用）。
 4. 写回后运行 `kimi doctor config ~/.kimi-code/config.toml` 验证配置有效。
+
+## 给 Hook 加中文描述
+
+Dashboard 的 Hooks 列表页会显示中文描述，而不是原始命令。描述存在单独的文件 `~/.kimi-code/dashboard/hook-descriptions.json` 中，**不写入 `config.toml`**，因此不会影响 Kimi CLI 的配置校验。
+
+创建或更新 hook 时，建议在 body 里加上 `description`：
+
+```json
+{
+  "event": "PostToolUse",
+  "description": "Shell 命令执行后发送 Bark 通知到手机",
+  "matcher": "Shell",
+  "command": "curl -s \"https://api.day.app/<key>/Kimi%20Code/%E6%89%A7%E8%A1%8C%E4%BA%86%20Shell%20%E5%91%BD%E4%BB%A4\"",
+  "timeout": 10,
+  "enabled": true
+}
+```
+
+如果用户没有提供描述，AI 可以根据 hook 的用途生成一句 20~40 字的中文说明。
 
 ## 注意事项
 

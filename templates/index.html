@@ -19,7 +19,7 @@
         } catch (e) {}
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=53">
+    <link rel="stylesheet" href="/static/css/style.css?v=54">
 </head>
 <body>
     <header>
@@ -353,21 +353,23 @@
                     <span class="mu-summary-value" id="modelTopModel">-</span>
                 </div>
             </div>
-            <div class="seg-filter" id="modelUsageWindowFilter">
-                <button class="seg-item active" data-window="all" onclick="setModelUsageWindow('all')">全部</button>
-                <button class="seg-item" data-window="30d" onclick="setModelUsageWindow('30d')">30 天</button>
-                <button class="seg-item" data-window="7d" onclick="setModelUsageWindow('7d')">7 天</button>
-                <button class="seg-item" data-window="24h" onclick="setModelUsageWindow('24h')">24 小时</button>
+            <div class="model-usage-chart-section">
+                <div class="lb-subheader">
+                    <span class="lb-title lb-title-model">模型用量趋势</span>
+                    <div class="seg-filter" id="modelTrendUnitFilter">
+                        <button class="seg-item active" data-unit="weekly" onclick="setModelTrendUnit('weekly')">按周</button>
+                        <button class="seg-item" data-unit="daily" onclick="setModelTrendUnit('daily')">按日</button>
+                    </div>
+                </div>
+                <div id="modelTrendChart" class="model-trend-chart"></div>
+                <div id="modelTrendTooltip" class="chart-tooltip"></div>
             </div>
-            <div class="lb-section">
+            <div class="model-usage-chart-section">
                 <div class="lb-subheader">
                     <span class="lb-title lb-title-model">模型分布</span>
-                    <button class="lb-sort-btn" id="sortModelBtnDetail" onclick="toggleSort('model')" title="切换排序">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
-                    </button>
                 </div>
-                <div id="modelChartDetail"></div>
-                <div id="modelTooltipDetail" class="chart-tooltip"></div>
+                <div id="modelDistributionChart" class="model-distribution-chart"></div>
+                <div id="modelDistributionTooltip" class="chart-tooltip"></div>
             </div>
         </section>
     </div>
@@ -738,6 +740,10 @@
                         </datalist>
                     </div>
                     <div class="form-row">
+                        <label for="hook-edit-description">中文描述</label>
+                        <input type="text" id="hook-edit-description" placeholder="例如：Shell 执行后发送 Bark 通知">
+                    </div>
+                    <div class="form-row">
                         <label for="hook-edit-matcher">匹配器 (matcher，可选)</label>
                         <input type="text" id="hook-edit-matcher" placeholder="例如 Shell、WriteFile，留空表示匹配所有">
                     </div>
@@ -765,7 +771,7 @@
         </div>
     </div>
 
-    <script src="/static/js/charts.js?v=12"></script>
-    <script src="/static/js/app.js?v=81"></script>
+    <script src="/static/js/charts.js?v=13"></script>
+    <script src="/static/js/app.js?v=82"></script>
 </body>
 </html>

@@ -6,6 +6,8 @@ Active hooks live under the top-level `hooks` array; disabled hooks live under
 store any dashboard-only metadata inside individual hook entries.
 """
 
+import hashlib
+import json
 import shutil
 import tomllib
 from datetime import datetime
@@ -14,11 +16,45 @@ from pathlib import Path
 import tomli_w
 from flask import Blueprint, jsonify, request
 
-from config import KIMI_CONFIG, log
+from config import KIMI_CODE_DIR, KIMI_CONFIG, log
 
 bp = Blueprint("hooks", __name__)
 
 HOOK_SCHEMA_FIELDS = ("event", "command", "matcher", "timeout")
+
+# Dashboard-only metadata for hooks (Kimi CLI rejects unknown keys inside hook objects).
+HOOK_DESCRIPTIONS_DIR = KIMI_CODE_DIR / "dashboard"
+HOOK_DESCRIPTIONS_FILE = HOOK_DESCRIPTIONS_DIR / "hook-descriptions.json"
+
+
+def _hook_hash(hook: dict) -> str:
+    """Return a stable hash for a hook based on its Kimi-compatible content."""
+    normalized = json.dumps(_clean_hook(hook), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+
+def _load_descriptions() -> dict:
+    """Load the dashboard-only hook descriptions mapping."""
+    try:
+        if HOOK_DESCRIPTIONS_FILE.exists():
+            return json.loads(HOOK_DESCRIPTIONS_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        log.warning("Failed to load hook descriptions: %s", e)
+    return {}
+
+
+def _save_descriptions(descriptions: dict) -> bool:
+    """Save the dashboard-only hook descriptions mapping."""
+    try:
+        HOOK_DESCRIPTIONS_DIR.mkdir(parents=True, exist_ok=True)
+        HOOK_DESCRIPTIONS_FILE.write_text(
+            json.dumps(descriptions, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return True
+    except Exception as e:
+        log.error("Failed to save hook descriptions: %s", e)
+        return False
 
 
 def _backup_config() -> Path:
@@ -70,18 +106,24 @@ def _clean_hook(hook: dict) -> dict:
     return clean
 
 
-def _normalize_hook(hook: dict) -> dict:
+def _normalize_hook(hook: dict, descriptions: dict | None = None) -> dict:
     """Normalize a hook for API responses."""
+    if descriptions is None:
+        descriptions = _load_descriptions()
     timeout = hook.get("timeout")
     try:
         timeout = int(timeout) if timeout is not None else None
     except (TypeError, ValueError):
         timeout = None
+    cleaned = _clean_hook(hook)
+    hhash = _hook_hash(cleaned)
     return {
         "event": hook.get("event", ""),
         "command": hook.get("command", ""),
         "matcher": hook.get("matcher", ""),
         "timeout": timeout,
+        "description": descriptions.get(hhash, ""),
+        "hash": hhash,
     }
 
 
@@ -92,17 +134,18 @@ def _list_hooks(data: dict) -> list:
     enough for a single-user local dashboard because each request reloads the
     file before mutation.
     """
+    descriptions = _load_descriptions()
     active = data.get("hooks") or []
     disabled = data.get("disabled_hooks") or []
     result = []
     for idx, hook in enumerate(active):
-        item = _normalize_hook(hook)
+        item = _normalize_hook(hook, descriptions)
         item["enabled"] = True
         item["id"] = str(idx)
         result.append(item)
     offset = len(active)
     for idx, hook in enumerate(disabled):
-        item = _normalize_hook(hook)
+        item = _normalize_hook(hook, descriptions)
         item["enabled"] = False
         item["id"] = str(offset + idx)
         result.append(item)
@@ -172,6 +215,14 @@ def api_hook_create():
 
     if not _save_config(data):
         return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
+
+    # Save dashboard-only description.
+    description = str(body.get("description", "")).strip()
+    if description:
+        descriptions = _load_descriptions()
+        descriptions[_hook_hash(new_hook)] = description
+        _save_descriptions(descriptions)
+
     return jsonify({"success": True})
 
 
@@ -206,6 +257,7 @@ def api_hook_update(hook_id: str):
         "timeout": timeout,
     })
 
+    old_hash = _hook_hash(_clean_hook(data[key][idx]))
     target_enabled = bool(body.get("enabled", key == "hooks"))
     current_enabled = key == "hooks"
 
@@ -220,6 +272,19 @@ def api_hook_update(hook_id: str):
 
     if not _save_config(data):
         return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
+
+    # Update dashboard-only description.
+    descriptions = _load_descriptions()
+    description = str(body.get("description", "")).strip()
+    new_hash = _hook_hash(updated)
+    if old_hash in descriptions and old_hash != new_hash:
+        descriptions.pop(old_hash, None)
+    if description:
+        descriptions[new_hash] = description
+    elif new_hash in descriptions:
+        descriptions.pop(new_hash, None)
+    _save_descriptions(descriptions)
+
     return jsonify({"success": True})
 
 
@@ -247,8 +312,17 @@ def api_hook_delete(hook_id: str):
     if key is None:
         return jsonify({"success": False, "error": "Hook 不存在"}), 404
 
+    removed = _clean_hook(data[key][idx])
     data[key].pop(idx)
 
     if not _save_config(data):
         return jsonify({"success": False, "error": "保存 config.toml 失败"}), 500
+
+    # Clean up dashboard-only description.
+    descriptions = _load_descriptions()
+    hhash = _hook_hash(removed)
+    if hhash in descriptions:
+        descriptions.pop(hhash, None)
+        _save_descriptions(descriptions)
+
     return jsonify({"success": True})

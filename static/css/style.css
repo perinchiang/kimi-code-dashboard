@@ -475,12 +475,25 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 .mu-summary-item { background: var(--surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem 1rem; }
 .mu-summary-label { display: block; font-size: 0.72rem; color: var(--text-secondary); margin-bottom: 0.2rem; }
 .mu-summary-value { display: block; font-size: 1.1rem; font-weight: 700; font-family: var(--mono); color: var(--text); word-break: break-word; }
+.model-usage-chart-section { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px dashed var(--border); }
+.model-usage-chart-section:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+.model-usage-chart-section .lb-subheader { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
+.model-usage-chart-section .lb-subheader .seg-filter { margin: 0; }
+.model-trend-chart { position: relative; min-height: 260px; }
+.model-distribution-chart { position: relative; min-height: 220px; }
+.model-distribution-chart .donut-wrap { justify-content: flex-start; gap: 2rem; }
+.model-distribution-chart .donut-container { width: 200px; height: 200px; }
+.model-distribution-chart .donut-total { font-size: 1.6rem; }
+.model-distribution-chart .memory-legend { max-width: 420px; grid-template-columns: repeat(2, minmax(140px, 1fr)); }
 .model-usage-item { flex-wrap: wrap; }
 .model-usage-meta { width: 100%; display: flex; gap: 0.75rem; padding-left: calc(20px + 0.5rem + 200px); font-size: 0.72rem; color: var(--text-tertiary); font-family: var(--mono); }
 .model-usage-meta span { white-space: nowrap; }
 @media (max-width: 640px) {
     .model-usage-meta { padding-left: 0; margin-top: 0.2rem; }
     .model-bar-name { width: 140px; }
+    .model-distribution-chart .donut-wrap { flex-direction: column; align-items: center; gap: 1.25rem; }
+    .model-distribution-chart .donut-container { width: 160px; height: 160px; }
+    .model-distribution-chart .memory-legend { width: 100%; max-width: none; grid-template-columns: 1fr; }
 }
 
 /* === Tasks === */
@@ -1556,3 +1569,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
     background: rgba(88,166,255,0.12); color: var(--accent);
     padding: 0.05rem 0.3rem; border-radius: 0.2rem;
 }
+.hook-card-desc {
+    font-size: 0.88rem; color: var(--text);
+    line-height: 1.55; min-height: 1.5rem;
+}
+.hook-card-desc .text-secondary { color: var(--text-tertiary); font-style: italic; }
