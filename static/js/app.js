@@ -1348,14 +1348,16 @@ function renderModelConfigDetail() {
         var defaultBtn = isDefault
             ? '<span class="badge badge-local">默认</span>'
             : '<button class="btn-task btn-sm" onclick="setDefaultModel(\'' + escapeHtml(m.id).replace(/'/g, "\\'") + '\')">设为默认</button>';
+        var modelActionsHtml = isDefault ? '' :
+            '<div class="config-item-actions">' +
+                '<button class="btn-task" onclick="editModel(\'' + escapeHtml(m.id).replace(/'/g, "\\'") + '\')">编辑</button>' +
+                '<button class="btn-task" onclick="deleteModel(\'' + escapeHtml(m.id).replace(/'/g, "\\'") + '\')">删除</button>' +
+            '</div>';
         return '<div class="config-item" id="model-row-' + escapeHtml(m.id) + '">' +
             '<div class="config-item-title"><span>' + escapeHtml(m.id) + '</span>' + defaultBtn + '</div>' +
             '<div class="config-item-meta">' + meta + '</div>' +
             '<div class="config-item-caps">' + (m.capabilities || []).map(function(c) { return '<span class="cap-badge">' + escapeHtml(c) + '</span>'; }).join('') + '</div>' +
-            '<div class="config-item-actions">' +
-                '<button class="btn-task" onclick="editModel(\'' + escapeHtml(m.id).replace(/'/g, "\\'") + '\')">编辑</button>' +
-                '<button class="btn-task" onclick="deleteModel(\'' + escapeHtml(m.id).replace(/'/g, "\\'") + '\')">删除</button>' +
-            '</div>' +
+            modelActionsHtml +
         '</div>';
     }).join('');
     if (!modelsHtml) {

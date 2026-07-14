@@ -316,6 +316,8 @@ def api_save_model():
 
     try:
         cfg = _load()
+        if mid == cfg.get("default_model"):
+            return jsonify({"error": "cannot edit default model"}), 403
         providers = cfg.get("providers", {})
         provider = body.get("provider") or ""
         if provider and provider not in providers:
@@ -352,13 +354,12 @@ def api_save_model():
 def api_delete_model(mid: str):
     try:
         cfg = _load()
+        if mid == cfg.get("default_model"):
+            return jsonify({"error": "cannot delete default model"}), 403
         models = cfg.get("models", {})
         if mid not in models:
             return jsonify({"error": "model not found"}), 404
         del models[mid]
-        # Keep default_model valid.
-        if cfg.get("default_model") == mid:
-            cfg["default_model"] = next(iter(models.keys()), "")
         _save(cfg)
         return jsonify({"ok": True})
     except Exception as e:
