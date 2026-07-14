@@ -8,6 +8,7 @@
 3. 启动外网访问 Kimi Code Web
 4. 停止 Kimi Code Web（kimi server kill）
 5. 更新 Kimi Code
+6. 更新 Dashboard
 
 也可以直接传入选项数字跳过菜单，例如 `kimi dashboard 1`。
 """
@@ -16,6 +17,7 @@ import json
 import platform
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -244,6 +246,22 @@ def update_kimi_code() -> None:
         print(f"更新命令返回非零退出码: {result.returncode}")
 
 
+def update_dashboard() -> None:
+    """在 Dashboard 目录执行 git pull origin master 更新代码。"""
+    if shutil.which("git") is None:
+        print("未找到 git 命令，请确认 Git 已安装并加入 PATH。")
+        return
+
+    cmd = ["git", "-C", str(DASHBOARD_DIR), "pull", "origin", "master"]
+    print("正在更新 Dashboard...")
+    print(" ".join(cmd))
+    result = subprocess.run(cmd)
+    if result.returncode == 0:
+        print("Dashboard 更新完成，请用选项 1 重新启动以生效。")
+    else:
+        print(f"更新命令返回非零退出码: {result.returncode}")
+
+
 def show_menu() -> str:
     print("\n===== Kimi Code 启动菜单 =====")
     print("1. 启动 Dashboard")
@@ -251,6 +269,7 @@ def show_menu() -> str:
     print("3. 启动外网访问 Kimi Code Web")
     print("4. 停止 Kimi Code Web（kimi server kill）")
     print("5. 更新 Kimi Code")
+    print("6. 更新 Dashboard")
     print("0. 退出")
     print("==============================")
     return input("请输入数字选项: ").strip()
@@ -269,10 +288,12 @@ def main() -> None:
         stop_kimi_web()
     elif choice == "5":
         update_kimi_code()
+    elif choice == "6":
+        update_dashboard()
     elif choice in ("0", "q", "quit", "exit"):
         print("已取消")
     else:
-        print("无效选项，请输入 1/2/3/4/5/0。")
+        print("无效选项，请输入 1/2/3/4/5/6/0。")
         sys.exit(1)
 
 
