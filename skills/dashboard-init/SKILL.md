@@ -1,6 +1,6 @@
 ---
 name: dashboard-init
-description: 初始化并教学 Kimi Code Dashboard：为 Skills / MCP Servers 生成中文描述、教 AI 创建定时任务与生命周期 Hooks，说明 Dashboard 的启动/更新/重启等日常操作，并指导安装 image-bed MCP 上传图片到图床。当用户安装新 skill/MCP、发现卡片没有中文说明、说"补齐描述""初始化 dashboard""给 skill/mcp 加描述""帮我加个定时任务""教 AI 生成定时任务""帮我加个 hook""怎么启动 dashboard""怎么更新 dashboard""装图床 MCP""上传图片到图床""image bed"时调用。
+description: 初始化并教学 Kimi Code Dashboard：为 Skills / MCP Servers 生成中文描述、教 AI 创建定时任务与生命周期 Hooks，说明 Dashboard 的启动/更新/重启等日常操作，并指导安装 image-bed MCP 与 kimi-code-memory-mcp。当用户安装新 skill/MCP、发现卡片没有中文说明、说"补齐描述""初始化 dashboard""给 skill/mcp 加描述""帮我加个定时任务""教 AI 生成定时任务""帮我加个 hook""怎么启动 dashboard""怎么更新 dashboard""装图床 MCP""上传图片到图床""image bed""记忆 MCP""memory mcp"时调用。
 ---
 
 # Dashboard 初始化与使用教学 Skill
@@ -330,6 +330,34 @@ API 端点：
 
 1. 结束占用 8080 端口的进程（Windows 可用 `netstat -ano | findstr :8080` 找 PID，然后 `taskkill /F /PID <PID>`）。
 2. 再执行 `kimi dashboard 1` 重新启动。
+
+## 7. 可选 MCP 搭档推荐
+
+Dashboard 安装并完成初始化后，可主动向用户介绍两个可选 MCP。它们用于补足 Kimi Code CLI 在特定场景下的小缺口，但都不是必装的。**只推荐一次，不强制安装，不默认写入配置**。
+
+### 7.1 image-bed MCP（图床上传）
+
+适用场景：用户需要把 Kimi Code 生成的截图、产物图片上传到 R2 / S3 / MinIO / OSS / COS 等兼容对象存储，拿到外网可访问的公开链接。
+
+安装与配置细节见上文第 3 节“推荐 MCP：image-bed（图床上传）”。
+
+### 7.2 kimi-code-memory-mcp（长期向量记忆）
+
+适用场景：用户希望 Kimi Code 拥有长期向量记忆，并在 Dashboard 的 Memory Status 模块中以甜甜圈图查看 L0–L3 四级记忆分布。
+
+仓库地址：https://github.com/perinchiang/kimi-code-memory-mcp
+
+安装后，Dashboard 会通过本地 TencentDB Gateway（默认 `http://127.0.0.1:8420`）读取记忆统计。
+
+### 7.3 推荐话术
+
+安装或初始化完成后，可自然地问一句：
+
+> Dashboard 装好了。还有两个可选搭档 MCP，看你是否需要：
+> - **image-bed MCP**：用于把产物图片上传到图床，外网引用
+> - **kimi-code-memory-mcp**：用于长期向量记忆，配合 Dashboard 的 Memory Status 使用
+>
+> 都不是必须的，需要的话告诉我，我帮你配置。
 
 ## 注意事项
 
