@@ -8,11 +8,12 @@ import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request
 
-from config import TASKS_CONFIG, log
+from config import SESSIONS_DIR, TASKS_CONFIG, log
 from services.helpers import (
     atomic_write_text,
     config_lock,
@@ -524,3 +525,156 @@ def api_task_delete(task_id: str):
     if warning:
         result["warning"] = warning
     return jsonify(result)
+
+
+# === 后台任务（Kimi Code CLI 运行时任务） ===
+
+_BG_CACHE_TTL = 10  # 秒
+_bg_cache = {"data": None, "ts": 0.0}
+_TASK_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+_SESSION_ID_RE = re.compile(r"^session_[0-9a-f-]+$")
+
+
+def _scan_background_tasks() -> dict:
+    """扫描 sessions 目录下的后台任务 JSON，返回汇总与列表。
+
+    路径模式: sessions/<wd>/session_<uuid>/agents/<agent>/tasks/<task_id>.json
+    日志路径: 同级 <task_id>/output.log
+    """
+    tasks = []
+    try:
+        # glob 单层匹配: sessions/<wd>/session_<uuid>/agents/<agent>/tasks/<task>.json
+        pattern = "*/session_*/agents/*/tasks/*.json"
+        for json_path in SESSIONS_DIR.glob(pattern):
+            try:
+                data = safe_json_load(json_path)
+            except Exception:
+                data = None
+            if not isinstance(data, dict):
+                continue
+            try:
+                # 路径解析: .../sessions/<wd>/session_<uuid>/agents/<agent>/tasks/<task_id>.json
+                parts = json_path.parts
+                # 找到 "sessions" 索引
+                if "sessions" not in parts:
+                    continue
+                sess_idx = parts.index("sessions")
+                work_dir_name = parts[sess_idx + 1] if len(parts) > sess_idx + 1 else ""
+                session_full = parts[sess_idx + 2] if len(parts) > sess_idx + 2 else ""
+                agent_id = parts[sess_idx + 4] if len(parts) > sess_idx + 4 else ""
+                task_file = parts[-1]
+                task_id = task_file[:-5] if task_file.endswith(".json") else task_file
+            except Exception:
+                continue
+
+            session_short = session_full
+            if session_short.startswith("session_"):
+                session_short = session_short[len("session_"):]
+            session_short = session_short[:8]
+
+            task_id_val = str(data.get("taskId", task_id))
+            status_val = str(data.get("status", "")).lower()
+            started_at = data.get("startedAt")
+            ended_at = data.get("endedAt")
+            output_path = json_path.parent / task_id_val / "output.log"
+
+            tasks.append({
+                "taskId": task_id_val,
+                "description": str(data.get("description", "")),
+                "status": status_val,
+                "kind": str(data.get("kind", "")),
+                "command": str(data.get("command", "")),
+                "pid": data.get("pid"),
+                "exitCode": data.get("exitCode"),
+                "startedAt": started_at,
+                "endedAt": ended_at,
+                "timeoutMs": data.get("timeoutMs"),
+                "detached": bool(data.get("detached", False)),
+                "sessionId": session_full,
+                "sessionShort": session_short,
+                "workDirName": work_dir_name,
+                "agentId": agent_id,
+                "outputPath": str(output_path),
+            })
+    except Exception as e:
+        log.warning("Failed to scan background tasks: %s", e)
+
+    # 分类计数
+    running = sum(1 for t in tasks if t["status"] == "running")
+    failed = sum(1 for t in tasks if t["status"] == "completed" and t.get("exitCode") not in (0, None))
+    completed = sum(1 for t in tasks if t["status"] == "completed" and t.get("exitCode") == 0)
+
+    # 排序：running 置顶 → 其余按 startedAt 倒序
+    def sort_key(t):
+        # running 优先级 0，其他 1；startedAt 缺失视为 0
+        priority = 0 if t["status"] == "running" else 1
+        started = t.get("startedAt") or 0
+        # 倒序需要负号
+        return (priority, -started if isinstance(started, (int, float)) else 0)
+
+    tasks.sort(key=sort_key)
+
+    return {
+        "running": running,
+        "completed": completed,
+        "failed": failed,
+        "total": len(tasks),
+        "tasks": tasks,
+    }
+
+
+@bp.route("/api/background-tasks")
+def api_background_tasks():
+    """返回后台任务列表（带 TTL 缓存）。"""
+    now = time.monotonic()
+    if _bg_cache["data"] is None or now - _bg_cache["ts"] > _BG_CACHE_TTL:
+        _bg_cache["data"] = _scan_background_tasks()
+        _bg_cache["ts"] = now
+    return jsonify(_bg_cache["data"])
+
+
+@bp.route("/api/background-tasks/log")
+def api_background_tasks_log():
+    """读取后台任务 output.log 最后 200 行。
+
+    Query: session=<session_xxx>&task=<task_id>
+    """
+    session = (request.args.get("session") or "").strip()
+    task = (request.args.get("task") or "").strip()
+
+    if not session or not _SESSION_ID_RE.match(session):
+        return jsonify({"taskId": task, "log": "", "error": "invalid session"}), 400
+    if not task or not _TASK_ID_RE.match(task):
+        return jsonify({"taskId": task, "log": "", "error": "invalid task"}), 400
+
+    # 在 SESSIONS_DIR 下定位 <wd>/session_xxx/agents/*/tasks/<task>.json
+    try:
+        pattern = f"*/{session}/agents/*/tasks/{task}.json"
+        matches = list(SESSIONS_DIR.glob(pattern))
+    except Exception as e:
+        log.warning("glob failed for bg task log: %s", e)
+        return jsonify({"taskId": task, "log": ""}), 500
+
+    if not matches:
+        return jsonify({"taskId": task, "log": "", "error": "task not found"}), 404
+
+    json_path = matches[0]
+    # log 路径硬约束在 tasks 目录内
+    tasks_dir = json_path.parent
+    log_path = (tasks_dir / task / "output.log").resolve()
+    try:
+        log_path.relative_to(tasks_dir.resolve())
+    except ValueError:
+        return jsonify({"taskId": task, "log": "", "error": "path traversal"}), 400
+
+    if not log_path.exists():
+        return jsonify({"taskId": task, "log": ""})
+
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+        all_lines = text.strip().splitlines()
+        tail = "\n".join(all_lines[-200:]) if all_lines else ""
+        return jsonify({"taskId": task, "log": tail})
+    except Exception as e:
+        log.warning("Failed to read bg task log %s: %s", log_path, e)
+        return jsonify({"taskId": task, "log": "", "error": str(e)}), 500
