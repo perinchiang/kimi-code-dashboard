@@ -1289,13 +1289,34 @@ function renderTrend(unit) {
 
 async function loadTrends() {
     document.getElementById('trendTotal').textContent = '-';
-    document.getElementById('trendGrandTotal').textContent = '-';
+    document.getElementById('trendActiveDays').textContent = '-';
+    document.getElementById('trendStreakDays').textContent = '-';
     try {
         trendData = await fetchJSON('/api/kimi-trends');
         statusData.trends = trendData;
         renderTrend(currentTrendUnit);
         if (trendData.total) {
-            document.getElementById('trendGrandTotal').innerHTML = formatTokens(trendData.total.value);
+            var activeDaysEl = document.getElementById('trendActiveDays');
+            var activeDaysEvalEl = document.getElementById('trendActiveDaysEval');
+            var streakDaysEl = document.getElementById('trendStreakDays');
+            var activeEv = trendData.total.activeEvaluation;
+            if (activeDaysEl) {
+                activeDaysEl.textContent = trendData.total.activeDays || 0;
+                activeDaysEl.className = 'metric';
+            }
+            if (activeDaysEvalEl) {
+                if (activeEv && activeEv.level !== 'none') {
+                    activeDaysEvalEl.textContent = activeEv.label;
+                    activeDaysEvalEl.className = 'cache-eval-badge cache-eval-' + activeEv.level;
+                    activeDaysEvalEl.title = '活跃天数 ' + (trendData.total.activeDays || 0) + ' 天';
+                } else {
+                    activeDaysEvalEl.textContent = '';
+                    activeDaysEvalEl.className = 'cache-eval-badge';
+                }
+            }
+            if (streakDaysEl) {
+                streakDaysEl.textContent = trendData.total.streakDays || 0;
+            }
             var rateEl = document.getElementById('trendCacheRate');
             var evalEl = document.getElementById('trendCacheRateEval');
             var ev = trendData.total.cacheEvaluation;
@@ -1317,7 +1338,8 @@ async function loadTrends() {
     } catch (e) {
         setError('trendChart', '加载失败: ' + e.message);
         document.getElementById('trendTotal').textContent = '-';
-        document.getElementById('trendGrandTotal').textContent = '-';
+        document.getElementById('trendActiveDays').textContent = '-';
+        document.getElementById('trendStreakDays').textContent = '-';
         var rateElErr = document.getElementById('trendCacheRate');
         var evalElErr = document.getElementById('trendCacheRateEval');
         if (rateElErr) { rateElErr.textContent = '-'; rateElErr.className = 'metric'; }

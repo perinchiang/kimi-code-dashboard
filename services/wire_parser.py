@@ -442,6 +442,43 @@ def _evaluate_cache_rate(input_total: int, cache_read: int) -> dict:
     return {"label": "很差", "level": "poor"}
 
 
+def _evaluate_active_days(active_days: int) -> dict:
+    """Return human-readable active-days evaluation.
+
+    Thresholds:
+    - 优秀: active days >= 30
+    - 良好: 7 <= active days < 30
+    - 加油: 0 < active days < 7
+    - 无数据: no active days
+    """
+    if active_days <= 0:
+        return {"label": "无数据", "level": "none"}
+    if active_days >= 30:
+        return {"label": "优秀", "level": "excellent"}
+    if active_days >= 7:
+        return {"label": "良好", "level": "good"}
+    return {"label": "加油", "level": "poor"}
+
+
+def _compute_active_streak(records: list[UsageRecord]) -> tuple[int, int]:
+    """Return (active_days, streak_days).
+
+    active_days: number of distinct calendar days with usage records.
+    streak_days: consecutive days (ending today or yesterday) with usage.
+    """
+    active_day_set = {r.dt.strftime("%Y-%m-%d") for r in records}
+    active_days = len(active_day_set)
+    today = datetime.now().astimezone().date()
+    streak_days = 0
+    for i in range(365 * 5):
+        d = today - timedelta(days=i)
+        if d.strftime("%Y-%m-%d") in active_day_set:
+            streak_days += 1
+        else:
+            break
+    return active_days, streak_days
+
+
 def get_trends() -> dict:
     """Get cached trend data, re-parsing if stale."""
     now_ts = time.time()
@@ -452,6 +489,7 @@ def get_trends() -> dict:
         grand_output = sum(r.output for r in result.usage_records)
         grand_total = grand_input + grand_output
         grand_cache = sum(r.cache_read for r in result.usage_records)
+        active_days, streak_days = _compute_active_streak(result.usage_records)
 
         daily_buckets, daily_cmp = _aggregate_usage(result.usage_records, "hour", 24)
         weekly_buckets, weekly_cmp = _aggregate_usage(result.usage_records, "day", 7)
@@ -476,6 +514,9 @@ def get_trends() -> dict:
                 "cacheRead": grand_cache,
                 "cacheRate": round((grand_cache / grand_input * 100), 1) if grand_input > 0 else 0.0,
                 "cacheEvaluation": _evaluate_cache_rate(grand_input, grand_cache),
+                "activeDays": active_days,
+                "streakDays": streak_days,
+                "activeEvaluation": _evaluate_active_days(active_days),
             },
         }
         _trend_cache["at"] = now_ts
@@ -578,8 +619,7 @@ def _update_model_usage_cache(result: ParseResult):
             "all": all_data,
         },
         "trends": {
-            "daily": _build_model_trend_series(result.model_tokens_by_day, 30, "day"),
-            "weekly": _build_model_trend_series(result.model_tokens_by_week, 12, "week"),
+            "last7days": _build_model_trend_series(result.model_tokens_by_day, 7, "day"),
         },
     }
     _model_usage_cache["at"] = time.time()
