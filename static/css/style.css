@@ -1,6 +1,7 @@
 /* === Design Tokens === */
 :root {
     --bg: #0d1117;
+    --bg-tertiary: #161b22;
     --surface: #161b22;
     --surface-2: #131820;
     --surface-hover: #1c2128;
@@ -720,6 +721,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
    跟随：[data-theme="auto"] 下系统为亮色时也生效（靠 JS 推导成 light，所以只需这一份） */
 [data-theme="light"] {
     --bg: #ffffff;
+    --bg-tertiary: #f6f8fa;
     --surface: #f6f8fa;
     --surface-2: #ffffff;
     --surface-hover: #eaeef2;
@@ -750,6 +752,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 @media (prefers-color-scheme: light) {
     [data-theme="auto"] {
         --bg: #ffffff;
+        --bg-tertiary: #f6f8fa;
         --surface: #f6f8fa;
         --surface-2: #ffffff;
         --surface-hover: #eaeef2;
@@ -1124,14 +1127,38 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 .seg-stats { margin-left: auto; padding-right: 0.4rem; font-size: 0.78rem; font-weight: 450; color: var(--text-secondary); }
 .seg-stats strong { color: var(--text); font-family: var(--mono); }
 .seg-divider { width: 1px; align-self: stretch; margin: 0.2rem 0.15rem; background: var(--border); flex-shrink: 0; }
-.seg-sort-select {
+.custom-dropdown { position: relative; flex-shrink: 0; margin-left: 0.25rem; }
+.custom-dropdown-trigger {
+    display: inline-flex; align-items: center; gap: 0.35rem;
     background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border);
-    border-radius: calc(var(--radius-sm) - 2px); padding: 0 0.5rem; font-size: 0.75rem; font-weight: 500;
+    border-radius: calc(var(--radius-sm) - 2px); padding: 0 0.55rem; font-size: 0.75rem; font-weight: 500;
     height: 1.7rem; line-height: 1.7rem; cursor: pointer; outline: none;
-    margin-left: 0.25rem; flex-shrink: 0;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
-.seg-sort-select:hover { border-color: var(--text-tertiary); color: var(--text); }
-.seg-sort-select:focus { border-color: var(--accent); }
+.custom-dropdown-trigger:hover { border-color: var(--text-tertiary); color: var(--text); }
+.custom-dropdown-trigger:focus,
+.custom-dropdown.open .custom-dropdown-trigger { border-color: var(--accent); color: var(--text); }
+.custom-dropdown-chevron { transition: transform 0.2s; color: currentColor; }
+.custom-dropdown.open .custom-dropdown-chevron { transform: rotate(180deg); }
+.custom-dropdown-menu {
+    position: absolute; top: calc(100% + 0.35rem); right: 0; min-width: 100%; width: max-content;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35); padding: 0.25rem; z-index: 50;
+    display: none; flex-direction: column; gap: 0.1rem;
+}
+.custom-dropdown.open .custom-dropdown-menu { display: flex; }
+.custom-dropdown-item {
+    background: transparent; border: none; border-radius: calc(var(--radius-sm) - 2px);
+    padding: 0 0.65rem; font-size: 0.75rem; font-weight: 500; color: var(--text-secondary);
+    height: 1.9rem; line-height: 1.9rem; text-align: left; white-space: nowrap;
+    cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.custom-dropdown-item:hover { background: var(--surface-hover); color: var(--text); }
+.custom-dropdown-item.active { background: var(--surface-hover); color: var(--text); }
+
+/* 亮色主题下阴影更柔和 */
+[data-theme="light"] .custom-dropdown-menu { box-shadow: 0 8px 24px rgba(0,0,0,0.12); }
+@media (prefers-color-scheme: light) { [data-theme="auto"] .custom-dropdown-menu { box-shadow: 0 8px 24px rgba(0,0,0,0.12); } }
 
 .skill-grid, .mcp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; margin-top: 0.5rem; }
 .skill-card, .mcp-card {

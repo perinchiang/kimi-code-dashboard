@@ -635,9 +635,8 @@ function renderSkillsDetail() {
     var sorted = _sortSkills(filtered);
     renderSkillsDetailList(sorted);
 
-    // sync sort select
-    var sortSelect = document.getElementById('skillSortSelect');
-    if (sortSelect) sortSelect.value = currentSkillSort;
+    // sync sort dropdown
+    _syncSkillSortDropdown();
 }
 
 function _skillDetailHtml(s) {
@@ -712,10 +711,36 @@ function filterSkillsDetail(q) {
     renderSkillsDetailList(sorted);
 }
 
+var SKILL_SORT_LABELS = { name: '名称', 'calls-desc': '调用次数（多→少）', 'calls-asc': '调用次数（少→多）' };
+
+function _syncSkillSortDropdown() {
+    var label = document.getElementById('skillSortLabel');
+    if (label) label.textContent = SKILL_SORT_LABELS[currentSkillSort] || '名称';
+    document.querySelectorAll('#skillSortDropdown .custom-dropdown-item').forEach(function(item) {
+        item.classList.toggle('active', item.dataset.value === currentSkillSort);
+    });
+    closeSkillSortDropdown();
+}
+
+function toggleSkillSortDropdown() {
+    var dd = document.getElementById('skillSortDropdown');
+    if (!dd) return;
+    var isOpen = dd.classList.toggle('open');
+    var trigger = dd.querySelector('.custom-dropdown-trigger');
+    if (trigger) trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+}
+
+function closeSkillSortDropdown() {
+    var dd = document.getElementById('skillSortDropdown');
+    if (!dd) return;
+    dd.classList.remove('open');
+    var trigger = dd.querySelector('.custom-dropdown-trigger');
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+}
+
 function setSkillSort(sort) {
     currentSkillSort = sort || 'name';
-    var sortSelect = document.getElementById('skillSortSelect');
-    if (sortSelect) sortSelect.value = currentSkillSort;
+    _syncSkillSortDropdown();
     var q = document.getElementById('skillSearchDetail');
     filterSkillsDetail(q ? q.value : '');
 }
@@ -3012,4 +3037,8 @@ Promise.all([loadDashboardVersion(), loadStartupServiceStatus(), loadKimiConfig(
 checkKimiWebStatus();
 setInterval(checkKimiWebStatus, 10000);
 window.addEventListener('hashchange', handleRoute);
+document.addEventListener('click', function(e) {
+    var dd = document.getElementById('skillSortDropdown');
+    if (dd && !dd.contains(e.target)) closeSkillSortDropdown();
+});
 handleRoute();
