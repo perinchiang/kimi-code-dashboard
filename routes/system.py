@@ -5,6 +5,7 @@ import os
 import platform
 import re
 import subprocess
+import sys
 import threading
 import time
 import urllib.parse
@@ -89,16 +90,32 @@ def _clean_stale_lock():
 
 
 def _pid_alive(pid: int) -> bool:
-    """Check if a process with the given PID is running."""
+    """Check if a process with the given PID is running (cross-platform)."""
+    if pid <= 0:
+        return False
     try:
-        result = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-            capture_output=True, text=True, errors="replace", timeout=5,
-            **no_window_kwargs(),
-        )
-        return str(pid) in result.stdout
+        if os.name == "nt":
+            # Windows: os.kill(pid, 0) 对不存在的进程抛 OSError 而非 ProcessLookupError
+            # 用 ctypes OpenProcess 更可靠
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not handle:
+                return False  # OpenProcess 失败 = 进程不存在或无权限
+            kernel32.CloseHandle(handle)
+            return True
+        else:
+            # POSIX: 信号 0 = 不实际发信号,只检测存在性
+            os.kill(pid, 0)
+            return True
+    except ProcessLookupError:
+        return False  # POSIX: 进程不存在
+    except PermissionError:
+        return True  # POSIX: 进程存在但无权限
     except Exception:
-        return True  # Assume alive to be safe
+        # 其他异常 — 保守返回 True,与原行为一致
+        return True
 
 
 def _build_url(cfg):
@@ -461,10 +478,25 @@ def _escape_vbs_string(value: str) -> str:
     return value.replace('"', '""')
 
 
+def _windows_pythonw() -> str:
+    """Return the pythonw.exe path, falling back to sys.executable if not found.
+
+    Borrowed from launch_menu.py's candidate-probing pattern.
+    """
+    candidates = [
+        APP_DIR / ".venv" / "Scripts" / "pythonw.exe",
+        APP_DIR / ".venv" / "Scripts" / "python.exe",  # Conda 等
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c.resolve())
+    return sys.executable  # 最终 fallback:当前解释器
+
+
 def _windows_create_dashboard_startup() -> None:
     vbs_path = _windows_startup_file("dashboard")
     dashboard_dir = str(APP_DIR.resolve())
-    pythonw = str((APP_DIR / ".venv" / "Scripts" / "pythonw.exe").resolve())
+    pythonw = _windows_pythonw()
     run_cmd = f'cmd /c cd /d "{dashboard_dir}" && "{pythonw}" app.py'
     vbs = f'''Set WshShell = CreateObject("WScript.Shell")
 WshShell.Run "{_escape_vbs_string(run_cmd)}", 0, False
@@ -514,7 +546,7 @@ def _windows_elevated_task_exists() -> bool:
 def _windows_elevated_task_ps(enable: bool) -> str:
     """Return PowerShell code to create or remove the elevated startup task."""
     dashboard_dir = str(APP_DIR.resolve())
-    pythonw = str((APP_DIR / ".venv" / "Scripts" / "pythonw.exe").resolve())
+    pythonw = _windows_pythonw()
     log_path = str((KIMI_CODE_DIR / "dashboard.log").resolve())
 
     if enable:

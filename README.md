@@ -90,9 +90,13 @@ cd ~/.kimi-code/dashboard
 
 也可以直接传入选项数字跳过菜单，例如 `kimi dashboard 2`。
 
-> **注意**：定时任务看板功能依赖 Windows PowerShell（`powershell` 命令），在 macOS / Linux 上不可用。其他功能（数据可视化、Kimi Web 服务配置、主题切换等）均跨平台可用。
+> **跨平台支持**：
+> - **全平台可用**：数据可视化、产物与配置管理、Kimi Web 服务配置、主题切换、版本检查与一键更新、手动安装、开机自启（Windows Startup/Task Scheduler、macOS launchd）
+> - **仅 Windows**：定时任务看板（依赖 Task Scheduler，macOS/Linux 暂不支持）
+> - **Linux 限制**：开机自启暂不支持（macOS 已支持 launchd）
+> - 设备型号检测：Windows 用 `Get-CimInstance`（兼容 Win11 24H2+），macOS 用 `sysctl`/`system_profiler`，Linux 读 `/sys/class/dmi/id/product_name`
 
-> **schedule 字段格式**：`每日 HH:MM` / `每周X HH:MM` / `每月D日 HH:MM`（X 为 日 / 一 / 二 / ... / 六，多个用 `、` 分隔，如 `每周一、三、五 09:00`）。`scriptsDir` 需写绝对路径，不支持 `~` 展开。
+> **schedule 字段格式**：`每日 HH:MM` / `每周X HH:MM` / `每月D日 HH:MM`（X 为 日 / 一 / 二 / ... / 六，多个用 `、` 分隔，如 `每周一、三、五 09:00`）。`scriptsDir` 支持绝对路径与 `~` 展开。
 
 ## 项目结构
 

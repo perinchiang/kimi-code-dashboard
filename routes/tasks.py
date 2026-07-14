@@ -22,7 +22,12 @@ _DAY_NAME_TO_INT = {name: i for i, name in enumerate(_DAY_NAMES)}
 
 
 def _load_tasks_config() -> dict:
-    return safe_json_load(TASKS_CONFIG) or {"scriptsDir": "", "tasks": []}
+    cfg = safe_json_load(TASKS_CONFIG) or {"scriptsDir": "", "tasks": []}
+    # 展开 scriptsDir 中的 ~,Python 的 Path 不会自动展开
+    scripts_dir = cfg.get("scriptsDir", "")
+    if scripts_dir:
+        cfg["scriptsDir"] = str(Path(scripts_dir).expanduser())
+    return cfg
 
 
 def _save_tasks_config(cfg: dict) -> bool:

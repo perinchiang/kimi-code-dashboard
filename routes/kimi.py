@@ -69,15 +69,25 @@ def _get_device_label() -> str:
                     if items:
                         model = items[0].get("machine_model", "")
         elif system == "Windows":
+            # 优先用 PowerShell Get-CimInstance(Win11 24H2 起默认不再安装 wmic)
             result = subprocess.run(
-                ["wmic", "computersystem", "get", "model", "/value"],
-                capture_output=True, text=True, timeout=10,
+                ["powershell", "-NoProfile", "-Command",
+                 "(Get-CimInstance -ClassName Win32_ComputerSystem).Model"],
+                capture_output=True, text=True, errors="replace", timeout=10,
                 **no_window_kwargs(),
             )
-            for line in result.stdout.splitlines():
-                if line.startswith("Model="):
-                    model = line.split("=", 1)[1].strip()
-                    break
+            model = result.stdout.strip() if result.returncode == 0 else ""
+            # Fallback:旧版 Windows 仍可用 wmic
+            if not model:
+                result = subprocess.run(
+                    ["wmic", "computersystem", "get", "model", "/value"],
+                    capture_output=True, text=True, errors="replace", timeout=10,
+                    **no_window_kwargs(),
+                )
+                for line in result.stdout.splitlines():
+                    if line.startswith("Model="):
+                        model = line.split("=", 1)[1].strip()
+                        break
         elif system == "Linux":
             product_path = Path("/sys/class/dmi/id/product_name")
             if product_path.exists():
@@ -519,7 +529,8 @@ def api_kimi_update_check():
 
 _upgrade_state: dict = {"proc": None, "log_path": None, "started_at": 0.0, "manual": False}
 
-_MANUAL_INSTALL_URL = "https://code.kimi.com/kimi-code/install.ps1"
+_MANUAL_INSTALL_URL_PS1 = "https://code.kimi.com/kimi-code/install.ps1"
+_MANUAL_INSTALL_URL_SH = "https://code.kimi.com/kimi-code/install.sh"
 
 
 @bp.route("/api/kimi-update/run", methods=["POST"])
@@ -554,7 +565,10 @@ def api_kimi_update_run():
 
 @bp.route("/api/kimi-update/manual-run", methods=["POST"])
 def api_kimi_update_manual_run():
-    """POST-only: run the official PowerShell installer for Windows native installs."""
+    """POST-only: run the official installer for manual Kimi Code installs.
+
+    Windows uses install.ps1 (PowerShell); macOS/Linux uses install.sh (bash).
+    """
     proc = _upgrade_state.get("proc")
     if proc is not None and proc.poll() is None:
         return jsonify({"status": "already_running"})
@@ -564,20 +578,22 @@ def api_kimi_update_manual_run():
     os.close(log_fd)
     try:
         logf = open(log_path, "w", encoding="utf-8")
-        cmd = [
-            "powershell",
-            "-NoProfile",
-            "-ExecutionPolicy", "Bypass",
-            "-Command",
-            f"irm {_MANUAL_INSTALL_URL} | iex",
-        ]
+        if platform.system() == "Windows":
+            cmd = [
+                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-Command", f"irm {_MANUAL_INSTALL_URL_PS1} | iex",
+            ]
+            log.info("Started manual Kimi Code install via PowerShell")
+        else:
+            # macOS / Linux: curl install.sh | bash
+            cmd = ["bash", "-c", f"curl -fsSL {_MANUAL_INSTALL_URL_SH} | bash"]
+            log.info("Started manual Kimi Code install via bash")
         kwargs = {
             "stdout": logf,
             "stderr": subprocess.STDOUT,
         }
         kwargs.update(no_window_kwargs())
         proc = subprocess.Popen(cmd, **kwargs)
-        log.info("Started manual Kimi Code install via PowerShell")
     except Exception as e:
         log.error("Failed to start manual kimi install: %s", e)
         return jsonify({"status": "error", "error": str(e)})
@@ -612,7 +628,12 @@ def api_kimi_update_status():
         status = "manual_update"
         manual_update = True
         m = re.search(r"To update manually, run:\s*(.+)", log_text)
-        manual_command = m.group(1).strip() if m else "irm https://code.kimi.com/kimi-code/install.ps1 | iex"
+        if m:
+            manual_command = m.group(1).strip()
+        elif platform.system() == "Windows":
+            manual_command = f"irm {_MANUAL_INSTALL_URL_PS1} | iex"
+        else:
+            manual_command = f"curl -fsSL {_MANUAL_INSTALL_URL_SH} | bash"
 
     return jsonify({
         "status": status,
