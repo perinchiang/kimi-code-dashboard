@@ -1332,6 +1332,24 @@ function renderTrend(unit) {
     else { chartEl.innerHTML = renderLineChart(data); attachChartHover(data); }
     var total = data.reduce(function(a, b) { return a + b.value; }, 0);
     document.getElementById('trendTotal').innerHTML = formatTokens(total);
+    // 渲染环比箭头 badge：对比前一日/前一周/前一月/前一年
+    var badgeEl = document.getElementById('trendChangeBadge');
+    if (badgeEl) {
+        var cmp = trendData.comparison && trendData.comparison[unit];
+        if (cmp && typeof cmp.changePercent === 'number' && cmp.previous > 0) {
+            var pct = cmp.changePercent;
+            var cls = pct > 0 ? 'up' : (pct < 0 ? 'down' : 'flat');
+            var arrow = pct > 0 ? '\u2191' : (pct < 0 ? '\u2193' : '\u2192');
+            var sign = pct > 0 ? '+' : '';
+            var unitLabel = unit === 'daily' ? '昨日' : (unit === 'weekly' ? '上周' : (unit === 'monthly' ? '上月' : '去年'));
+            badgeEl.className = 'change-badge ' + cls;
+            badgeEl.title = unitLabel + '同期: ' + formatTokens(cmp.previous) + ' (' + sign + pct + '%)';
+            badgeEl.textContent = arrow + ' ' + sign + pct + '%';
+            badgeEl.style.display = '';
+        } else {
+            badgeEl.style.display = 'none';
+        }
+    }
     document.querySelectorAll('.trend-tab').forEach(function(btn) { btn.classList.toggle('active', btn.dataset.unit === unit); });
     // Update legend bar
     var legendEl = document.getElementById('trendLegend');
