@@ -232,6 +232,7 @@ def parse_all_full() -> ParseResult:
 _trend_cache: dict = {"data": None, "at": 0.0}
 _tool_usage_cache: dict = {"data": None, "at": 0.0}
 _model_usage_cache: dict = {"data": None, "at": 0.0}
+_cache_lock = __import__("threading").Lock()
 
 
 def _trend_key(dt: datetime, unit: str) -> tuple[str, str]:
@@ -413,47 +414,52 @@ def get_trends() -> dict:
     """Get cached trend data, re-parsing if stale."""
     now_ts = time.time()
     if _trend_cache["data"] is None or now_ts - _trend_cache["at"] > TREND_CACHE_TTL:
-        log.debug("Trend cache miss, parsing wire.jsonl files")
-        result = parse_all_full()
-        grand_input = sum(r.input_total for r in result.usage_records)
-        grand_output = sum(r.output for r in result.usage_records)
-        grand_total = grand_input + grand_output
-        grand_cache = sum(r.cache_read for r in result.usage_records)
-        active_days, streak_days = _compute_active_streak(result.usage_records)
+        with _cache_lock:
+            # Double-checked locking: another thread may have refreshed while we waited
+            now_ts = time.time()
+            if _trend_cache["data"] is not None and now_ts - _trend_cache["at"] <= TREND_CACHE_TTL:
+                return _trend_cache["data"]
+            log.debug("Trend cache miss, parsing wire.jsonl files")
+            result = parse_all_full()
+            grand_input = sum(r.input_total for r in result.usage_records)
+            grand_output = sum(r.output for r in result.usage_records)
+            grand_total = grand_input + grand_output
+            grand_cache = sum(r.cache_read for r in result.usage_records)
+            active_days, streak_days = _compute_active_streak(result.usage_records)
 
-        daily_buckets, daily_cmp = _aggregate_usage(result.usage_records, "hour", 24)
-        weekly_buckets, weekly_cmp = _aggregate_usage(result.usage_records, "day", 7)
-        monthly_buckets, monthly_cmp = _aggregate_usage(result.usage_records, "day", 30)
-        yearly_buckets, yearly_cmp = _aggregate_usage(result.usage_records, "day", 365)
+            daily_buckets, daily_cmp = _aggregate_usage(result.usage_records, "hour", 24)
+            weekly_buckets, weekly_cmp = _aggregate_usage(result.usage_records, "day", 7)
+            monthly_buckets, monthly_cmp = _aggregate_usage(result.usage_records, "day", 30)
+            yearly_buckets, yearly_cmp = _aggregate_usage(result.usage_records, "day", 365)
 
-        _trend_cache["data"] = {
-            "daily": daily_buckets,
-            "weekly": weekly_buckets,
-            "monthly": monthly_buckets,
-            "yearly": yearly_buckets,
-            "comparison": {
-                "daily": daily_cmp,
-                "weekly": weekly_cmp,
-                "monthly": monthly_cmp,
-                "yearly": yearly_cmp,
-            },
-            "total": {
-                "value": grand_total,
-                "input": grand_input,
-                "output": grand_output,
-                "cacheRead": grand_cache,
-                "cacheRate": round((grand_cache / grand_input * 100), 1) if grand_input > 0 else 0.0,
-                "cacheEvaluation": _evaluate_cache_rate(grand_input, grand_cache),
-                "activeDays": active_days,
-                "streakDays": streak_days,
-                "activeEvaluation": _evaluate_active_days(active_days),
-            },
-        }
-        _trend_cache["at"] = now_ts
+            _trend_cache["data"] = {
+                "daily": daily_buckets,
+                "weekly": weekly_buckets,
+                "monthly": monthly_buckets,
+                "yearly": yearly_buckets,
+                "comparison": {
+                    "daily": daily_cmp,
+                    "weekly": weekly_cmp,
+                    "monthly": monthly_cmp,
+                    "yearly": yearly_cmp,
+                },
+                "total": {
+                    "value": grand_total,
+                    "input": grand_input,
+                    "output": grand_output,
+                    "cacheRead": grand_cache,
+                    "cacheRate": round((grand_cache / grand_input * 100), 1) if grand_input > 0 else 0.0,
+                    "cacheEvaluation": _evaluate_cache_rate(grand_input, grand_cache),
+                    "activeDays": active_days,
+                    "streakDays": streak_days,
+                    "activeEvaluation": _evaluate_active_days(active_days),
+                },
+            }
+            _trend_cache["at"] = now_ts
 
-        # Also update tool-usage and model-usage caches since we just parsed everything
-        _update_tool_usage_cache(result)
-        _update_model_usage_cache(result)
+            # Also update tool-usage and model-usage caches since we just parsed everything
+            _update_tool_usage_cache(result)
+            _update_model_usage_cache(result)
 
     return _trend_cache["data"]
 
@@ -487,12 +493,16 @@ def get_tool_usage() -> dict:
     """Get cached tool/skill usage data, re-parsing if stale."""
     now_ts = time.time()
     if _tool_usage_cache["data"] is None or now_ts - _tool_usage_cache["at"] > TOOL_USAGE_CACHE_TTL:
-        log.debug("Tool-usage cache miss, parsing wire.jsonl files")
-        result = parse_all_full()
-        _update_tool_usage_cache(result)
-        # Also update trend + model caches
-        _trend_cache["at"] = 0  # force trend refresh next call
-        _update_model_usage_cache(result)
+        with _cache_lock:
+            now_ts = time.time()
+            if _tool_usage_cache["data"] is not None and now_ts - _tool_usage_cache["at"] <= TOOL_USAGE_CACHE_TTL:
+                return _tool_usage_cache["data"]
+            log.debug("Tool-usage cache miss, parsing wire.jsonl files")
+            result = parse_all_full()
+            _update_tool_usage_cache(result)
+            # Also update trend + model caches
+            _trend_cache["at"] = 0  # force trend refresh next call
+            _update_model_usage_cache(result)
     return _tool_usage_cache["data"]
 
 
@@ -559,10 +569,14 @@ def get_model_usage() -> dict:
     """Get cached model usage distribution, re-parsing if stale."""
     now_ts = time.time()
     if _model_usage_cache["data"] is None or now_ts - _model_usage_cache["at"] > TOOL_USAGE_CACHE_TTL:
-        log.debug("Model-usage cache miss, parsing wire.jsonl files")
-        result = parse_all_full()
-        _update_model_usage_cache(result)
-        # Also update other caches
-        _trend_cache["at"] = 0
-        _update_tool_usage_cache(result)
+        with _cache_lock:
+            now_ts = time.time()
+            if _model_usage_cache["data"] is not None and now_ts - _model_usage_cache["at"] <= TOOL_USAGE_CACHE_TTL:
+                return _model_usage_cache["data"]
+            log.debug("Model-usage cache miss, parsing wire.jsonl files")
+            result = parse_all_full()
+            _update_model_usage_cache(result)
+            # Also update other caches
+            _trend_cache["at"] = 0
+            _update_tool_usage_cache(result)
     return _model_usage_cache["data"]

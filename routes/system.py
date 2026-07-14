@@ -193,7 +193,7 @@ def _build_cmd(cfg):
     cmd = [str(KIMI_BIN), "server", "run", "--port", str(cfg.get("port", 5494))]
     bind = cfg.get("bind", "127.0.0.1")
     if bind == "0.0.0.0":
-        cmd.append("--host")  # 不带值 = 绑定 0.0.0.0
+        cmd.extend(["--host", "0.0.0.0"])
     elif bind and bind != "127.0.0.1":
         cmd.extend(["--host", bind])
     # 127.0.0.1 时不传 --host

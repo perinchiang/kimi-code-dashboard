@@ -113,8 +113,11 @@ def save_image_bed_config(new_cfg: dict) -> None:
     try:
         with open(CONFIG_PATH, "rb") as f:
             cfg = tomllib.load(f)
-    except Exception:
+    except FileNotFoundError:
         cfg = {}
+    except Exception as e:
+        log.error("config.toml 解析失败,中止写入以防止数据丢失: %s", e)
+        raise
 
     # 更新 image_bed 段
     cfg["image_bed"] = {

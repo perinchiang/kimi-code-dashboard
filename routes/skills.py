@@ -11,7 +11,13 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request
 
 from config import AGENTS_DIR, SKILL_LOCK, log
-from services.helpers import parse_skill_frontmatter, safe_json_load
+from services.helpers import (
+    atomic_write_text,
+    config_lock,
+    lock_for,
+    parse_skill_frontmatter,
+    safe_json_load,
+)
 from services.wire_parser import get_tool_usage
 
 bp = Blueprint("skills", __name__)
@@ -41,15 +47,15 @@ def _cleanup_orphaned_entries(lock: dict) -> bool:
 
 
 def _load_lock() -> dict:
+    """Read-only load. Orphan cleanup is deferred to write operations to
+    keep GET /api/skills side-effect-free (avoids concurrent save races)."""
     lock = safe_json_load(SKILL_LOCK) or {"version": 3, "skills": {}, "dismissed": {}, "disabled": {}}
-    if _cleanup_orphaned_entries(lock):
-        _save_lock(lock)
     return lock
 
 
 def _save_lock(lock: dict) -> bool:
     try:
-        SKILL_LOCK.write_text(json.dumps(lock, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_text(SKILL_LOCK, json.dumps(lock, ensure_ascii=False, indent=2))
         return True
     except Exception as e:
         log.error("Failed to write %s: %s", SKILL_LOCK, e)
@@ -138,33 +144,36 @@ def api_skills():
 @bp.route("/api/skills/<skill_id>/toggle", methods=["POST"])
 def api_skill_toggle(skill_id: str):
     """Enable or disable a skill by moving it between skills and disabled dicts."""
-    lock = _load_lock()
     body = request.get_json(silent=True) or {}
     enabled = bool(body.get("enabled", True))
 
-    skills = lock.setdefault("skills", {})
-    disabled = lock.setdefault("disabled", {})
+    with config_lock(lock_for(SKILL_LOCK)):
+        lock = _load_lock()
+        _cleanup_orphaned_entries(lock)
 
-    currently_enabled = skill_id in skills
-    target_enabled = enabled
+        skills = lock.setdefault("skills", {})
+        disabled = lock.setdefault("disabled", {})
 
-    if currently_enabled == target_enabled:
-        return jsonify({"success": True, "enabled": target_enabled})
+        currently_enabled = skill_id in skills
+        target_enabled = enabled
 
-    if target_enabled:
-        if skill_id not in disabled:
-            # Local-only skill: create minimal entry
-            skills[skill_id] = {"source": "local/project", "sourceUrl": "", "installedAt": "", "skillPath": f"skills/{skill_id}/SKILL.md"}
+        if currently_enabled == target_enabled:
+            return jsonify({"success": True, "enabled": target_enabled})
+
+        if target_enabled:
+            if skill_id not in disabled:
+                # Local-only skill: create minimal entry
+                skills[skill_id] = {"source": "local/project", "sourceUrl": "", "installedAt": "", "skillPath": f"skills/{skill_id}/SKILL.md"}
+            else:
+                skills[skill_id] = disabled.pop(skill_id)
         else:
-            skills[skill_id] = disabled.pop(skill_id)
-    else:
-        if skill_id in skills:
-            disabled[skill_id] = skills.pop(skill_id)
-        else:
-            disabled[skill_id] = {"source": "local/project", "sourceUrl": "", "installedAt": "", "skillPath": f"skills/{skill_id}/SKILL.md"}
+            if skill_id in skills:
+                disabled[skill_id] = skills.pop(skill_id)
+            else:
+                disabled[skill_id] = {"source": "local/project", "sourceUrl": "", "installedAt": "", "skillPath": f"skills/{skill_id}/SKILL.md"}
 
-    if not _save_lock(lock):
-        return jsonify({"success": False, "error": "保存 .skill-lock.json 失败"}), 500
+        if not _save_lock(lock):
+            return jsonify({"success": False, "error": "保存 .skill-lock.json 失败"}), 500
 
     return jsonify({"success": True, "enabled": target_enabled})
 
@@ -172,49 +181,52 @@ def api_skill_toggle(skill_id: str):
 @bp.route("/api/skills/<skill_id>/save", methods=["POST"])
 def api_skill_save(skill_id: str):
     """Save skill metadata (name/description frontmatter, source info)."""
-    lock = _load_lock()
     body = request.get_json(silent=True) or {}
 
-    skills = lock.setdefault("skills", {})
-    disabled = lock.setdefault("disabled", {})
+    with config_lock(lock_for(SKILL_LOCK)):
+        lock = _load_lock()
+        _cleanup_orphaned_entries(lock)
 
-    meta = skills.get(skill_id) or disabled.get(skill_id)
-    if not meta:
-        # Local-only skill
-        meta = {"source": "local/project", "sourceUrl": "", "installedAt": "", "skillPath": f"skills/{skill_id}/SKILL.md"}
-        skills[skill_id] = meta
+        skills = lock.setdefault("skills", {})
+        disabled = lock.setdefault("disabled", {})
 
-    # Update source metadata
-    if "source" in body:
-        meta["source"] = str(body["source"]).strip()
-    if "sourceUrl" in body:
-        meta["sourceUrl"] = str(body["sourceUrl"]).strip()
+        meta = skills.get(skill_id) or disabled.get(skill_id)
+        if not meta:
+            # Local-only skill
+            meta = {"source": "local/project", "sourceUrl": "", "installedAt": "", "skillPath": f"skills/{skill_id}/SKILL.md"}
+            skills[skill_id] = meta
 
-    # Update SKILL.md frontmatter
-    skill_path = AGENTS_DIR / meta.get("skillPath", f"skills/{skill_id}/SKILL.md")
-    if not skill_path.exists():
-        skill_path = AGENTS_DIR / "skills" / skill_id / "SKILL.md"
+        # Update source metadata
+        if "source" in body:
+            meta["source"] = str(body["source"]).strip()
+        if "sourceUrl" in body:
+            meta["sourceUrl"] = str(body["sourceUrl"]).strip()
 
-    if skill_path.exists():
-        try:
-            text = skill_path.read_text(encoding="utf-8")
-            name = str(body.get("name", "")).strip()
-            description = str(body.get("description", "")).strip()
-            if text.startswith("---"):
-                end = text.find("---", 3)
-                if end != -1:
-                    new_fm = f"---\nname: {name}\ndescription: {description}\n---"
-                    rest = text[end + 3:].lstrip("\n")
-                    skill_path.write_text(new_fm + "\n\n" + rest, encoding="utf-8")
-            else:
-                new_fm = f"---\nname: {name}\ndescription: {description}\n---\n\n"
-                skill_path.write_text(new_fm + text, encoding="utf-8")
-        except Exception as e:
-            log.error("Failed to update SKILL.md for %s: %s", skill_id, e)
-            return jsonify({"success": False, "error": "更新 SKILL.md 失败: " + str(e)}), 500
+        # Update SKILL.md frontmatter
+        skill_path = AGENTS_DIR / meta.get("skillPath", f"skills/{skill_id}/SKILL.md")
+        if not skill_path.exists():
+            skill_path = AGENTS_DIR / "skills" / skill_id / "SKILL.md"
 
-    if not _save_lock(lock):
-        return jsonify({"success": False, "error": "保存 .skill-lock.json 失败"}), 500
+        if skill_path.exists():
+            try:
+                text = skill_path.read_text(encoding="utf-8")
+                name = str(body.get("name", "")).strip()
+                description = str(body.get("description", "")).strip()
+                if text.startswith("---"):
+                    end = text.find("---", 3)
+                    if end != -1:
+                        new_fm = f"---\nname: {name}\ndescription: {description}\n---"
+                        rest = text[end + 3:].lstrip("\n")
+                        skill_path.write_text(new_fm + "\n\n" + rest, encoding="utf-8")
+                else:
+                    new_fm = f"---\nname: {name}\ndescription: {description}\n---\n\n"
+                    skill_path.write_text(new_fm + text, encoding="utf-8")
+            except Exception as e:
+                log.error("Failed to update SKILL.md for %s: %s", skill_id, e)
+                return jsonify({"success": False, "error": "更新 SKILL.md 失败: " + str(e)}), 500
+
+        if not _save_lock(lock):
+            return jsonify({"success": False, "error": "保存 .skill-lock.json 失败"}), 500
 
     return jsonify({"success": True})
 
@@ -222,28 +234,41 @@ def api_skill_save(skill_id: str):
 @bp.route("/api/skills/<skill_id>/delete", methods=["POST"])
 def api_skill_delete(skill_id: str):
     """Uninstall a skill: remove from lock file and delete skill directory."""
-    lock = _load_lock()
+    with config_lock(lock_for(SKILL_LOCK)):
+        lock = _load_lock()
+        _cleanup_orphaned_entries(lock)
 
-    skills = lock.setdefault("skills", {})
-    disabled = lock.setdefault("disabled", {})
+        skills = lock.setdefault("skills", {})
+        disabled = lock.setdefault("disabled", {})
 
-    meta = skills.pop(skill_id, None) or disabled.pop(skill_id, None)
+        meta = skills.pop(skill_id, None) or disabled.pop(skill_id, None)
 
-    skill_path = None
-    if meta:
-        skill_path = AGENTS_DIR / meta.get("skillPath", f"skills/{skill_id}/SKILL.md")
-    if not skill_path or not skill_path.exists():
-        skill_path = AGENTS_DIR / "skills" / skill_id / "SKILL.md"
+        skill_path = None
+        if meta:
+            skill_path = AGENTS_DIR / meta.get("skillPath", f"skills/{skill_id}/SKILL.md")
+        if not skill_path or not skill_path.exists():
+            skill_path = AGENTS_DIR / "skills" / skill_id / "SKILL.md"
 
-    if skill_path and skill_path.exists():
-        skill_dir = skill_path.parent
-        try:
-            shutil.rmtree(skill_dir)
-        except Exception as e:
-            log.error("Failed to remove skill directory %s: %s", skill_dir, e)
-            return jsonify({"success": False, "error": "删除 skill 目录失败: " + str(e)}), 500
+        # 安全检查:skill_path 必须在 AGENTS_DIR 之内,防止绝对路径/路径穿越导致误删
+        if skill_path and skill_path.exists():
+            try:
+                resolved = skill_path.resolve()
+                agents_resolved = AGENTS_DIR.resolve()
+                if agents_resolved not in resolved.parents and resolved != agents_resolved:
+                    log.error("skill_path %s 不在 AGENTS_DIR %s 之内,拒绝删除", resolved, agents_resolved)
+                    return jsonify({"success": False, "error": "skill 路径越界,已拒绝删除"}), 400
+            except Exception as e:
+                log.error("路径解析失败: %s", e)
+                return jsonify({"success": False, "error": "路径解析失败"}), 400
 
-    if not _save_lock(lock):
-        return jsonify({"success": False, "error": "保存 .skill-lock.json 失败"}), 500
+            skill_dir = skill_path.parent
+            try:
+                shutil.rmtree(skill_dir)
+            except Exception as e:
+                log.error("Failed to remove skill directory %s: %s", skill_dir, e)
+                return jsonify({"success": False, "error": "删除 skill 目录失败: " + str(e)}), 500
+
+        if not _save_lock(lock):
+            return jsonify({"success": False, "error": "保存 .skill-lock.json 失败"}), 500
 
     return jsonify({"success": True})

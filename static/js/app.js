@@ -411,7 +411,7 @@ function postJSON(url, body) {
     return fetchJSON(url, opts);
 }
 function setError(id, msg) {
-    document.getElementById(id).innerHTML = '<div class="error">' + msg + '</div>';
+    document.getElementById(id).innerHTML = '<div class="error">' + escapeHtml(msg) + '</div>';
 }
 
 // === Launch Kimi Web ===
@@ -933,13 +933,15 @@ function renderMcpCard(s) {
     var statusCls = s.status;
     var desc = s.description || getMcpDesc(s.name) || s.detail || '';
     var isOffline = s.status === 'offline';
-    var diagBtn = isOffline ? '<button class="btn-task mcp-diag-btn" title="复制诊断 prompt 给 AI" onclick="event.stopPropagation();copyMcpDiagnosticPrompt(\'' + s.name + '\')">诊断</button>' : '';
-    return '<div class="mcp-card ' + (s.enabled ? '' : 'disabled') + (isOffline ? ' offline' : '') + '" data-mcp-id="' + s.name + '" onclick="if(!event.target.closest(\'.toggle-switch\') && !event.target.closest(\'.mcp-diag-btn\'))openMcpDetail(\'' + s.name + '\')">' +
-        '<div class="mcp-card-header"><span class="mcp-card-name">' + s.name + '</span><span class="status ' + statusCls + '"><span class="status-dot"></span>' + s.status + '</span></div>' +
-        (desc ? '<div class="mcp-card-desc">' + desc + '</div>' : '') +
+    var safeName = escapeJsString(s.name);
+    var displayName = escapeHtml(s.name);
+    var diagBtn = isOffline ? '<button class="btn-task mcp-diag-btn" title="复制诊断 prompt 给 AI" onclick="event.stopPropagation();copyMcpDiagnosticPrompt(\'' + safeName + '\')">诊断</button>' : '';
+    return '<div class="mcp-card ' + (s.enabled ? '' : 'disabled') + (isOffline ? ' offline' : '') + '" data-mcp-id="' + displayName + '" onclick="if(!event.target.closest(\'.toggle-switch\') && !event.target.closest(\'.mcp-diag-btn\'))openMcpDetail(\'' + safeName + '\')">' +
+        '<div class="mcp-card-header"><span class="mcp-card-name">' + displayName + '</span><span class="status ' + statusCls + '"><span class="status-dot"></span>' + s.status + '</span></div>' +
+        (desc ? '<div class="mcp-card-desc">' + escapeHtml(desc) + '</div>' : '') +
         (isOffline && s.detail ? '<div class="mcp-card-error">' + escapeHtml(s.detail) + '</div>' : '') +
         '<div class="mcp-card-actions">' +
-            '<label class="toggle-switch" title="启用/禁用" onclick="event.stopPropagation()"><input type="checkbox" onchange="toggleMcpEnabled(\'' + s.name + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label>' +
+            '<label class="toggle-switch" title="启用/禁用" onclick="event.stopPropagation()"><input type="checkbox" onchange="toggleMcpEnabled(\'' + safeName + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label>' +
             diagBtn +
         '</div>' +
     '</div>';
@@ -1645,6 +1647,9 @@ function isProtectedProvider(p) {
 function escapeHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+function escapeJsString(s) {
+    return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
 
 async function loadModelConfig() {
     try {
@@ -2316,9 +2321,13 @@ function renderTaskCard(t) {
     }
     var resultStatus = s.resultStatus || { label: '未知', ok: null };
     var resultColor = resultStatus.ok === true ? 'var(--success)' : (resultStatus.ok === false ? 'var(--danger)' : 'var(--text-secondary)');
-    var resultLabel = '<span style="color:' + resultColor + '">' + resultStatus.label + '</span>';
+    var resultLabel = '<span style="color:' + resultColor + '">' + escapeHtml(resultStatus.label) + '</span>';
     var enabledChecked = t.enabled ? ' checked' : '';
-    return '<div class="task-card" data-task-id="' + t.id + '"><div class="task-card-header"><span class="task-card-name">' + t.name + '</span><span class="task-state-badge ' + stateCls + '">' + stateLabel + '</span></div><div class="task-card-desc">' + t.description + '</div><div class="task-card-schedule">\u23f0 ' + t.schedule + '</div>' + renderTaskSources(t.sources, t.logPreview) + '<div class="task-card-info">' + (s.lastRun && s.lastRun !== '1999-11-30T00:00:00' ? '<div><span class="label">上次运行:</span> ' + s.lastRun.replace('T', ' ') + '</div>' : '<div><span class="label">上次运行:</span> 尚未运行</div>') + (s.nextRun ? '<div><span class="label">下次运行:</span> ' + s.nextRun.replace('T', ' ') + '</div>' : '') + (resultStatus.label ? '<div><span class="label">运行结果:</span> ' + resultLabel + '</div>' : '') + '</div><div class="task-card-actions"><label class="toggle-switch" title="启用/禁用"><input type="checkbox" onchange="toggleTaskEnabled(\'' + t.id + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label><button class="btn-task" onclick="runTask(\'' + t.id + '\', this)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>立即运行</button><button class="btn-task" onclick="openTaskEdit(\'' + t.id + '\')">编辑</button>' + (t.logFile ? '<button class="btn-task" onclick="openTaskLog(\'' + t.id + '\')">日志</button>' : '') + '<button class="btn-task btn-danger" onclick="deleteTask(\'' + t.id + '\')">删除</button></div></div>';
+    var safeId = escapeJsString(t.id);
+    var displayName = escapeHtml(t.name);
+    var displayDesc = escapeHtml(t.description);
+    var displaySchedule = escapeHtml(t.schedule);
+    return '<div class="task-card" data-task-id="' + displayName + '"><div class="task-card-header"><span class="task-card-name">' + displayName + '</span><span class="task-state-badge ' + stateCls + '">' + stateLabel + '</span></div><div class="task-card-desc">' + displayDesc + '</div><div class="task-card-schedule">\u23f0 ' + displaySchedule + '</div>' + renderTaskSources(t.sources, t.logPreview) + '<div class="task-card-info">' + (s.lastRun && s.lastRun !== '1999-11-30T00:00:00' ? '<div><span class="label">上次运行:</span> ' + s.lastRun.replace('T', ' ') + '</div>' : '<div><span class="label">上次运行:</span> 尚未运行</div>') + (s.nextRun ? '<div><span class="label">下次运行:</span> ' + s.nextRun.replace('T', ' ') + '</div>' : '') + (resultStatus.label ? '<div><span class="label">运行结果:</span> ' + resultLabel + '</div>' : '') + '</div><div class="task-card-actions"><label class="toggle-switch" title="启用/禁用"><input type="checkbox" onchange="toggleTaskEnabled(\'' + safeId + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label><button class="btn-task" onclick="runTask(\'' + safeId + '\', this)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>立即运行</button><button class="btn-task" onclick="openTaskEdit(\'' + safeId + '\')">编辑</button>' + (t.logFile ? '<button class="btn-task" onclick="openTaskLog(\'' + safeId + '\')">日志</button>' : '') + '<button class="btn-task btn-danger" onclick="deleteTask(\'' + safeId + '\')">删除</button></div></div>';
 }
 
 function _filterTasksByStatus(tasks) {
@@ -3040,7 +3049,7 @@ async function loadKimiConfig() {
             saveSettings(settings);
         }
     } catch (e) {
-        log.debug('Failed to load kimi config: %s', e.message);
+        console.warn('Failed to load kimi config:', e.message);
     }
 }
 

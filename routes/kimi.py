@@ -554,9 +554,11 @@ def api_kimi_update_run():
         proc = subprocess.Popen([str(KIMI_BIN), "upgrade"], **kwargs)
     except Exception as e:
         log.error("Failed to start kimi upgrade: %s", e)
+        logf.close()
         return jsonify({"status": "error", "error": str(e)})
 
     _upgrade_state["proc"] = proc
+    _upgrade_state["logf"] = logf
     _upgrade_state["log_path"] = log_path
     _upgrade_state["started_at"] = datetime.now(timezone.utc).timestamp()
     _upgrade_state["manual"] = False
@@ -596,9 +598,11 @@ def api_kimi_update_manual_run():
         proc = subprocess.Popen(cmd, **kwargs)
     except Exception as e:
         log.error("Failed to start manual kimi install: %s", e)
+        logf.close()
         return jsonify({"status": "error", "error": str(e)})
 
     _upgrade_state["proc"] = proc
+    _upgrade_state["logf"] = logf
     _upgrade_state["log_path"] = log_path
     _upgrade_state["started_at"] = datetime.now(timezone.utc).timestamp()
     _upgrade_state["manual"] = True
@@ -617,9 +621,19 @@ def api_kimi_update_status():
     log_text = ""
     if log_path and os.path.exists(log_path):
         try:
-            log_text = open(log_path, "r", encoding="utf-8", errors="replace").read()
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                log_text = f.read()
         except Exception:
             log_text = ""
+
+    # 进程结束后关闭日志 fd,避免泄漏
+    if not running:
+        old_logf = _upgrade_state.pop("logf", None)
+        if old_logf and not old_logf.closed:
+            try:
+                old_logf.close()
+            except Exception:
+                pass
 
     status = "running" if running else ("success" if exit_code == 0 else "failed")
     manual_update = False

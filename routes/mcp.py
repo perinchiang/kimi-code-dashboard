@@ -5,6 +5,7 @@ Disabled servers are stored in ~/.kimi-code/.mcp-disabled.json.
 """
 
 import json
+import shutil
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request
@@ -57,7 +58,8 @@ def _check_mcp_server(name: str, cfg: dict) -> dict:
             detail = "Gateway not responding on port 8420"
     elif name == "memory":
         cmd = cfg.get("command", "")
-        if Path(cmd).exists():
+        first_token = cmd.split()[0] if cmd else ""
+        if first_token and (Path(first_token).exists() or shutil.which(first_token)):
             status = "available"
             detail = "Python interpreter found; assumed managed by Kimi Code"
         else:
@@ -65,7 +67,8 @@ def _check_mcp_server(name: str, cfg: dict) -> dict:
             detail = "Configured Python interpreter not found"
     else:
         cmd = cfg.get("command", "")
-        if Path(cmd).exists():
+        first_token = cmd.split()[0] if cmd else ""
+        if first_token and (Path(first_token).exists() or shutil.which(first_token)):
             status = "available"
             detail = "Executable found"
         else:

@@ -13,7 +13,14 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request
 
 from config import TASKS_CONFIG, log
-from services.helpers import no_window_kwargs, ps_escape_single_quote, safe_json_load
+from services.helpers import (
+    atomic_write_text,
+    config_lock,
+    lock_for,
+    no_window_kwargs,
+    ps_escape_single_quote,
+    safe_json_load,
+)
 
 bp = Blueprint("tasks", __name__)
 
@@ -32,7 +39,7 @@ def _load_tasks_config() -> dict:
 
 def _save_tasks_config(cfg: dict) -> bool:
     try:
-        TASKS_CONFIG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_text(TASKS_CONFIG, json.dumps(cfg, ensure_ascii=False, indent=2))
         return True
     except Exception as e:
         log.error("Failed to write %s: %s", TASKS_CONFIG, e)
@@ -172,24 +179,33 @@ def _format_schedule(trigger: dict) -> str:
 
 def _build_trigger_ps(trigger: dict) -> str:
     """Build a New-ScheduledTaskTrigger PowerShell snippet."""
+    import re as _re
+
     ttype = trigger.get("type", "daily")
-    time = trigger.get("time", "00:00")
+    time = str(trigger.get("time", "00:00"))
+    # 校验 time 格式为 HH:MM,防止命令注入
+    if not _re.match(r"^\d{1,2}:\d{2}$", time):
+        time = "00:00"
+    safe_time = ps_escape_single_quote(time)
     if ttype == "daily":
-        return f"New-ScheduledTaskTrigger -Daily -At '{time}'"
+        return f"New-ScheduledTaskTrigger -Daily -At '{safe_time}'"
     if ttype == "weekly":
         days = sorted(set(trigger.get("daysOfWeek", [0])))
         weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-        days_en = [weekdays[d] for d in days]
+        days_en = [weekdays[d] for d in days if 0 <= d <= 6]
         days_str = ",".join(days_en)
-        return f"New-ScheduledTaskTrigger -Weekly -DaysOfWeek {days_str} -At '{time}'"
+        return f"New-ScheduledTaskTrigger -Weekly -DaysOfWeek {days_str} -At '{safe_time}'"
     if ttype == "monthly":
         day = trigger.get("day", 1)
-        return f"New-ScheduledTaskTrigger -Monthly -DaysOfMonth {day} -At '{time}'"
+        if not isinstance(day, int) or not (1 <= day <= 31):
+            day = 1
+        return f"New-ScheduledTaskTrigger -Monthly -DaysOfMonth {day} -At '{safe_time}'"
     if ttype == "once":
-        dt = trigger.get("datetime", "")
-        return f"New-ScheduledTaskTrigger -Once -At '{dt}'"
+        dt = str(trigger.get("datetime", ""))
+        safe_dt = ps_escape_single_quote(dt)
+        return f"New-ScheduledTaskTrigger -Once -At '{safe_dt}'"
     # Fallback to daily
-    return f"New-ScheduledTaskTrigger -Daily -At '{time}'"
+    return f"New-ScheduledTaskTrigger -Daily -At '{safe_time}'"
 
 
 def _register_scheduled_task(task: dict, scripts_dir: str) -> tuple[bool, str]:
@@ -341,17 +357,19 @@ def api_task_log(task_id: str):
 @bp.route("/api/tasks/<task_id>/toggle", methods=["POST"])
 def api_task_toggle(task_id: str):
     """Enable or disable a task."""
-    cfg = _load_tasks_config()
-    task = _find_task(cfg, task_id)
-    if not task:
-        return jsonify({"success": False, "error": "Task not found"}), 404
-
     body = request.get_json(silent=True) or {}
-    enabled = bool(body.get("enabled", not task.get("enabled", True)))
-    task["enabled"] = enabled
 
-    if not _save_tasks_config(cfg):
-        return jsonify({"success": False, "error": "保存 tasks.json 失败"}), 500
+    with config_lock(lock_for(TASKS_CONFIG)):
+        cfg = _load_tasks_config()
+        task = _find_task(cfg, task_id)
+        if not task:
+            return jsonify({"success": False, "error": "Task not found"}), 404
+
+        enabled = bool(body.get("enabled", not task.get("enabled", True)))
+        task["enabled"] = enabled
+
+        if not _save_tasks_config(cfg):
+            return jsonify({"success": False, "error": "保存 tasks.json 失败"}), 500
 
     ok, error = _set_task_enabled(task.get("taskName", ""), enabled)
     if not ok:
@@ -363,9 +381,7 @@ def api_task_toggle(task_id: str):
 @bp.route("/api/tasks/create", methods=["POST"])
 def api_task_create():
     """Create a new scheduled task."""
-    cfg = _load_tasks_config()
     body = request.get_json(silent=True) or {}
-    scripts_dir = cfg.get("scriptsDir", "")
 
     task_id = str(body.get("id", "")).strip()
     task_name_display = str(body.get("name", "")).strip()
@@ -380,13 +396,6 @@ def api_task_create():
         return jsonify({"success": False, "error": "script 不能为空"}), 400
     if not task_name:
         return jsonify({"success": False, "error": "taskName 不能为空"}), 400
-
-    # Check id / taskName uniqueness
-    for t in cfg.get("tasks", []):
-        if t.get("id") == task_id:
-            return jsonify({"success": False, "error": f"任务 id '{task_id}' 已存在"}), 409
-        if t.get("taskName", "").lower() == task_name.lower():
-            return jsonify({"success": False, "error": f"taskName '{task_name}' 已存在"}), 409
 
     trigger = body.get("trigger") or {"type": "daily", "time": "00:00"}
     if isinstance(trigger, dict):
@@ -412,10 +421,21 @@ def api_task_create():
         "taskName": task_name,
     }
 
-    cfg.setdefault("tasks", []).append(task)
+    with config_lock(lock_for(TASKS_CONFIG)):
+        cfg = _load_tasks_config()
+        scripts_dir = cfg.get("scriptsDir", "")
 
-    if not _save_tasks_config(cfg):
-        return jsonify({"success": False, "error": "保存 tasks.json 失败"}), 500
+        # Check id / taskName uniqueness
+        for t in cfg.get("tasks", []):
+            if t.get("id") == task_id:
+                return jsonify({"success": False, "error": f"任务 id '{task_id}' 已存在"}), 409
+            if t.get("taskName", "").lower() == task_name.lower():
+                return jsonify({"success": False, "error": f"taskName '{task_name}' 已存在"}), 409
+
+        cfg.setdefault("tasks", []).append(task)
+
+        if not _save_tasks_config(cfg):
+            return jsonify({"success": False, "error": "保存 tasks.json 失败"}), 500
 
     warning = None
     if task.get("enabled", True):
@@ -432,32 +452,34 @@ def api_task_create():
 @bp.route("/api/tasks/<task_id>/save", methods=["POST"])
 def api_task_save(task_id: str):
     """Save task edits and update the scheduled task."""
-    cfg = _load_tasks_config()
-    task = _find_task(cfg, task_id)
-    if not task:
-        return jsonify({"success": False, "error": "Task not found"}), 404
-
     body = request.get_json(silent=True) or {}
-    scripts_dir = cfg.get("scriptsDir", "")
 
-    # Update editable fields
-    task["name"] = str(body.get("name", task.get("name", ""))).strip()
-    task["description"] = str(body.get("description", task.get("description", ""))).strip()
-    task["script"] = str(body.get("script", task.get("script", ""))).strip()
-    task["logFile"] = str(body.get("logFile", task.get("logFile", ""))).strip()
-    task["sources"] = list(body.get("sources", task.get("sources", [])))
+    with config_lock(lock_for(TASKS_CONFIG)):
+        cfg = _load_tasks_config()
+        task = _find_task(cfg, task_id)
+        if not task:
+            return jsonify({"success": False, "error": "Task not found"}), 404
 
-    trigger = body.get("trigger")
-    if trigger and isinstance(trigger, dict):
-        trigger["type"] = trigger.get("type", "daily")
-        trigger["time"] = trigger.get("time", "00:00")
-        if trigger["type"] == "weekly":
-            trigger["daysOfWeek"] = sorted(set(trigger.get("daysOfWeek", [0])))
-        task["trigger"] = trigger
-        task["schedule"] = _format_schedule(trigger)
+        scripts_dir = cfg.get("scriptsDir", "")
 
-    if not _save_tasks_config(cfg):
-        return jsonify({"success": False, "error": "保存 tasks.json 失败"}), 500
+        # Update editable fields
+        task["name"] = str(body.get("name", task.get("name", ""))).strip()
+        task["description"] = str(body.get("description", task.get("description", ""))).strip()
+        task["script"] = str(body.get("script", task.get("script", ""))).strip()
+        task["logFile"] = str(body.get("logFile", task.get("logFile", ""))).strip()
+        task["sources"] = list(body.get("sources", task.get("sources", [])))
+
+        trigger = body.get("trigger")
+        if trigger and isinstance(trigger, dict):
+            trigger["type"] = trigger.get("type", "daily")
+            trigger["time"] = trigger.get("time", "00:00")
+            if trigger["type"] == "weekly":
+                trigger["daysOfWeek"] = sorted(set(trigger.get("daysOfWeek", [0])))
+            task["trigger"] = trigger
+            task["schedule"] = _format_schedule(trigger)
+
+        if not _save_tasks_config(cfg):
+            return jsonify({"success": False, "error": "保存 tasks.json 失败"}), 500
 
     # Re-register the scheduled task if enabled
     warning = None
@@ -479,21 +501,24 @@ def api_task_save(task_id: str):
 @bp.route("/api/tasks/<task_id>/delete", methods=["POST"])
 def api_task_delete(task_id: str):
     """Delete a task and its scheduled task."""
-    cfg = _load_tasks_config()
-    task = _find_task(cfg, task_id)
-    if not task:
-        return jsonify({"success": False, "error": "Task not found"}), 404
+    task_name = ""
 
-    task_name = task.get("taskName", "")
+    with config_lock(lock_for(TASKS_CONFIG)):
+        cfg = _load_tasks_config()
+        task = _find_task(cfg, task_id)
+        if not task:
+            return jsonify({"success": False, "error": "Task not found"}), 404
+
+        task_name = task.get("taskName", "")
+        cfg["tasks"] = [t for t in cfg.get("tasks", []) if t.get("id") != task_id]
+        if not _save_tasks_config(cfg):
+            return jsonify({"success": False, "error": "保存 tasks.json 失败"}), 500
+
     warning = None
     if task_name:
         ok, error = _unregister_scheduled_task(task_name)
         if not ok:
             warning = "配置已删除，但移除 Windows 计划任务失败（需要管理员权限）: " + error
-
-    cfg["tasks"] = [t for t in cfg.get("tasks", []) if t.get("id") != task_id]
-    if not _save_tasks_config(cfg):
-        return jsonify({"success": False, "error": "保存 tasks.json 失败"}), 500
 
     result = {"success": True}
     if warning:

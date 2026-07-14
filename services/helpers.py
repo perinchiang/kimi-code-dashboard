@@ -1,8 +1,11 @@
 """Shared helper utilities: JSON loading, HTTP, TCP, YAML parsing, PowerShell escaping."""
 
+import contextlib
 import json
+import os
 import socket
 import subprocess
+import tempfile
 import urllib.request
 from pathlib import Path
 
@@ -30,15 +33,29 @@ def no_window_kwargs() -> dict:
 
 
 def safe_json_load(path: Path) -> dict | None:
-    """Load JSON from *path*, returning None on any error."""
+    """Load JSON from *path*, returning None on any error.
+
+    Uses utf-8-sig to transparently skip an optional BOM that Windows
+    Notepad writes by default when saving as "UTF-8".
+    """
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8-sig") as f:
             return json.load(f)
     except FileNotFoundError:
         return None
     except Exception as e:
         log.warning("Failed to load JSON from %s: %s", path, e)
         return None
+
+
+def lock_for(path: Path) -> Path:
+    """Return the sibling lock-file path for *path*.
+
+    `tasks.json` -> `tasks.json.lock`, `config.toml` -> `config.toml.lock`.
+    Used together with config_lock() to serialize load-modify-save sequences.
+    """
+    path = Path(path)
+    return path.parent / (path.name + ".lock")
 
 
 def http_get(url: str, timeout: int = 5) -> dict | None:
@@ -104,3 +121,77 @@ def ps_escape_single_quote(s: str) -> str:
     is the single quote itself — it's doubled: ' → ''
     """
     return s.replace("'", "''")
+
+
+def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
+    """Atomically write *text* to *path* via tempfile + rename.
+
+    Writes to a temp file in the same directory, then renames over the target.
+    On Windows, rename is atomic on the same filesystem. On POSIX, os.replace
+    is atomic. Prevents partial-write corruption on crash.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent), prefix="." + path.name + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding=encoding, newline="") as f:
+            f.write(text)
+        os.replace(tmp, str(path))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+@contextlib.contextmanager
+def config_lock(lock_path: Path, timeout: float = 5.0):
+    """Cross-platform file lock for serializing config.toml writes.
+
+    Uses msvcrt.locking on Windows, fcntl.flock on POSIX. Blocks up to
+    *timeout* seconds; raises TimeoutError if the lock cannot be acquired.
+    """
+    import time
+
+    lock_path = Path(lock_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    f = open(lock_path, "w", encoding="utf-8")
+    acquired = False
+    try:
+        start = time.monotonic()
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError:
+                if time.monotonic() - start >= timeout:
+                    raise TimeoutError(
+                        f"Could not acquire lock on {lock_path} within {timeout}s"
+                    )
+                time.sleep(0.05)
+        yield
+    finally:
+        if acquired:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        f.close()
