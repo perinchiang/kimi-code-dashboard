@@ -1918,12 +1918,12 @@ function toggleDetectedBubble(el) {
 async function detectModels(id) {
     var row = document.getElementById('provider-row-' + id);
     if (!row) return;
-    row.innerHTML = '<div class="config-form"><div class="hint">正在探测模型...</div></div>';
+    row.innerHTML = '<div class="config-form" onclick="event.stopPropagation()"><div class="hint">正在探测模型...</div></div>';
     try {
         var data = await fetchJSON('/api/model-config/provider/' + encodeURIComponent(id) + '/detect-models', { method: 'POST' });
         var models = data.models || [];
         if (!models.length) {
-            row.innerHTML = '<div class="config-form"><div class="hint">没有发现新模型（可能都已添加，或 provider 未返回模型列表）。</div><div class="config-form-actions"><button class="btn-task" onclick="renderModelConfigDetail()">返回</button></div></div>';
+            row.innerHTML = '<div class="config-form" onclick="event.stopPropagation()"><div class="hint">没有发现新模型（可能都已添加，或 provider 未返回模型列表）。</div><div class="config-form-actions"><button class="btn-task" onclick="renderModelConfigDetail()">返回</button></div></div>';
             return;
         }
         var bubbles = models.map(function(m, i) {
@@ -1931,7 +1931,7 @@ async function detectModels(id) {
                 escapeHtml(m.id) +
             '</div>';
         }).join('');
-        row.innerHTML = '<div class="config-form">' +
+        row.innerHTML = '<div class="config-form" onclick="event.stopPropagation()">' +
             '<label>探测到 ' + models.length + ' 个模型，点击泡泡选择（provider: ' + escapeHtml(id) + '）</label>' +
             '<div class="detect-bubble-group">' + bubbles + '</div>' +
             '<div class="config-form-actions">' +
@@ -1940,7 +1940,7 @@ async function detectModels(id) {
             '</div>' +
         '</div>';
     } catch (e) {
-        row.innerHTML = '<div class="config-form"><div class="error">探测失败: ' + escapeHtml(e.message) + '</div><div class="config-form-actions"><button class="btn-task" onclick="renderModelConfigDetail()">返回</button></div></div>';
+        row.innerHTML = '<div class="config-form" onclick="event.stopPropagation()"><div class="error">探测失败: ' + escapeHtml(e.message) + '</div><div class="config-form-actions"><button class="btn-task" onclick="renderModelConfigDetail()">返回</button></div></div>';
     }
 }
 
