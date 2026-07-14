@@ -568,6 +568,7 @@
             <div class="modal-footer modal-footer-split">
                 <div style="display:flex;gap:0.6rem;">
                     <button id="mcp-detail-edit-btn" onclick="var id=_currentMcpDetailId;closeMcpDetail();openMcpEdit(id)">编辑</button>
+                    <button id="mcp-detail-delete-btn" class="btn-task btn-danger" onclick="var id=_currentMcpDetailId;closeMcpDetail();deleteMcp(id)">删除</button>
                     <button id="mcp-detail-fix-btn" class="btn-task" onclick="copyMcpFixPrompt()" style="display:none" title="复制修复 prompt 给 AI，让它帮忙修复">复制修复 prompt</button>
                 </div>
                 <button class="btn-task" onclick="closeMcpDetail()">关闭</button>
@@ -620,6 +621,6 @@
     </div>
 
     <script src="/static/js/charts.js?v=12"></script>
-    <script src="/static/js/app.js?v=65"></script>
+    <script src="/static/js/app.js?v=66"></script>
 </body>
 </html>

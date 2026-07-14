@@ -717,9 +717,6 @@ function renderMcpCard(s) {
         (desc ? '<div class="mcp-card-desc">' + desc + '</div>' : '') +
         '<div class="mcp-card-actions">' +
             '<label class="toggle-switch" title="启用/禁用" onclick="event.stopPropagation()"><input type="checkbox" onchange="toggleMcpEnabled(\'' + s.name + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label>' +
-            '<button class="btn-task" onclick="event.stopPropagation();openMcpDetail(\'' + s.name + '\')">详情</button>' +
-            '<button class="btn-task" onclick="event.stopPropagation();openMcpEdit(\'' + s.name + '\')">编辑</button>' +
-            '<button class="btn-task btn-danger" onclick="event.stopPropagation();deleteMcp(\'' + s.name + '\')">删除</button>' +
         '</div>' +
     '</div>';
 }
@@ -1343,12 +1340,14 @@ function renderModelConfigDetail() {
     });
     var modelsHtml = filteredModels.map(function(m) {
         var isDefault = m.id === data.default_model;
+        var modelProvider = providers.find(function(p) { return p.id === m.provider; });
+        var providerProtected = modelProvider && isProtectedProvider(modelProvider);
         var meta = 'model=' + escapeHtml(m.model) + ' &middot; ctx=' + (m.max_context_size || 0).toLocaleString();
         if (m.max_tokens) meta += ' &middot; max_tokens=' + m.max_tokens.toLocaleString();
         var defaultBtn = isDefault
             ? '<span class="badge badge-local">默认</span>'
             : '<button class="btn-task btn-sm" onclick="setDefaultModel(\'' + escapeHtml(m.id).replace(/'/g, "\\'") + '\')">设为默认</button>';
-        var modelActionsHtml = isDefault ? '' :
+        var modelActionsHtml = providerProtected ? '' :
             '<div class="config-item-actions">' +
                 '<button class="btn-task" onclick="editModel(\'' + escapeHtml(m.id).replace(/'/g, "\\'") + '\')">编辑</button>' +
                 '<button class="btn-task" onclick="deleteModel(\'' + escapeHtml(m.id).replace(/'/g, "\\'") + '\')">删除</button>' +
