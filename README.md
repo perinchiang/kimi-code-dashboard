@@ -19,6 +19,13 @@ Kimi Code CLI 的本地可视化面板，展示 Skill、MCP、记忆状态、Kim
 - **工具 & 模型用量排行榜**：从 `wire.jsonl` 解析 `tool.call` / `usage.record` 事件，统计调用次数与各模型 Token 占比
 - **定时任务看板**：聚合多个来源（Kimi Code / wiki-sync 等）的定时任务状态
 
+### 产物与配置管理
+
+- **产物浏览器**（`#/artifacts`）：浏览 `~/.kimi-code/files/` 与会话 `blobs/`，支持缩略图网格、搜索、筛选、详情弹窗，可选上传到图床获取外链
+- **Hooks 管理**（`#/hooks`）：可视化编辑 `config.toml` 的 `hooks` / `disabled_hooks` 数组，支持 CRUD、启用/禁用、中文描述
+- **第三方模型配置**（`#/models`）：管理 `config.toml` 的 `[providers]` 与 `[models]`，支持探测模型列表、预设、能力推断
+- **图床配置**（设置页）：配置 R2 / S3 / MinIO / OSS / COS 凭证，写入 `[image_bed]` 段，支持测试连接（需安装可选依赖 `boto3`）
+
 ### Kimi Web 服务配置
 
 面板右上角「启动 Kimi Web」按钮可直接拉起本地 Kimi Web 服务，所有启动参数都可在「面板设置」页中可视化配置：
@@ -30,6 +37,8 @@ Kimi Code CLI 的本地可视化面板，展示 Skill、MCP、记忆状态、Kim
 - **密码认证**：开启时无需密码直接访问；关闭时自动从进程 stdout 捕获 bearer token 并拼接到访问 URL
 - **自定义访问 URL**：外网模式下可填入一个或多个反代域名，每个域名都会自动提取主机名加入 `--allowed-host` 信任列表，支持 SakuraFrp、Cloudflare Tunnel 等多域名同时访问
 - **主题切换**：跟随系统日间 / 夜间主题，或手动切换 dark / light
+- **开机自启**：Dashboard 自身支持 normal（Startup folder）/ elevated（Task Scheduler + UAC）/ off 三种模式；Kimi Code 自身支持 macOS launchd / Windows Startup folder
+- **默认权限模式**：读写 `config.toml` 的 `default_permission_mode`（manual / auto / yolo）
 
 启动后按钮会变成「打开 Kimi Web」，点击直接跳转到对应 URL（需要认证时附带 token）。
 
@@ -37,6 +46,9 @@ Kimi Code CLI 的本地可视化面板，展示 Skill、MCP、记忆状态、Kim
 
 ```bash
 cd ~/.kimi-code/dashboard
+
+# 安装依赖（首次使用）
+.venv/Scripts/python.exe -m pip install -r requirements.txt
 
 # Windows
 .venv/Scripts/python.exe app.py
@@ -80,18 +92,23 @@ cd ~/.kimi-code/dashboard
 
 > **注意**：定时任务看板功能依赖 Windows PowerShell（`powershell` 命令），在 macOS / Linux 上不可用。其他功能（数据可视化、Kimi Web 服务配置、主题切换等）均跨平台可用。
 
+> **schedule 字段格式**：`每日 HH:MM` / `每周X HH:MM` / `每月D日 HH:MM`（X 为 日 / 一 / 二 / ... / 六，多个用 `、` 分隔，如 `每周一、三、五 09:00`）。`scriptsDir` 需写绝对路径，不支持 `~` 展开。
+
 ## 项目结构
 
 ```
 dashboard/
 ├── app.py              # 入口：创建 Flask app，注册蓝图
 ├── config.py           # 路径、常量、日志配置
+├── launch_menu.py      # 控制台启动菜单（数字选项）
+├── requirements.txt    # Python 依赖清单
 ├── .env                # API Key（不提交 git）
 ├── .gitignore
 ├── tasks.json          # 定时任务配置
 ├── services/
 │   ├── helpers.py      # JSON/HTTP/TCP/YAML 工具函数 + PowerShell 转义
-│   └── wire_parser.py  # 合并 wire.jsonl 解析（增量+缓存+模型统计）
+│   ├── wire_parser.py  # 合并 wire.jsonl 解析（单次遍历+缓存+模型统计）
+│   └── r2_uploader.py  # S3/R2/MinIO/OSS/COS 统一上传
 ├── routes/
 │   ├── skills.py       # /api/skills
 │   ├── mcp.py          # /api/mcp
@@ -99,7 +116,12 @@ dashboard/
 │   ├── kimi.py         # /api/kimi, /api/kimi-trends, /api/kimi-quota,
 │   │                   #   /api/kimi-update*, /api/tool-usage, /api/model-usage
 │   ├── tasks.py        # /api/tasks, /api/tasks/<id>/run (POST), /api/tasks/<id>/log
+│   ├── hooks.py        # /api/hooks — Hooks CRUD
+│   ├── model_config.py # /api/model-config — 第三方模型配置
+│   ├── image_bed.py    # /api/image-bed — 图床凭证配置
+│   ├── artifacts.py    # /api/artifacts — 产物浏览与上传
 │   └── system.py       # /api/kimi-web-status, /api/launch-kimi-web (POST), /
+├── skills/             # Dashboard 自带 Skill（dashboard-init、kimi-hooks）
 ├── static/
 │   ├── css/style.css   # 样式（从 HTML 分离）
 │   └── js/
@@ -119,7 +141,6 @@ dashboard/
 ## 性能优化
 
 - wire.jsonl 解析合并为单次遍历，同时提取 usage 记录、工具调用、模型统计
-- 增量解析：跟踪每个文件的 mtime + byte offset，只读新增内容
 - 趋势数据、工具用量、模型用量共享 60s TTL 缓存
 - 日志写入 `dashboard.log`，不再静默吞掉异常
 
@@ -132,10 +153,13 @@ dashboard/
 - **Token Trends**：解析 `~/.kimi-code/sessions/*/agents/*/wire.jsonl` 中的 `usage.record` 事件
 - **Tool Usage**：解析同一文件中的 `tool.call` 事件
 - **Model Usage**：从 `usage.record` 事件的 `model` 字段统计各模型的 token 占比
+- **产物浏览器**：读取 `~/.kimi-code/files/index.json` 与 `~/.kimi-code/sessions/*/agents/*/blobs/`
+- **图床缓存**：上传记录写入 `~/.kimi-code/dashboard/image_upload_cache.json`
+- **Hooks / 模型配置 / 默认权限模式**：读写 `~/.kimi-code/config.toml`
 
 ## 可选：查询 Kimi Code 额度
 
-在 [Kimi Code Console](https://www.kimi.com/code/console?from=kfc_overview_topbar) 创建 API Key，然后写入 `.env`：
+在 [Kimi Code Console](https://www.kimi.com/code/console?from=kfc_overview_topbar) 创建 API Key，然后在「第三方模型配置」页（`#/models`）添加 Kimi provider 并填入 API Key（推荐），或在本项目 `.env` 写入：
 
 ```bash
 KIMI_API_KEY=your-api-key

@@ -1,0 +1,12 @@
+# Kimi Code Dashboard — Python 依赖
+# 安装：.venv/Scripts/python.exe -m pip install -r requirements.txt
+
+# 必需依赖
+flask>=3.0
+python-dotenv>=1.0
+pyyaml>=6.0
+tomli_w>=1.0
+
+# 可选依赖（图床功能：R2/S3/MinIO/OSS/COS 上传）
+# 未安装时图床测试连接会返回明确错误提示，不影响其他功能
+boto3>=1.34

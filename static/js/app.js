@@ -1110,7 +1110,7 @@ async function loadKimi() {
 
         var quotaHtml = '';
         if (!quota.configured) {
-            quotaHtml = '<div class="hint"><strong>额度查询</strong><br>在 <code>~/.kimi-code/dashboard/.env</code> 写入 <code>KIMI_API_KEY=your-api-key</code> 后刷新，即可显示 5 小时窗口与 7 天窗口额度。<br>API Key 可在 <a class="console-link" href="' + data.consoleUrl + '" target="_blank" rel="noopener">Kimi Code Console</a> 创建。</div>';
+            quotaHtml = '<div class="hint"><strong>额度查询</strong><br>前往「第三方模型配置」页(<code>#/models</code>)添加 Kimi provider 并填入 API Key（推荐），或在本项目 <code>.env</code> 写入 <code>KIMI_API_KEY=your-api-key</code> 后刷新，即可显示 5 小时窗口与 7 天窗口额度。<br>API Key 可在 <a class="console-link" href="' + data.consoleUrl + '" target="_blank" rel="noopener">Kimi Code Console</a> 创建。</div>';
         } else if (quota.error) {
             quotaHtml = '<div class="error">额度查询失败: ' + quota.error + '</div>';
         } else {

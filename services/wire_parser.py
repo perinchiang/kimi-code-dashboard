@@ -1,13 +1,12 @@
-"""Combined wire.jsonl parser with incremental reading, caching, and model stats.
+"""Combined wire.jsonl parser with caching and model stats.
 
 This module replaces the two separate functions (_parse_wire_usage_records and
 _parse_tool_calls) that each independently iterated all session wire.jsonl files.
 
 Key improvements:
 1. Single pass: extracts usage records, tool calls, and model stats together.
-2. Incremental: tracks per-file mtime + byte offset, only reads new bytes.
-3. Cached: results are cached with a configurable TTL.
-4. Model usage: aggregates token counts per model name.
+2. Cached: results are cached with a configurable TTL (60s).
+3. Model usage: aggregates token counts per model name.
 """
 
 import json
@@ -58,46 +57,6 @@ class ParseResult:
     # Time-series buckets for model usage charts
     model_tokens_by_day: dict[str, dict[str, dict[str, int]]] = field(default_factory=dict)   # day -> model -> stats
     model_tokens_by_week: dict[str, dict[str, dict[str, int]]] = field(default_factory=dict)  # week -> model -> stats
-
-
-# ---------------------------------------------------------------------------
-# Incremental file tracking
-# ---------------------------------------------------------------------------
-
-# Persistent state: {file_path_str: (mtime, size, byte_offset)}
-_file_state: dict[str, tuple[float, int, int]] = {}
-
-
-def _should_read_file(path: Path) -> tuple[bool, int]:
-    """Check if *path* has changed since last read. Returns (should_read, last_offset)."""
-    key = str(path)
-    try:
-        stat = path.stat()
-    except OSError:
-        return False, 0
-
-    mtime, size, offset = _file_state.get(key, (0, 0, 0))
-
-    # File hasn't changed (same mtime + same size)
-    if stat.st_mtime == mtime and stat.st_size == size:
-        return False, offset
-
-    # File shrank (truncated/rotated) — read from start
-    if stat.st_size < offset:
-        log.debug("File %s shrank, reading from start", path.name)
-        return True, 0
-
-    return True, offset
-
-
-def _mark_file_read(path: Path, offset: int):
-    """Record that we've read up to *offset* in *path*."""
-    key = str(path)
-    try:
-        stat = path.stat()
-        _file_state[key] = (stat.st_mtime, stat.st_size, offset)
-    except OSError:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -245,50 +204,21 @@ def _parse_file(path: Path, offset: int, result: ParseResult) -> int:
                                 result.skill_counts_by_window[w][skill_name] += 1
 
             new_offset = f.tell()
-            _mark_file_read(path, new_offset)
             return new_offset
     except Exception as e:
         log.warning("Error parsing %s: %s", path, e)
         return offset
 
 
-def parse_all(force: bool = False) -> ParseResult:
-    """Parse all wire.jsonl files incrementally.
-
-    If *force* is True, clear state and do a full re-read.
-    Returns a ParseResult with all accumulated data (not just the new data).
-    """
-    if force:
-        _file_state.clear()
-
-    result = ParseResult()
-
-    for wire_file in _iter_wire_files():
-        should_read, offset = _should_read_file(wire_file)
-        if should_read:
-            _parse_file(wire_file, offset, result)
-        # If file hasn't changed, its data was already accumulated in previous calls
-        # — but since ParseResult is fresh each call, we need to re-read unchanged
-        # files too. So actually, for correctness, we always parse from the
-        # recorded offset (which may be the full file if unchanged).
-        # The incremental optimization kicks in because seek(offset) skips already-read bytes.
-        elif offset > 0:
-            # File unchanged — still need to re-read it for this fresh ParseResult
-            _parse_file(wire_file, 0, result)
-
-    return result
-
-
 # ---------------------------------------------------------------------------
-# Full re-parse (no incremental, for cache misses)
+# Full re-parse (single pass, for cache misses)
 # ---------------------------------------------------------------------------
 
 def parse_all_full() -> ParseResult:
     """Do a complete re-parse of all wire.jsonl files from scratch.
 
-    Used when the incremental state is stale or on first load.
+    Called by the cached high-level APIs on cache miss.
     """
-    _file_state.clear()
     result = ParseResult()
     for wire_file in _iter_wire_files():
         _parse_file(wire_file, 0, result)

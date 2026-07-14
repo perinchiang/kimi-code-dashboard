@@ -13,7 +13,6 @@ from flask import Blueprint, jsonify, request
 from config import AGENTS_DIR, SKILL_LOCK, log
 from services.helpers import parse_skill_frontmatter, safe_json_load
 from services.wire_parser import get_tool_usage
-from services.wire_parser import get_tool_usage
 
 bp = Blueprint("skills", __name__)
 
