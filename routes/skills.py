@@ -81,6 +81,7 @@ def _skill_info(skill_id: str, meta: dict, call_count: int = 0) -> dict:
         "installedAt": meta.get("installedAt", ""),
         "local": local,
         "callCount": call_count,
+        "skillPath": str(skill_path) if local else "",
     }
 
 
@@ -129,6 +130,7 @@ def api_skills():
                         "local": True,
                         "enabled": True,
                         "callCount": skill_counts.get(skill_dir.name, 0),
+                        "skillPath": str(skill_md),
                     })
 
     skills.sort(key=lambda s: s["name"].lower())

@@ -719,7 +719,9 @@ function _skillDetailHtml(s) {
     lines.push('<div class="mcp-detail-desc"><div class="label">描述</div><div class="detail-content">' + escapeHtml(desc) + '</div></div>');
     lines.push('<div class="mcp-detail-meta"><span class="label">状态</span><span class="badge ' + (s.enabled ? (s.local ? 'badge-local' : 'badge-remote') : 'badge-disabled') + '">' + (s.enabled ? (s.local ? '已启用 · 本地' : '已启用 · 仅 lock') : '未启用') + '</span></div>');
     lines.push('<div class="mcp-detail-meta"><span class="label">调用次数</span><span class="skill-call-count">' + callCount + ' 次</span></div>');
-    lines.push('<div class="mcp-detail-meta"><span class="label">ID</span><code>' + escapeHtml(s.id) + '</code></div>');
+    if (s.skillPath) {
+        lines.push('<div class="mcp-detail-meta"><span class="label">路径</span><code style="word-break:break-all;flex:1;">' + escapeHtml(s.skillPath) + '</code><button class="btn-task btn-sm" onclick="copySkillPath(\'' + escapeJsString(s.id) + '\')">复制</button></div>');
+    }
     lines.push('<div class="mcp-detail-meta"><span class="label">来源</span><span>' + escapeHtml(s.source || '未知') + '</span></div>');
     if (s.sourceUrl) lines.push('<div class="mcp-detail-meta"><span class="label">来源 URL</span><a href="' + escapeHtml(s.sourceUrl) + '" target="_blank" style="color:var(--accent);text-decoration:underline;font-size:0.75rem;">' + escapeHtml(s.sourceUrl) + '</a></div>');
     if (s.installedAt) lines.push('<div class="mcp-detail-meta"><span class="label">安装时间</span><span>' + escapeHtml(s.installedAt.slice(0, 10)) + '</span></div>');
@@ -750,15 +752,15 @@ function renderSkillCard(s) {
     var badgeText = s.enabled ? (s.local ? '本地' : '仅 lock') : '已禁用';
     var desc = getSkillDesc(s);
     var callCount = s.callCount || 0;
+    var safeId = escapeJsString(s.id);
     var actions = '<div class="skill-card-actions">' +
         '<label class="toggle-switch" title="启用/禁用" onclick="event.stopPropagation()"><input type="checkbox" onchange="toggleSkillEnabled(\'' + s.id + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label>' +
         '<button class="btn-task btn-danger" onclick="event.stopPropagation();deleteSkill(\'' + s.id + '\')">卸载</button>' +
     '</div>';
     return '<div class="skill-card ' + (s.enabled ? '' : 'disabled') + '" data-skill-id="' + s.id + '" onclick="openSkillDetail(\'' + s.id + '\')">' +
-        '<div class="skill-card-header"><span class="skill-card-name">' + s.name + '</span><span class="badge ' + badgeCls + '">' + badgeText + '</span></div>' +
+        '<div class="skill-card-header"><div class="skill-name-wrap"><span class="skill-card-name">' + escapeHtml(s.name) + '</span><button class="btn-task btn-sm skill-copy-btn" title="复制 ID" onclick="event.stopPropagation();copySkillId(\'' + safeId + '\')">复制</button></div><span class="badge ' + badgeCls + '">' + badgeText + '</span></div>' +
         '<div class="skill-card-desc">' + desc + '</div>' +
         '<div class="skill-card-meta"><span class="label">调用:</span> <span class="skill-call-count">' + callCount + ' 次</span></div>' +
-        '<div class="skill-card-meta"><span class="label">ID:</span> ' + s.id + '</div>' +
         '<div class="skill-card-meta"><span class="label">来源:</span> ' + (s.source || '未知') + '</div>' +
         (s.installedAt ? '<div class="skill-card-meta"><span class="label">安装时间:</span> ' + s.installedAt.slice(0, 10) + '</div>' : '') +
         actions +
@@ -959,6 +961,40 @@ async function copyMcpDiagnosticPrompt(mcpName) {
     } catch (e) {
         showToast('复制失败，请手动复制', 3000);
     }
+}
+
+// 通用复制 helper（仅给 skill 复制按钮用，不改动现有 copyMcpDiagnosticPrompt/copyArtifactUrl）
+async function _copyToClipboard(text, successMsg) {
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+        } else {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
+        showToast(successMsg || '已复制到剪贴板', 2000);
+    } catch (e) {
+        showToast('复制失败，请手动复制', 3000);
+    }
+}
+
+// 卡片「复制」按钮：复制 skill ID
+function copySkillId(skillId) {
+    _copyToClipboard(skillId, '已复制 Skill ID');
+}
+
+// 详情弹窗「复制」按钮：按 skillId 查路径并复制
+function copySkillPath(skillId) {
+    var data = statusData.skills;
+    var s = data && data.skills.find(function(x) { return x.id === skillId; });
+    if (!s || !s.skillPath) { showToast('该 skill 无本地路径', 3000); return; }
+    _copyToClipboard(s.skillPath, '已复制 Skill 路径');
 }
 
 var _currentMcpDetailId = null;
