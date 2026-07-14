@@ -129,6 +129,12 @@ def api_memory_items():
     results = resp.get("results", "")
     items = _parse_conversations(results) if endpoint == "conversations" else _parse_memories(results)
 
+    # L0 原始对话按时间倒序，最新记录在前；L1-L3 按 priority 倒序 + score 倒序
+    if endpoint == "conversations":
+        items.sort(key=lambda m: m.get("timestamp") or "", reverse=True)
+    else:
+        items.sort(key=lambda m: (m.get("priority") or 0, m.get("score") or 0), reverse=True)
+
     # 本地子串过滤（大小写不敏感）。在 content/scene/session/role/type 上匹配。
     if q:
         ql = q.lower()
