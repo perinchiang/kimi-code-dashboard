@@ -672,7 +672,7 @@ function _mcpDetailHtml(s) {
     var info = _mcpTypeInfo(s);
     var desc = s.description || getMcpDesc(s.name) || s.detail || '';
     var lines = [];
-    if (desc) lines.push('<div class="mcp-detail-row"><span class="label">描述:</span> ' + desc + '</div>');
+    if (desc) lines.push('<div class="mcp-detail-row block"><span class="label">描述:</span><div>' + desc + '</div></div>');
     lines.push('<div class="mcp-detail-row"><span class="label">类型:</span> <span class="badge ' + info.cls + '">' + info.label + '</span></div>');
     lines.push('<div class="mcp-detail-row"><span class="label">状态:</span> <span class="status ' + s.status + '"><span class="status-dot"></span>' + s.status + '</span></div>');
     lines.push('<div class="mcp-detail-row"><span class="label">命令:</span> <code>' + escapeHtml(s.command) + '</code></div>');
@@ -712,7 +712,7 @@ function renderMcpCard(s) {
     var enabledChecked = s.enabled ? ' checked' : '';
     var statusCls = s.status;
     var desc = s.description || getMcpDesc(s.name) || s.detail || '';
-    return '<div class="mcp-card ' + (s.enabled ? '' : 'disabled') + '" data-mcp-id="' + s.name + '" onclick="if(!event.target.closest(\'.mcp-card-actions\'))openMcpDetail(\'' + s.name + '\')">' +
+    return '<div class="mcp-card ' + (s.enabled ? '' : 'disabled') + '" data-mcp-id="' + s.name + '" onclick="if(!event.target.closest(\'.toggle-switch\'))openMcpDetail(\'' + s.name + '\')">' +
         '<div class="mcp-card-header"><span class="mcp-card-name">' + s.name + '</span><span class="status ' + statusCls + '"><span class="status-dot"></span>' + s.status + '</span></div>' +
         (desc ? '<div class="mcp-card-desc">' + desc + '</div>' : '') +
         '<div class="mcp-card-actions">' +
