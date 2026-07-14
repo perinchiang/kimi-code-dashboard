@@ -1,4 +1,4 @@
-# kimi-code-dashboard installer for Windows.
+﻿# kimi-code-dashboard installer for Windows.
 #
 # Usage:
 #   irm https://raw.githubusercontent.com/perinchiang/kimi-code-dashboard/master/install.ps1 | iex
@@ -88,11 +88,8 @@ if (-not (Test-Path $BIN_DIR)) {
     New-Item -ItemType Directory -Path $BIN_DIR -Force | Out-Null
 }
 $WRAPPER = "$BIN_DIR\kimi-dashboard.bat"
-@"
-@echo off
-cd /d "%USERPROFILE%\.kimi-code\dashboard"
-".venv\Scripts\python.exe" launch_menu.py %*
-"@ | Set-Content -Path $WRAPPER -Encoding ASCII
+$BAT = "@echo off`r`ncd /d `"%USERPROFILE%\.kimi-code\dashboard`"`r`n`".venv\Scripts\python.exe`" launch_menu.py %*"
+Set-Content -Path $WRAPPER -Value $BAT -Encoding ASCII
 Ok "已生成: $WRAPPER"
 
 # --- 5. Check PATH ---
