@@ -692,12 +692,10 @@ def upload_blob(sha256: str, cfg: dict | None = None) -> dict:
         # 用 sha256 作为 key（去重，同图只传一次）
         key = _render_path_template(
             cfg.get("path_template", "{file_id}"),
-            file_id=sha256[:16],
-            name=sha256[:16],
-            stem=sha256[:16],
-            ext=media_type.split("/")[-1] if "/" in media_type else "",
-            created_at="",
-            media=media_type.split("/")[-1] if "/" in media_type else "",
+            sha256[:16],
+            sha256[:16],
+            media_type,
+            "",
         )
         client.upload_file(
             Filename=str(blob_path),

@@ -578,8 +578,6 @@ function onKimiPillClick() {
     if (kimiUpdateState.checking) return;
     if (kimiUpdateState.updateAvailable) {
         runKimiUpdate();
-        kimiUpdateState = { checking: false, updateAvailable: false, error: null };
-        renderStatusBar();
         return;
     }
     checkKimiUpdate();
@@ -1306,6 +1304,9 @@ function pollUpdateStatus() {
             if (!box) return;
             if (s.status === 'success') {
                 box.innerHTML = '<div class="vc-row"><span class="vc-ok">\u2713 更新完成！</span></div><div class="vc-meta" style="margin-top:0.4rem">请刷新页面以加载新版本。</div><button class="vc-btn" style="margin-top:0.4rem" onclick="location.reload()">刷新页面</button>';
+            } else if (s.status === 'manual_update' || s.manualUpdate) {
+                var cmd = s.manualCommand || '';
+                box.innerHTML = '<div class="vc-row"><span class="vc-tag vc-tag-warn">\u26a0 此版本不支持自动更新</span></div><div class="vc-meta" style="margin-top:0.4rem">请手动运行以下命令更新：</div><pre class="vc-log" style="margin-top:0.4rem;user-select:text;cursor:text">' + escapeHtml(cmd) + '</pre><button class="vc-btn vc-btn-sm" style="margin-top:0.4rem" onclick="checkKimiUpdate()">返回</button>';
             } else {
                 box.innerHTML = '<div class="vc-row vc-error">\u2717 更新未成功 (exit ' + s.exitCode + ')</div><pre class="vc-log">' + (s.log || '').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '') + '</pre><button class="vc-btn vc-btn-sm" style="margin-top:0.4rem" onclick="checkKimiUpdate()">返回</button>';
             }
