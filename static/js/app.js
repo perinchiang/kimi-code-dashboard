@@ -205,7 +205,7 @@ function applySettings() {
 function applyPwaIcons() {
     var enabled = settings.enable_pwa_icons;
     var head = document.head;
-    var ids = ['pwa-favicon', 'pwa-apple-touch-icon', 'pwa-manifest', 'pwa-apple-capable', 'pwa-apple-status'];
+    var ids = ['pwa-favicon', 'pwa-apple-touch-icon', 'pwa-manifest', 'pwa-mobile-capable', 'pwa-apple-status'];
 
     if (!enabled) {
         ids.forEach(function(id) {
@@ -239,7 +239,8 @@ function applyPwaIcons() {
     ensureLink('pwa-favicon', 'icon', '/static/pwa/favicon.ico');
     ensureLink('pwa-apple-touch-icon', 'apple-touch-icon', '/static/pwa/apple-touch-icon.png');
     ensureLink('pwa-manifest', 'manifest', '/static/pwa/manifest.json');
-    ensureMeta('pwa-apple-capable', 'apple-mobile-web-app-capable', 'yes');
+    // Chrome deprecates apple-mobile-web-app-capable; use the standard name.
+    ensureMeta('pwa-mobile-capable', 'mobile-web-app-capable', 'yes');
     ensureMeta('pwa-apple-status', 'apple-mobile-web-app-status-bar-style', 'black-translucent');
 }
 
