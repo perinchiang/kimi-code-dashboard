@@ -10,6 +10,7 @@ var artifactsData = null;
 var currentArtifactSource = 'all';
 var currentArtifactQuery = '';
 var kimiUpdateState = { checking: false, updateAvailable: false, error: null };
+var selectedProvider = null;
 
 // === Settings ===
 var SETTINGS_KEY = 'kimi_dashboard_settings_v1';
@@ -1295,53 +1296,56 @@ async function loadModelConfig() {
     }
 }
 
+function selectProvider(id) {
+    selectedProvider = id || null;
+    renderModelConfigDetail();
+}
+
 function renderModelConfigDetail() {
     var data = statusData.modelConfig;
     if (!data) { document.getElementById('providersList').innerHTML = '<div class="empty">加载中...</div>'; return; }
 
-    // Default model selector
-    var sel = document.getElementById('defaultModelSelect');
-    sel.innerHTML = '<option value="">-- 选择默认模型 --</option>' +
-        (data.models || []).map(function(m) {
-            return '<option value="' + escapeHtml(m.id) + '"' + (m.id === data.default_model ? ' selected' : '') + '>' + escapeHtml(m.id) + '</option>';
-        }).join('');
+    var providers = data.providers || [];
+    var models = data.models || [];
 
-    // Providers list
-    var providersHtml = (data.providers || []).map(function(p) {
-        return '<div class="config-item" id="provider-row-' + escapeHtml(p.id) + '">' +
+    // 若选中的 provider 已不存在则清空
+    if (selectedProvider && !providers.find(function(p) { return p.id === selectedProvider; })) {
+        selectedProvider = null;
+    }
+    // 默认选中第一个 provider
+    if (!selectedProvider && providers.length) {
+        selectedProvider = providers[0].id;
+    }
+
+    // Providers list（可点击选中）
+    var providersHtml = providers.map(function(p) {
+        var isSelected = p.id === selectedProvider;
+        return '<div class="config-item provider-selectable' + (isSelected ? ' selected' : '') + '" id="provider-row-' + escapeHtml(p.id) + '" onclick="selectProvider(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">' +
             '<div class="config-item-title"><span>' + escapeHtml(p.id) + '</span><span class="badge badge-local">' + escapeHtml(MODEL_CONFIG_TYPE_LABEL[p.type] || p.type) + '</span></div>' +
             '<div class="config-item-meta">' + escapeHtml(p.base_url) + '</div>' +
             '<div class="config-item-actions">' +
-                '<button class="btn-task" onclick="detectModels(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">探测模型</button>' +
-                '<button class="btn-task" onclick="editProvider(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">编辑</button>' +
-                '<button class="btn-task" onclick="deleteProvider(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">删除</button>' +
+                '<button class="btn-task" onclick="event.stopPropagation(); detectModels(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">探测模型</button>' +
+                '<button class="btn-task" onclick="event.stopPropagation(); editProvider(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">编辑</button>' +
+                '<button class="btn-task" onclick="event.stopPropagation(); deleteProvider(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">删除</button>' +
             '</div>' +
         '</div>';
     }).join('');
     if (!providersHtml) providersHtml = '<div class="empty">暂无 Provider，点击右上角添加</div>';
     document.getElementById('providersList').innerHTML = providersHtml;
 
-    // Provider filter for models
-    var filterSel = document.getElementById('modelProviderFilter');
-    var currentFilter = filterSel ? filterSel.value : '';
-    var filterOptions = '<option value="">全部 provider</option>' +
-        (data.providers || []).map(function(p) {
-            return '<option value="' + escapeHtml(p.id) + '"' + (p.id === currentFilter ? ' selected' : '') + '>' + escapeHtml(p.id) + '</option>';
-        }).join('');
-    if (filterSel) filterSel.innerHTML = filterOptions;
-
-    // Models list
-    var filterValue = filterSel ? filterSel.value : '';
-    var filteredModels = (data.models || []).filter(function(m) {
-        return !filterValue || m.provider === filterValue;
+    // Models list：只显示当前选中 provider 的模型
+    var filteredModels = models.filter(function(m) {
+        return m.provider === selectedProvider;
     });
     var modelsHtml = filteredModels.map(function(m) {
         var isDefault = m.id === data.default_model;
-        var meta = 'provider=' + escapeHtml(m.provider) + ' &middot; model=' + escapeHtml(m.model) +
-            ' &middot; ctx=' + (m.max_context_size || 0).toLocaleString();
+        var meta = 'model=' + escapeHtml(m.model) + ' &middot; ctx=' + (m.max_context_size || 0).toLocaleString();
         if (m.max_tokens) meta += ' &middot; max_tokens=' + m.max_tokens.toLocaleString();
+        var defaultBtn = isDefault
+            ? '<span class="badge badge-local">默认</span>'
+            : '<button class="btn-task btn-sm" onclick="setDefaultModel(\'' + escapeHtml(m.id).replace(/'/g, "\\'") + '\')">设为默认</button>';
         return '<div class="config-item" id="model-row-' + escapeHtml(m.id) + '">' +
-            '<div class="config-item-title"><span>' + escapeHtml(m.id) + '</span>' + (isDefault ? '<span class="badge badge-local">默认</span>' : '') + '</div>' +
+            '<div class="config-item-title"><span>' + escapeHtml(m.id) + '</span>' + defaultBtn + '</div>' +
             '<div class="config-item-meta">' + meta + '</div>' +
             '<div class="config-item-caps">' + (m.capabilities || []).map(function(c) { return '<span class="cap-badge">' + escapeHtml(c) + '</span>'; }).join('') + '</div>' +
             '<div class="config-item-actions">' +
@@ -1351,7 +1355,7 @@ function renderModelConfigDetail() {
         '</div>';
     }).join('');
     if (!modelsHtml) {
-        modelsHtml = '<div class="empty">' + (filterValue ? '该 provider 下暂无 Model' : '暂无 Model，点击右上角添加') + '</div>';
+        modelsHtml = '<div class="empty">' + (selectedProvider ? '该 provider 下暂无 Model，点击右上角添加' : '请先在左侧选择一个 Provider') + '</div>';
     }
     document.getElementById('modelsList').innerHTML = modelsHtml;
 }
@@ -1509,6 +1513,7 @@ function toggleCapBubble(el) {
 
 function modelFormHtml(m) {
     m = m || {};
+    var isEdit = !!m.id;
     var providers = (statusData.modelConfig && statusData.modelConfig.providers) || [];
     var providerOptions = providers.map(function(p) {
         return '<option value="' + escapeHtml(p.id) + '"' + (m.provider === p.id ? ' selected' : '') + '>' + escapeHtml(p.id) + '</option>';
@@ -1529,10 +1534,9 @@ function modelFormHtml(m) {
     }).join('');
 
     return '<div class="config-form">' +
-        '<label>Model ID（配置键名）</label><input type="text" id="model-id" value="' + escapeHtml(m.id) + '"' + (m.id ? ' disabled' : '') + ' placeholder="例如 gpt-4.1">' +
+        '<label>API Model</label><input type="text" id="model-api_model" value="' + escapeHtml(m.model || m.id || '') + '" placeholder="例如 gpt-4.1">' +
+        (isEdit ? '<input type="hidden" id="model-id" value="' + escapeHtml(m.id) + '">' : '') +
         '<label>Provider</label><select id="model-provider">' + providerOptions + '</select>' +
-        '<label>API Model 名称</label><input type="text" id="model-model" value="' + escapeHtml(m.model) + '" placeholder="例如 gpt-4.1">' +
-        '<label>显示名称</label><input type="text" id="model-display_name" value="' + escapeHtml(m.display_name) + '" placeholder="可选">' +
         '<label>上下文长度</label><div class="option-bubble-group ctx-bubble-group">' + ctxBubbles + '</div>' +
         '<label>Max Tokens</label><div class="option-bubble-group maxtokens-bubble-group">' + maxTokensBubbles + '</div>' +
         '<label>Capabilities</label><div class="option-bubble-group cap-bubble-group">' + capBubbles + '</div>' +
@@ -1543,9 +1547,13 @@ function modelFormHtml(m) {
     '</div>';
 }
 
-function editModel(id) {
+function editModelForSelectedProvider() {
+    editModel(null, selectedProvider);
+}
+
+function editModel(id, preferredProvider) {
     var data = statusData.modelConfig;
-    var m = id ? (data.models || []).find(function(x) { return x.id === id; }) : null;
+    var m = id ? (data.models || []).find(function(x) { return x.id === id; }) : { provider: preferredProvider || '' };
     var row = document.getElementById(id ? 'model-row-' + id : 'modelsList');
     if (!row) return;
     row.innerHTML = modelFormHtml(m);
@@ -1553,8 +1561,10 @@ function editModel(id) {
 
 async function saveModel() {
     var idInput = document.getElementById('model-id');
-    var id = idInput ? idInput.value.trim() : '';
-    if (!id) return alert('Model ID 不能为空');
+    var apiModelInput = document.getElementById('model-api_model');
+    var apiModel = apiModelInput ? apiModelInput.value.trim() : '';
+    var id = idInput ? idInput.value.trim() : apiModel;
+    if (!id || !apiModel) return alert('API Model 不能为空');
 
     var ctxEl = document.querySelector('.ctx-bubble-group .option-bubble.selected');
     var maxTokensEl = document.querySelector('.maxtokens-bubble-group .option-bubble.selected');
@@ -1564,8 +1574,8 @@ async function saveModel() {
     var body = {
         id: id,
         provider: document.getElementById('model-provider').value,
-        model: document.getElementById('model-model').value.trim(),
-        display_name: document.getElementById('model-display_name').value.trim(),
+        model: apiModel,
+        display_name: apiModel,
         max_context_size: ctxEl ? parseInt(ctxEl.getAttribute('data-value'), 10) : 128000,
         max_tokens: maxTokensEl ? parseInt(maxTokensEl.getAttribute('data-value'), 10) : 4096,
         capabilities: caps,

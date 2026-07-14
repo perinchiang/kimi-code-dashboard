@@ -19,7 +19,7 @@
         } catch (e) {}
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=39">
+    <link rel="stylesheet" href="/static/css/style.css?v=41">
 </head>
 <body>
     <header>
@@ -280,13 +280,6 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                 第三方模型配置
             </h2>
-            <div class="default-model-bar">
-                <label for="defaultModelSelect">默认模型</label>
-                <select id="defaultModelSelect" onchange="setDefaultModel(this.value)">
-                    <option>加载中...</option>
-                </select>
-            </div>
-            <input type="text" class="search-box detail-search" id="modelSearchDetail" placeholder="搜索 provider / model..." oninput="filterModelConfigDetail(this.value)">
         </div>
         <div class="config-layout">
             <section class="config-section card">
@@ -627,6 +620,6 @@
     </div>
 
     <script src="/static/js/charts.js?v=12"></script>
-    <script src="/static/js/app.js?v=59"></script>
+    <script src="/static/js/app.js?v=62"></script>
 </body>
 </html>
