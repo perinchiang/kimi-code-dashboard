@@ -193,8 +193,9 @@ def test_connection(cfg: dict) -> dict:
     """
     if not HAS_BOTO3:
         return {"ok": False, "msg": "未安装 boto3，请运行 pip install boto3"}
-    if not cfg.get("enabled"):
-        return {"ok": False, "msg": "配置不完整（缺少 endpoint_url/access_key/secret_key/bucket）"}
+    err = _validate_cfg(cfg)
+    if err:
+        return {"ok": False, "msg": err}
     try:
         client = _get_client(cfg)
         client.head_bucket(Bucket=cfg["bucket"])
@@ -216,10 +217,11 @@ def upload_file(file_id: str, cfg: dict | None = None) -> dict:
 
     if cfg is None:
         cfg = load_image_bed_config()
-    if not cfg.get("enabled"):
-        return {"success": False, "error": "图床未配置或配置不完整"}
     if not HAS_BOTO3:
         return {"success": False, "error": "未安装 boto3，请运行 pip install boto3"}
+    err = _validate_cfg(cfg)
+    if err:
+        return {"success": False, "error": err}
 
     # 读取 index.json 拿到文件名和 media_type
     index_path = FILES_DIR / "index.json"
@@ -670,10 +672,11 @@ def upload_blob(sha256: str, cfg: dict | None = None) -> dict:
 
     if cfg is None:
         cfg = load_image_bed_config()
-    if not cfg.get("enabled"):
-        return {"success": False, "error": "图床未配置或配置不完整"}
     if not HAS_BOTO3:
         return {"success": False, "error": "未安装 boto3，请运行 pip install boto3"}
+    err = _validate_cfg(cfg)
+    if err:
+        return {"success": False, "error": err}
 
     blob_path = find_blob_path(sha256)
     if not blob_path or not blob_path.exists():
@@ -741,3 +744,21 @@ def _get_client(cfg: dict):
         region_name="auto",
         config=BotoConfig(signature_version="s3v4"),
     )
+
+
+def _validate_cfg(cfg: dict) -> str | None:
+    """Early validation of image_bed config; returns error message or None if OK.
+
+    Catches common misconfigurations before hitting boto3's low-level errors
+    (e.g. "Credential access key has length 12, should be 32").
+    """
+    if not cfg.get("enabled"):
+        return "图床未配置或配置不完整（缺少 endpoint_url/access_key/secret_key/bucket）"
+    ak = cfg.get("access_key", "")
+    sk = cfg.get("secret_key", "")
+    # R2 access_key 必须 32 字符，secret_key 必须 64 字符
+    if len(ak) != 32:
+        return f"Access Key 长度异常（{len(ak)} 字符，R2 应为 32 字符）。请检查是否复制完整或误填了 account_id。"
+    if len(sk) != 64:
+        return f"Secret Key 长度异常（{len(sk)} 字符，R2 应为 64 字符）。请检查是否复制完整。"
+    return None
