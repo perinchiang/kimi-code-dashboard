@@ -1297,10 +1297,14 @@ async function loadTrends() {
         renderTrend(currentTrendUnit);
         if (trendData.total) {
             var activeDaysEl = document.getElementById('trendActiveDays');
+            var streakBadgeEl = document.getElementById('trendStreakBadge');
             var streakDaysEl = document.getElementById('trendStreakDays');
             if (activeDaysEl) {
                 activeDaysEl.textContent = trendData.total.activeDays || 0;
                 activeDaysEl.className = 'metric';
+            }
+            if (streakBadgeEl) {
+                streakBadgeEl.style.display = (trendData.total.streakDays || 0) > 0 ? 'inline-flex' : 'none';
             }
             if (streakDaysEl) {
                 streakDaysEl.textContent = trendData.total.streakDays || 0;
@@ -1328,6 +1332,8 @@ async function loadTrends() {
         document.getElementById('trendTotal').textContent = '-';
         document.getElementById('trendActiveDays').textContent = '-';
         document.getElementById('trendStreakDays').textContent = '-';
+        var streakBadgeErr = document.getElementById('trendStreakBadge');
+        if (streakBadgeErr) streakBadgeErr.style.display = 'none';
         var rateElErr = document.getElementById('trendCacheRate');
         var evalElErr = document.getElementById('trendCacheRateEval');
         if (rateElErr) { rateElErr.textContent = '-'; rateElErr.className = 'metric'; }

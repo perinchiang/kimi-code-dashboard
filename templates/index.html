@@ -19,7 +19,7 @@
         } catch (e) {}
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=56">
+    <link rel="stylesheet" href="/static/css/style.css?v=57">
 </head>
 <body>
     <header>
@@ -88,8 +88,8 @@
                         <div class="metric-label">当前周期 Token 总量</div>
                     </div>
                     <div class="trend-summary-item">
-                        <div class="metric-row"><div class="metric" id="trendActiveDays">-</div></div>
-                        <div class="metric-label">活跃天数<span class="streak-badge" title="连续活跃天数"><svg class="fire-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22c4.5 0 8-3.5 8-8 0-3.5-2.5-6.5-5-8.5-.5 2.5-2 4-4 5 1-2.5.5-5-1.5-7.5C7.5 5.5 4 9 4 14c0 4.5 3.5 8 8 8z"/></svg><span id="trendStreakDays">-</span></span></div>
+                        <div class="metric-row"><div class="metric" id="trendActiveDays">-</div><span id="trendStreakBadge" class="cache-eval-badge streak-eval-badge" title="连续活跃天数"><svg class="fire-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22c4.5 0 8-3.5 8-8 0-3.5-2.5-6.5-5-8.5-.5 2.5-2 4-4 5 1-2.5.5-5-1.5-7.5C7.5 5.5 4 9 4 14c0 4.5 3.5 8 8 8z"/></svg><span id="trendStreakDays">-</span></span></div>
+                        <div class="metric-label">活跃天数</div>
                     </div>
                     <div class="trend-summary-item">
                         <div class="metric-row"><div class="metric" id="trendCacheRate">-</div><span id="trendCacheRateEval" class="cache-eval-badge"></span></div>
@@ -772,6 +772,6 @@
     </div>
 
     <script src="/static/js/charts.js?v=14"></script>
-    <script src="/static/js/app.js?v=85"></script>
+    <script src="/static/js/app.js?v=86"></script>
 </body>
 </html>
