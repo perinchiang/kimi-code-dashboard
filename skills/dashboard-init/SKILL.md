@@ -1,6 +1,6 @@
 ---
 name: dashboard-init
-description: 初始化并教学 Kimi Code Dashboard：为 Skills / MCP Servers 生成中文描述、教 AI 创建定时任务，并说明 Dashboard 的启动/更新/重启等日常操作。当用户安装新 skill/MCP、发现卡片没有中文说明、或说"补齐描述""初始化 dashboard""给 skill/mcp 加描述""帮我加个定时任务""教 AI 生成定时任务""怎么启动 dashboard""怎么更新 dashboard"时调用。
+description: 初始化并教学 Kimi Code Dashboard：为 Skills / MCP Servers 生成中文描述、教 AI 创建定时任务与生命周期 Hooks，并说明 Dashboard 的启动/更新/重启等日常操作。当用户安装新 skill/MCP、发现卡片没有中文说明、或说"补齐描述""初始化 dashboard""给 skill/mcp 加描述""帮我加个定时任务""教 AI 生成定时任务""帮我加个 hook""怎么启动 dashboard""怎么更新 dashboard"时调用。
 ---
 
 # Dashboard 初始化与使用教学 Skill
@@ -186,7 +186,70 @@ print(r.json())
 - `script`：与 `id` 对应，例如 `garmin-sync-daily.py`
 - `logFile`：与 `id` 对应，例如 `garmin-sync-daily.log`
 
-## 4. Dashboard 启动、更新与重启
+## 4. 创建生命周期 Hooks
+
+当用户说"帮我加个 hook""加个 bark 通知""危险命令拦截""hook 怎么用""会话结束通知我"时，按下面流程处理。
+
+### 4.1 基本概念
+
+- Hooks 配置在 `~/.kimi-code/config.toml` 中。
+- 启用中的 hook 放在 `[[hooks]]` 数组；禁用中的放在 `[[disabled_hooks]]` 数组。
+- Kimi CLI 严格校验 hook 对象，**只允许** `event`、`command`、`matcher`、`timeout` 四个字段。
+- 不要往 hook 对象里塞 `enabled`、`id` 等字段，否则 `kimi doctor config` 会报错。
+
+### 4.2 常用事件
+
+| 事件 | 说明 |
+|---|---|
+| `Stop` | 会话/任务结束时，最常用 |
+| `PreToolUse` | 工具调用前，可配合 `matcher` 做审计/拦截 |
+| `PostToolUse` | 工具调用后 |
+| `UserPromptSubmit` | 用户提交提示前 |
+| `SessionStart` | 会话开始时 |
+
+### 4.3 创建方式
+
+如果 Dashboard 在运行，**优先调用 Dashboard API**：
+
+```python
+import requests
+
+body = {
+    "event": "Stop",
+    "command": "curl -s \"https://api.day.app/YOUR_BARK_KEY/Kimi%20Code/%E4%BC%9A%E8%AF%9D%E7%BB%93%E6%9D%9F\"",
+    "matcher": "",
+    "timeout": 10,
+    "enabled": True,
+}
+
+r = requests.post("http://127.0.0.1:8080/api/hooks", json=body)
+print(r.json())
+```
+
+API 端点：
+
+| 方法 | 路径 | 功能 |
+|---|---|---|
+| GET | `/api/hooks` | 列出所有 hooks |
+| POST | `/api/hooks` | 新建 hook |
+| POST | `/api/hooks/<id>` | 更新 hook |
+| POST | `/api/hooks/<id>/toggle` | 启用/禁用切换 |
+| POST | `/api/hooks/<id>/delete` | 删除 hook |
+
+如果 Dashboard 没运行，则直接修改 `~/.kimi-code/config.toml`：
+
+1. 备份原文件。
+2. 用 `tomllib` 读取、`tomli_w` 写回，保留其他配置。
+3. 追加到 `[[hooks]]` 或 `[[disabled_hooks]]`。
+4. 运行 `kimi doctor config ~/.kimi-code/config.toml` 验证。
+
+### 4.4 命名与示例
+
+- Bark 通知：用 `Stop` 事件，命令里填 `curl -s "https://api.day.app/<key>/<title>/<body>"`。
+- 危险命令审计：用 `PreToolUse` + `matcher = "Shell"`，命令里写日志。
+- 详细示例和注意事项见独立的 `kimi-hooks` skill。
+
+## 5. Dashboard 启动、更新与重启
 
 当用户问"怎么启动 Dashboard""怎么更新 Dashboard""Dashboard 为什么没生效"时，按下面说明回答。
 
@@ -226,5 +289,5 @@ print(r.json())
 - 修改前先看一眼现有内容，避免覆盖用户手写的优质描述
 - YAML frontmatter 编辑时要保留 `---` 分隔符和原有字段
 - `mcp.json` 写入时要保持 JSON 格式，`description` 放在 `command`/`args`/`cwd`/`env` 附近即可
-- 本 skill 不直接操作 Dashboard 进程，只修改数据文件；定时任务除外，可直接改 `tasks.json` 或调用 `/api/tasks/create`
+- 本 skill 不直接操作 Dashboard 进程，只修改数据文件；定时任务和 Hooks 除外，可调用 `/api/tasks/create`、`/api/hooks` 等 API
 - 涉及 Dashboard 进程的操作（启动、更新后重启）通过 `kimi dashboard` 菜单完成，不需要 AI 手动起 Flask 进程
