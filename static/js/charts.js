@@ -316,13 +316,20 @@ function formatNumberPlain(n) {
 function _prepareModelTrendData(data) {
     if (!data || data.length === 0) return [];
 
-    // Build a lookup by key
-    var map = {};
-    data.forEach(function(d) { map[d.key] = d; });
+    // Use the last 7 entries from the backend-sorted array (avoids browser timezone issues)
+    var last7 = data.slice(-7);
+    if (last7.some(function(d) { return d.total > 0; })) {
+        return last7;
+    }
 
-    var today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // No data in the trailing 7 days: find non-empty range and center it in a 7-day window
+    var nonEmpty = data.filter(function(d) { return d.total > 0; });
+    if (nonEmpty.length === 0) return last7;
 
+    function parseKey(key) {
+        var parts = key.split('-');
+        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    }
     function makeDayKey(d) {
         return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
     }
@@ -330,33 +337,14 @@ function _prepareModelTrendData(data) {
         return String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
     }
 
-    // Try last 7 days first
-    var last7 = [];
-    for (var i = 6; i >= 0; i--) {
-        var d = new Date(today);
-        d.setDate(d.getDate() - i);
-        var key = makeDayKey(d);
-        var existing = map[key];
-        last7.push(existing || { key: key, label: makeLabel(d), total: 0, models: {} });
-    }
-    var hasLast7 = last7.some(function(d) { return d.total > 0; });
-    if (hasLast7) return last7;
+    var map = {};
+    data.forEach(function(d) { map[d.key] = d; });
 
-    // No data in last 7 days: find date range with data and center it in 7-day window
-    var nonEmpty = data.filter(function(d) { return d.total > 0; });
-    if (nonEmpty.length === 0) return last7;
-
-    // Parse keys to dates
-    function parseKey(key) {
-        var parts = key.split('-');
-        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-    }
     var dates = nonEmpty.map(function(d) { return parseKey(d.key); }).sort(function(a, b) { return a - b; });
     var firstDate = dates[0];
     var lastDate = dates[dates.length - 1];
     var midDate = new Date(firstDate.getTime() + (lastDate.getTime() - firstDate.getTime()) / 2);
 
-    // Center the midDate in a 7-day window
     var windowStart = new Date(midDate);
     windowStart.setDate(windowStart.getDate() - 3);
 

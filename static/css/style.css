@@ -250,8 +250,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 .donut-wrap { display: flex; align-items: center; justify-content: center; gap: 1.5rem; margin: 0.5rem 0; }
 .donut-container { position: relative; width: 180px; height: 180px; flex-shrink: 0; }
 .donut-center { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; }
-.donut-total { font-size: 1.6rem; font-weight: 700; color: var(--text); font-family: var(--mono); font-variant-numeric: tabular-nums; line-height: 1.1; }
-.donut-label { font-size: 0.7rem; color: var(--text-secondary); font-weight: 450; margin-top: 0.1rem; }
+.donut-total { font-size: 1.4rem; font-weight: 700; color: var(--text); font-family: var(--mono); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.donut-label { font-size: 0.65rem; color: var(--text-secondary); font-weight: 450; margin-top: 0.1rem; }
 .memory-legend { flex: 1 1 auto; display: grid; grid-template-columns: repeat(2, minmax(110px, 1fr)); gap: 0.5rem 1rem; max-width: 320px; }
 .legend-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
 .legend-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
@@ -487,9 +487,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 .model-trend-chart { position: relative; min-height: 220px; }
 .model-distribution-chart { position: relative; min-height: 200px; }
 .model-distribution-chart .donut-wrap { justify-content: flex-start; gap: 2rem; }
-.model-distribution-chart .donut-container { width: 160px; height: 160px; }
-.model-distribution-chart .donut-total { font-size: 1.05rem; line-height: 1.2; }
-.model-distribution-chart .donut-label { font-size: 0.6rem; }
+.model-distribution-chart .donut-container { width: 150px; height: 150px; }
+.model-distribution-chart .donut-total { font-size: 0.95rem; line-height: 1.2; }
+.model-distribution-chart .donut-label { font-size: 0.55rem; }
 .model-distribution-chart .memory-legend { max-width: 420px; grid-template-columns: repeat(2, minmax(140px, 1fr)); }
 .model-usage-item { flex-wrap: wrap; }
 .model-usage-meta { width: 100%; display: flex; gap: 0.75rem; padding-left: calc(20px + 0.5rem + 200px); font-size: 0.72rem; color: var(--text-tertiary); font-family: var(--mono); }
