@@ -122,7 +122,7 @@ def _models_list(cfg: dict):
             "model": m.get("model", ""),
             "display_name": m.get("display_name", ""),
             "max_context_size": m.get("max_context_size", 0),
-            "max_tokens": m.get("max_tokens", 0),
+            "max_output_size": m.get("max_output_size") or m.get("max_tokens", 0),
             "capabilities": m.get("capabilities", []),
         })
     return result
@@ -307,7 +307,7 @@ def api_detect_models(pid: str):
                 "id": mid,
                 "capabilities": _infer_model_capabilities(mid),
                 "max_context_size": _infer_context_size(mid),
-                "max_tokens": 4096,
+                "max_output_size": 4096,
             })
 
         return jsonify({"ok": True, "provider": pid, "models": models})
@@ -342,7 +342,7 @@ def api_save_model():
                 "provider": provider or old.get("provider", ""),
                 "model": body.get("model") or old.get("model", mid),
                 "max_context_size": int(body.get("max_context_size") or old.get("max_context_size", 128000)),
-                "max_tokens": int(body.get("max_tokens") or old.get("max_tokens", 4096)),
+                "max_output_size": int(body.get("max_output_size") or body.get("max_tokens") or old.get("max_output_size") or old.get("max_tokens", 4096)),
             }
             caps = body.get("capabilities")
             if caps is not None:

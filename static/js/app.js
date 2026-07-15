@@ -1819,7 +1819,7 @@ function renderModelConfigDetail() {
         var modelProvider = providers.find(function(p) { return p.id === m.provider; });
         var providerProtected = modelProvider && isProtectedProvider(modelProvider);
         var meta = 'model=' + escapeHtml(m.model) + ' &middot; ctx=' + (m.max_context_size || 0).toLocaleString();
-        if (m.max_tokens) meta += ' &middot; max_tokens=' + m.max_tokens.toLocaleString();
+        if (m.max_output_size) meta += ' &middot; max_output=' + m.max_output_size.toLocaleString();
         var defaultBtn = isDefault
             ? '<span class="badge badge-local">默认</span>'
             : '<button class="btn-task btn-sm" onclick="setDefaultModel(\'' + escapeJsString(m.id) + '\')">设为默认</button>';
@@ -1927,7 +1927,7 @@ async function detectModels(id) {
             return;
         }
         var bubbles = models.map(function(m, i) {
-            return '<div class="detect-bubble" role="button" onclick="toggleDetectedBubble(this)" data-id="' + escapeHtml(m.id) + '" data-ctx="' + (m.max_context_size || 128000) + '" data-max-tokens="' + (m.max_tokens || 4096) + '" data-caps="' + escapeHtml((m.capabilities || []).join(',')) + '">' +
+            return '<div class="detect-bubble" role="button" onclick="toggleDetectedBubble(this)" data-id="' + escapeHtml(m.id) + '" data-ctx="' + (m.max_context_size || 128000) + '" data-max-tokens="' + (m.max_output_size || 4096) + '" data-caps="' + escapeHtml((m.capabilities || []).join(',')) + '">' +
                 escapeHtml(m.id) +
             '</div>';
         }).join('');
@@ -1950,7 +1950,7 @@ async function addDetectedModels(id) {
         selected.push({
             id: el.getAttribute('data-id'),
             ctx: parseInt(el.getAttribute('data-ctx'), 10) || 128000,
-            max_tokens: parseInt(el.getAttribute('data-max-tokens'), 10) || 4096,
+            max_output_size: parseInt(el.getAttribute('data-max-tokens'), 10) || 4096,
             caps: (el.getAttribute('data-caps') || '').split(',').filter(function(c) { return c; }),
         });
     });
@@ -1968,7 +1968,7 @@ async function addDetectedModels(id) {
                     model: m.id,
                     display_name: m.id,
                     max_context_size: m.ctx,
-                    max_tokens: m.max_tokens,
+                    max_output_size: m.max_output_size,
                     capabilities: m.caps,
                 })
             });
@@ -2008,7 +2008,7 @@ function modelFormHtml(m) {
         return '<div class="option-bubble' + (o.value === currentCtx ? ' selected' : '') + '" role="button" onclick="toggleOptionBubble(this, \'ctx-bubble-group\')" data-value="' + o.value + '">' + escapeHtml(o.label) + '</div>';
     }).join('');
 
-    var currentMaxTokens = m.max_tokens || 4096;
+    var currentMaxTokens = m.max_output_size || 4096;
     var maxTokensBubbles = MODEL_MAX_TOKENS_OPTIONS.map(function(o) {
         return '<div class="option-bubble' + (o.value === currentMaxTokens ? ' selected' : '') + '" role="button" onclick="toggleOptionBubble(this, \'maxtokens-bubble-group\')" data-value="' + o.value + '">' + escapeHtml(o.label) + '</div>';
     }).join('');
@@ -2061,7 +2061,7 @@ async function saveModel() {
         model: apiModel,
         display_name: apiModel,
         max_context_size: ctxEl ? parseInt(ctxEl.getAttribute('data-value'), 10) : 128000,
-        max_tokens: maxTokensEl ? parseInt(maxTokensEl.getAttribute('data-value'), 10) : 4096,
+        max_output_size: maxTokensEl ? parseInt(maxTokensEl.getAttribute('data-value'), 10) : 4096,
         capabilities: caps,
     };
     try {
