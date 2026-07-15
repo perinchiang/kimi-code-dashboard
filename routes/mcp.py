@@ -12,6 +12,7 @@ from flask import Blueprint, jsonify, request
 
 from config import GATEWAY_BASE, KIMI_CODE_DIR, MCP_CONFIG, log
 from services.helpers import atomic_write_text, config_lock, http_get, lock_for, safe_json_load
+from services.wire_parser import get_tool_usage
 
 bp = Blueprint("mcp", __name__)
 
@@ -94,15 +95,25 @@ def api_mcp():
     enabled_servers = cfg.get("mcpServers", {})
     disabled_servers = disabled_cfg.get("mcpServers", {})
 
+    # MCP call counts from wire.jsonl (full counter)
+    try:
+        tool_usage = get_tool_usage()
+        mcp_counts = tool_usage.get("mcpCountsFull", {})
+    except Exception as e:
+        log.warning("Failed to load MCP usage for /api/mcp: %s", e)
+        mcp_counts = {}
+
     result = []
     for name, srv in enabled_servers.items():
         info = _check_mcp_server(name, srv)
         info["enabled"] = True
+        info["callCount"] = mcp_counts.get(name, 0)
         result.append(info)
 
     for name, srv in disabled_servers.items():
         info = _check_mcp_server(name, srv)
         info["enabled"] = False
+        info["callCount"] = mcp_counts.get(name, 0)
         result.append(info)
 
     # 排序：offline 优先（方便发现配置错误），其次按名称
