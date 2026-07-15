@@ -270,6 +270,8 @@ def api_detect_models(pid: str):
         url = base_url + "/models"
         req = urllib.request.Request(url, method="GET")
         req.add_header("Accept", "application/json")
+        # 部分 provider（如 opencode zen）套了 Cloudflare，默认 urllib UA 会被 Error 1010 拦截
+        req.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36")
         if api_key:
             req.add_header("Authorization", f"Bearer {api_key}")
         for k, v in (p.get("custom_headers") or {}).items():
