@@ -1854,7 +1854,7 @@ function providerFormHtml(p) {
             }).join('');
         presetHtml = '<label>预设提供商</label><select id="provider-preset" onchange="applyProviderPreset(this.value)">' + presetOptions + '</select>';
     }
-    return '<div class="config-form">' +
+    return '<div class="config-form" onclick="event.stopPropagation()">' +
         presetHtml +
         '<label>ID</label><input type="text" id="provider-id" value="' + escapeHtml(p.id) + '"' + (p.id ? ' disabled' : '') + ' placeholder="例如 openai">' +
         '<label>类型</label><select id="provider-type">' + typeOptions + '</select>' +
