@@ -48,11 +48,13 @@ class ParseResult:
     usage_records: list[UsageRecord] = field(default_factory=list)
     tool_counts: Counter = field(default_factory=Counter)
     skill_counts: Counter = field(default_factory=Counter)
+    mcp_counts: Counter = field(default_factory=Counter)         # calls per MCP server
     model_counts: Counter = field(default_factory=Counter)       # calls per model
     model_tokens: dict[str, dict[str, int]] = field(default_factory=dict)  # model -> {input, output, total}
     # Time-windowed copies (keyed by window label: "24h" / "7d" / "30d")
     tool_counts_by_window: dict = field(default_factory=lambda: {"24h": Counter(), "7d": Counter(), "30d": Counter()})
     skill_counts_by_window: dict = field(default_factory=lambda: {"24h": Counter(), "7d": Counter(), "30d": Counter()})
+    mcp_counts_by_window: dict = field(default_factory=lambda: {"24h": Counter(), "7d": Counter(), "30d": Counter()})
     model_tokens_by_window: dict = field(default_factory=lambda: {"24h": {}, "7d": {}, "30d": {}})
     # Time-series buckets for model usage charts
     model_tokens_by_day: dict[str, dict[str, dict[str, int]]] = field(default_factory=dict)   # day -> model -> stats
@@ -201,6 +203,12 @@ def _parse_file(path: Path, offset: int, result: ParseResult) -> int:
                     if name == "Skill":
                         skill_name = event.get("args", {}).get("skill", "unknown")
                         result.skill_counts[skill_name] += 1
+                    elif name.startswith("mcp__"):
+                        # MCP tool names: mcp__<server>__<tool>
+                        parts = name.split("__", 2)
+                        if len(parts) >= 2:
+                            mcp_server = parts[1]
+                            result.mcp_counts[mcp_server] += 1
 
                     # Time-windowed tool/skill stats (if event has timestamp)
                     ts = obj.get("time")
@@ -217,6 +225,11 @@ def _parse_file(path: Path, offset: int, result: ParseResult) -> int:
                             if name == "Skill":
                                 skill_name = event.get("args", {}).get("skill", "unknown")
                                 result.skill_counts_by_window[w][skill_name] += 1
+                            elif name.startswith("mcp__"):
+                                parts = name.split("__", 2)
+                                if len(parts) >= 2:
+                                    mcp_server = parts[1]
+                                    result.mcp_counts_by_window[w][mcp_server] += 1
 
             new_offset = f.tell()
             return new_offset
@@ -484,23 +497,32 @@ def get_trends() -> dict:
 
 def _update_tool_usage_cache(result: ParseResult):
     """Update the tool-usage cache from a ParseResult."""
-    def _build(tool_counter, skill_counter):
+    def _build(tool_counter, skill_counter, mcp_counter):
         return {
             "totalToolCalls": sum(tool_counter.values()),
             "totalSkillCalls": sum(skill_counter.values()),
+            "totalMcpCalls": sum(mcp_counter.values()),
             "tools": [{"name": k, "count": v} for k, v in tool_counter.most_common(15)],
             "skills": [{"name": k, "count": v} for k, v in skill_counter.most_common(15)],
+            "mcpServers": [{"name": k, "count": v} for k, v in mcp_counter.most_common()],
+            # Full counters for per-item lookup (not truncated to top 15)
+            "skillCountsFull": dict(skill_counter),
+            "mcpCountsFull": dict(mcp_counter),
         }
-    all_data = _build(result.tool_counts, result.skill_counts)
+    all_data = _build(result.tool_counts, result.skill_counts, result.mcp_counts)
     _tool_usage_cache["data"] = {
         "totalToolCalls": all_data["totalToolCalls"],
         "totalSkillCalls": all_data["totalSkillCalls"],
+        "totalMcpCalls": all_data["totalMcpCalls"],
         "tools": all_data["tools"],
         "skills": all_data["skills"],
+        "mcpServers": all_data["mcpServers"],
+        "skillCountsFull": all_data["skillCountsFull"],
+        "mcpCountsFull": all_data["mcpCountsFull"],
         "windows": {
-            "24h": _build(result.tool_counts_by_window["24h"], result.skill_counts_by_window["24h"]),
-            "7d":  _build(result.tool_counts_by_window["7d"],  result.skill_counts_by_window["7d"]),
-            "30d": _build(result.tool_counts_by_window["30d"], result.skill_counts_by_window["30d"]),
+            "24h": _build(result.tool_counts_by_window["24h"], result.skill_counts_by_window["24h"], result.mcp_counts_by_window["24h"]),
+            "7d":  _build(result.tool_counts_by_window["7d"],  result.skill_counts_by_window["7d"],  result.mcp_counts_by_window["7d"]),
+            "30d": _build(result.tool_counts_by_window["30d"], result.skill_counts_by_window["30d"], result.mcp_counts_by_window["30d"]),
             "all": all_data,
         },
     }

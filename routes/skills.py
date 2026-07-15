@@ -91,10 +91,10 @@ def api_skills():
     skills = []
     disabled_ids = set()
 
-    # Skill call counts from wire.jsonl (all-time total)
+    # Skill call counts from wire.jsonl (all-time total, full counter)
     try:
         tool_usage = get_tool_usage()
-        skill_counts = {item["name"]: item["count"] for item in tool_usage.get("skills", [])}
+        skill_counts = tool_usage.get("skillCountsFull", {})
     except Exception as e:
         log.warning("Failed to load skill usage for /api/skills: %s", e)
         skill_counts = {}

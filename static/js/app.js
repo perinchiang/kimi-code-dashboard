@@ -902,10 +902,12 @@ function _mcpCompactCommand(s) {
 function _mcpDetailHtml(s) {
     var info = _mcpTypeInfo(s);
     var desc = s.description || getMcpDesc(s.name) || s.detail || '';
+    var callCount = s.callCount || 0;
     var lines = [];
     if (desc) lines.push('<div class="mcp-detail-desc"><div class="label">描述</div><div class="detail-content">' + escapeHtml(desc) + '</div></div>');
     lines.push('<div class="mcp-detail-meta"><span class="label">类型</span><span class="badge ' + info.cls + '">' + info.label + '</span></div>');
     lines.push('<div class="mcp-detail-meta"><span class="label">状态</span><span class="status ' + s.status + '"><span class="status-dot"></span>' + s.status + '</span></div>');
+    lines.push('<div class="mcp-detail-meta"><span class="label">调用次数</span><span class="skill-call-count">' + callCount + ' 次</span></div>');
     lines.push('<div class="mcp-detail-meta"><span class="label">命令</span><code>' + escapeHtml(s.command) + '</code></div>');
     if (s.args && s.args.length) {
         lines.push('<div class="mcp-detail-meta"><span class="label">参数</span></div>');
@@ -1024,10 +1026,12 @@ function renderMcpCard(s) {
     var isOffline = s.status === 'offline';
     var safeName = escapeJsString(s.name);
     var displayName = escapeHtml(s.name);
+    var callCount = s.callCount || 0;
     var diagBtn = isOffline ? '<button class="btn-task mcp-diag-btn" title="复制诊断 prompt 给 AI" onclick="event.stopPropagation();copyMcpDiagnosticPrompt(\'' + safeName + '\')">诊断</button>' : '';
     return '<div class="mcp-card ' + (s.enabled ? '' : 'disabled') + (isOffline ? ' offline' : '') + '" data-mcp-id="' + displayName + '" onclick="if(!event.target.closest(\'.toggle-switch\') && !event.target.closest(\'.mcp-diag-btn\'))openMcpDetail(\'' + safeName + '\')">' +
         '<div class="mcp-card-header"><span class="mcp-card-name">' + displayName + '</span><span class="status ' + statusCls + '"><span class="status-dot"></span>' + s.status + '</span></div>' +
         (desc ? '<div class="mcp-card-desc">' + escapeHtml(desc) + '</div>' : '') +
+        '<div class="skill-card-meta"><span class="label">调用:</span> <span class="skill-call-count">' + callCount + ' 次</span></div>' +
         (isOffline && s.detail ? '<div class="mcp-card-error">' + escapeHtml(s.detail) + '</div>' : '') +
         '<div class="mcp-card-actions">' +
             '<label class="toggle-switch" title="启用/禁用" onclick="event.stopPropagation()"><input type="checkbox" onchange="toggleMcpEnabled(\'' + safeName + '\', this.checked)"' + enabledChecked + '><span class="toggle-slider"></span></label>' +
@@ -1298,10 +1302,24 @@ function renderVersionCheck(r) {
     if (box) box.innerHTML = '';
 }
 
+function openKimiUpdateModal() {
+    var modal = document.getElementById('kimiUpdateModal');
+    if (modal) {
+        modal.style.display = '';
+        document.body.style.overflow = 'hidden';
+    }
+}
+
+function closeKimiUpdateModal() {
+    var modal = document.getElementById('kimiUpdateModal');
+    if (modal) modal.style.display = 'none';
+    document.body.style.overflow = '';
+}
+
 async function runKimiUpdate() {
+    openKimiUpdateModal();
     var box = document.getElementById('kimiVersionCheck');
-    if (!box) return;
-    box.innerHTML = '<div class="vc-row"><span class="vc-spinner"></span><span style="font-size:0.78rem;color:var(--text-secondary)">正在下载并更新…</span></div><pre class="vc-log" id="vcLog"></pre>';
+    if (box) box.innerHTML = '<div class="vc-row"><span class="vc-spinner"></span><span style="font-size:0.78rem;color:var(--text-secondary)">正在下载并更新…</span></div><pre class="vc-log" id="vcLog"></pre>';
     if (updatePollTimer) { clearTimeout(updatePollTimer); updatePollTimer = null; }
     kimiUpdateState = { checking: true, updateAvailable: false, error: null };
     renderStatusBar();
@@ -1311,14 +1329,17 @@ async function runKimiUpdate() {
         if (r.status === 'error') {
             kimiUpdateState = { checking: false, updateAvailable: false, error: r.error };
             renderStatusBar();
-            box.innerHTML = '<div class="vc-row vc-error">启动更新失败: ' + r.error + '</div><button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">返回</button>';
+            if (box) box.innerHTML = '<div class="vc-row vc-error">启动更新失败: ' + r.error + '</div><button class="vc-btn vc-btn-sm" onclick="checkKimiUpdate()">返回</button>';
             return;
+        }
+        if (r.status === 'already_running') {
+            // 已有更新进程在跑，直接进入轮询
         }
         pollUpdateStatus();
     } catch (e) {
         kimiUpdateState = { checking: false, updateAvailable: false, error: e.message };
         renderStatusBar();
-        box.innerHTML = '<div class="vc-row vc-error">启动更新失败: ' + e.message + '</div>';
+        if (box) box.innerHTML = '<div class="vc-row vc-error">启动更新失败: ' + e.message + '</div>';
     }
 }
 
