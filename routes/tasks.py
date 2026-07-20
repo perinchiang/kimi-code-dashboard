@@ -137,7 +137,7 @@ def _parse_schedule(schedule: str) -> dict:
     if m:
         days_str = m.group(1)
         days = []
-        for d in days_str.replace("。", "").split("。"):
+        for d in days_str.split("、"):
             d = d.strip()
             if d in _DAY_NAME_TO_INT:
                 days.append(_DAY_NAME_TO_INT[d])

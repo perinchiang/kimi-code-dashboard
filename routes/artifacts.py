@@ -17,6 +17,13 @@ bp = Blueprint("artifacts", __name__)
 FILES_DIR = r2_uploader.FILES_DIR
 
 
+def _is_safe_file_id(file_id: str) -> bool:
+    """Reject path traversal attempts in file_id."""
+    if not file_id:
+        return False
+    return "/" not in file_id and "\\" not in file_id and ".." not in file_id
+
+
 @bp.route("/api/artifacts/all")
 def api_list_all_artifacts():
     """统一列出所有产物（用户上传 + AI 生成），按时间倒序，AI 优先。
@@ -78,6 +85,8 @@ def api_artifact_content(file_id: str):
 
     自动判断来源：先查 files/，找不到再查 blobs/。
     """
+    if not _is_safe_file_id(file_id):
+        abort(400, description="无效的 file_id")
     # 1. 先查 files/
     index_path = FILES_DIR / "index.json"
     if index_path.exists():
@@ -113,6 +122,8 @@ def api_artifact_content(file_id: str):
 @bp.route("/api/artifacts/<file_id>/upload", methods=["POST"])
 def api_upload_artifact(file_id: str):
     """上传产物到图床。自动判断来源：file_id 或 sha256。"""
+    if not _is_safe_file_id(file_id):
+        return jsonify({"success": False, "error": "无效的 file_id"}), 400
     # 先查 files/
     index_path = FILES_DIR / "index.json"
     if index_path.exists():
