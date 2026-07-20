@@ -226,9 +226,10 @@ function _formatPct(fraction) {
     return pct.toFixed(1);
 }
 
-function renderDonut(values, total, colorMap, centerLabel) {
+function renderDonut(values, total, colorMap, centerLabel, showLegend) {
     if (total === 0) return '<div class="trend-empty">暂无数据</div>';
     centerLabel = centerLabel || '总 Token';
+    if (showLegend === undefined) showLegend = true;
     var size = 180, cx = 90, cy = 90, r = 72;
     var circumference = 2 * Math.PI * r;
     var strokeWidth = 20;
@@ -249,18 +250,19 @@ function renderDonut(values, total, colorMap, centerLabel) {
         var pct = _formatPct(s.fraction);
         return '<circle class="donut-segment" data-label="' + escapeHtml(s.label) + '" data-value="' + s.value + '" data-pct="' + pct + '" data-color="' + s.color + '" cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + s.color + '" stroke-width="' + strokeWidth + '" stroke-dasharray="' + s.length + ' ' + (circumference - s.length) + '" stroke-dashoffset="' + s.offset + '" transform="rotate(-90 ' + cx + ' ' + cy + ')" style="transition: stroke-dasharray 0.6s ease; cursor: pointer"/>';
     }).join('');
-    var legend = segments.map(function(s) {
+    var legend = showLegend ? segments.map(function(s) {
         var pct = _formatPct(s.fraction);
         return '<div class="legend-item"><span class="legend-swatch" style="background:' + s.color + '"></span><div class="legend-text"><div class="legend-name">' + escapeHtml(s.label) + '</div><div class="legend-meta">' + formatTokens(s.value) + ' · ' + pct + '%</div></div></div>';
-    }).join('');
-    return '<div class="donut-wrap"><div class="donut-container"><svg viewBox="0 0 ' + size + ' ' + size + '" style="width:100%;height:100%">' + circles + '</svg><div class="donut-center"><div class="donut-total">' + formatTokens(total) + '</div><div class="donut-label">' + escapeHtml(centerLabel) + '</div></div></div><div class="memory-legend">' + legend + '</div></div>';
+    }).join('') : '';
+    var legendHtml = showLegend ? '<div class="memory-legend">' + legend + '</div>' : '';
+    return '<div class="donut-wrap"><div class="donut-container"><svg viewBox="0 0 ' + size + ' ' + size + '" style="width:100%;height:100%">' + circles + '</svg><div class="donut-center"><div class="donut-total">' + formatTokens(total) + '</div><div class="donut-label">' + escapeHtml(centerLabel) + '</div></div></div>' + legendHtml + '</div>';
 }
 
 // === Model distribution: donut + sortable table (mirror of Helicone-style panel) ===
 function renderModelDistribution(values, total, colorMap, mode) {
     if (!values || values.length === 0 || total === 0) return '<div class="trend-empty">暂无数据</div>';
     mode = mode || 'token';
-    var donutHtml = renderDonut(values, total, colorMap, mode === 'calls' ? '总调用' : '总 Token');
+    var donutHtml = renderDonut(values, total, colorMap, mode === 'calls' ? '总调用' : '总 Token', false);
 
     var rows = values.map(function(v) {
         var pct = _formatPct(v.value / total);
