@@ -91,6 +91,8 @@ python -m venv .venv
 
 然后浏览器打开：http://127.0.0.1:18080
 
+Dashboard 默认端口为 `18080`。一键安装时可直接回车使用默认值，也可输入其他 `1–65535` 端口；非交互安装自动使用默认值。安装后可在「面板设置 → 开机启动 → Dashboard 服务端口」修改，配置保存在被 Git 忽略的 `dashboard-config.json` 中，执行 `kimi-dashboard 8` 重启后生效。
+
 ### 控制台启动菜单
 
 `kimi-dashboard` 命令弹出数字菜单：
@@ -111,12 +113,12 @@ python -m venv .venv
 
 - 选项 1：后台启动 Dashboard 并自动打开浏览器。
 - 选项 2：在本机 `127.0.0.1:5494` 启动 Kimi Code Web（无密码）。
-- 选项 3：读取 `start-kimi-web.vbs` 中保存的命令，启动外网访问模式。
+- 选项 3：读取设置页持久化的参数，启动外网访问模式。
 - 选项 4：执行 `kimi web kill` 停止所有 Kimi Code Web 进程。
 - 选项 5：执行 `kimi upgrade` 更新 Kimi Code CLI。
 - 选项 6：在 Dashboard 目录执行 `git pull origin master` 更新面板代码，有更新时自动重启生效。
 - 选项 7：删除 wrapper 和 dashboard 目录（需输入 yes 确认，Kimi Code CLI 不受影响）。
-- 选项 8：结束占用 18080 的旧进程并重新启动 Dashboard。
+- 选项 8：结束占用当前或上一个 Dashboard 配置端口的旧进程并重新启动。
 
 也可以直接传入选项数字跳过菜单，例如 `kimi-dashboard 2`。
 

@@ -832,6 +832,7 @@ def api_update_dashboard_port():
     try:
         port = validate_port(body.get("port"), "port")
         cfg = load_dashboard_config()
+        cfg["dashboard"]["previous_port"] = cfg["dashboard"]["port"]
         cfg["dashboard"]["port"] = port
         save_dashboard_config(cfg)
     except ValueError as exc:

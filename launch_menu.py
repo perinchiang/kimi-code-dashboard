@@ -30,7 +30,9 @@ from config import DASHBOARD_PORT, DASHBOARD_URL, load_dashboard_config
 
 DASHBOARD_DIR = Path(__file__).resolve().parent
 
-KIMI_WEB_PORT = load_dashboard_config()["kimi_web"]["port"]
+_dashboard_config = load_dashboard_config()
+KIMI_WEB_PORT = _dashboard_config["kimi_web"]["port"]
+PREVIOUS_DASHBOARD_PORT = _dashboard_config["dashboard"].get("previous_port", DASHBOARD_PORT)
 
 
 def _kimi_bin() -> Path:
@@ -254,10 +256,13 @@ def _pid_listening_on(port: int) -> int | None:
 
 
 def restart_dashboard() -> None:
-    """重启 Dashboard：结束占用配置端口的旧进程并重新启动。"""
-    pid = _pid_listening_on(DASHBOARD_PORT)
-    if pid:
-        print(f"正在停止旧 Dashboard 进程 (pid {pid})...")
+    """重启 Dashboard：结束占用当前或上一个配置端口的旧进程。"""
+    ports = list(dict.fromkeys([PREVIOUS_DASHBOARD_PORT, DASHBOARD_PORT]))
+    for port in ports:
+        pid = _pid_listening_on(port)
+        if not pid:
+            continue
+        print(f"正在停止端口 {port} 上的旧 Dashboard 进程 (pid {pid})...")
         killed = False
         try:
             if sys.platform == "win32":
@@ -281,7 +286,7 @@ def restart_dashboard() -> None:
             return
         # 等待端口释放，最多 5 秒
         for _ in range(10):
-            if not _tcp_open("127.0.0.1", DASHBOARD_PORT):
+            if not _tcp_open("127.0.0.1", port):
                 break
             time.sleep(0.5)
     start_dashboard()

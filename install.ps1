@@ -95,7 +95,10 @@ if ($null -ne $PORT) {
     Ok "保留已有 Dashboard 端口: $PORT"
 } else {
     $PORT = $DEFAULT_PORT
-    $interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+    $interactive = [Environment]::UserInteractive
+    if ([Console]::IsInputRedirected) {
+        $interactive = $false
+    }
     if ($interactive) {
         while ($true) {
             $inputPort = Read-Host "Dashboard 端口 [$DEFAULT_PORT]"
@@ -103,9 +106,12 @@ if ($null -ne $PORT) {
                 $inputPort = "$DEFAULT_PORT"
             }
             $parsedPort = 0
-            if ([int]::TryParse($inputPort, [ref]$parsedPort) -and $parsedPort -ge 1 -and $parsedPort -le 65535) {
-                $PORT = $parsedPort
-                break
+            $parsed = [int]::TryParse($inputPort, [ref]$parsedPort)
+            if ($parsed) {
+                if ($parsedPort -ge 1 -and $parsedPort -le 65535) {
+                    $PORT = $parsedPort
+                    break
+                }
             }
             Warn "端口必须是 1..65535 的整数"
         }

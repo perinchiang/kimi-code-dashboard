@@ -78,6 +78,10 @@ def _normalize_dashboard_config(data: dict | None) -> dict:
         "dashboard": {
             "host": dashboard_host,
             "port": validate_port(dashboard.get("port", 18080), "dashboard.port"),
+            "previous_port": validate_port(
+                dashboard.get("previous_port", dashboard.get("port", 18080)),
+                "dashboard.previous_port",
+            ),
         },
         "kimi_web": {
             "bind": bind,
