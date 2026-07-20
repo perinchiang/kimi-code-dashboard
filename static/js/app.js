@@ -1681,33 +1681,30 @@ function renderToolModelDetail() {
 
 function renderModelUsageDetail() {
     var data = statusData.modelUsage;
-    var range = statusData.modelRange || 'all';
-    var windowKey = (range === '24h' || range === '7d' || range === '30d') ? range : 'all';
-    var win = (data && data.windows && data.windows[windowKey]) || data;
     var totalTokensEl = document.getElementById('modelTotalTokens');
     var totalCallsEl = document.getElementById('modelTotalCalls');
     var topModelEl = document.getElementById('modelTopModel');
 
-    if (!data || !win) {
+    if (!data) {
         if (totalTokensEl) totalTokensEl.textContent = '-';
         if (totalCallsEl) totalCallsEl.textContent = '-';
         if (topModelEl) topModelEl.textContent = '-';
         return;
     }
 
-    if (totalTokensEl) totalTokensEl.innerHTML = formatTokens(win.totalTokens || 0);
-    if (totalCallsEl) totalCallsEl.textContent = (win.totalCalls || 0).toLocaleString();
-    if (topModelEl) topModelEl.textContent = (win.models && win.models[0]) ? win.models[0].model.replace('kimi-code/', '') : '-';
+    // Summary cards always reflect the global totals (independent of range filter)
+    if (totalTokensEl) totalTokensEl.innerHTML = formatTokens(data.totalTokens || 0);
+    if (totalCallsEl) totalCallsEl.textContent = (data.totalCalls || 0).toLocaleString();
+    if (topModelEl) topModelEl.textContent = (data.models && data.models[0]) ? data.models[0].model.replace('kimi-code/', '') : '-';
 
     var modelColorMap = getModelColorMap(data.models);
 
-    // Trend stacked bar chart (last 7 days, centered if sparse)
+    // Trend stacked bar chart (last 7 days, centered if sparse) — unaffected by range filter
     var trendChartEl = document.getElementById('modelTrendChart');
     var rawTrendData = (data.trends && (data.trends.daily || data.trends.last7days)) || [];
     var trendData = _prepareModelTrendData(rawTrendData);
     if (trendChartEl) {
         var chartHtml = renderStackedBarChart(trendData, modelColorMap);
-        // Add color legend for the bar chart
         var legendHtml = _renderModelColorLegend(data.models, modelColorMap);
         trendChartEl.innerHTML = chartHtml + legendHtml;
         if (chartHtml.indexOf('stackedBarSvg') >= 0) {
