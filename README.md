@@ -100,7 +100,7 @@ python -m venv .venv
 1. 启动 Dashboard
 2. 启动本地 Kimi Code Web
 3. 启动外网访问 Kimi Code Web
-4. 停止 Kimi Code Web（kimi server kill）
+4. 停止 Kimi Code Web（kimi web kill）
 5. 更新 Kimi Code
 6. 更新 Dashboard
 7. 完全卸载 Dashboard
@@ -111,7 +111,7 @@ python -m venv .venv
 - 选项 1：后台启动 Dashboard 并自动打开浏览器。
 - 选项 2：在本机 `127.0.0.1:5494` 启动 Kimi Code Web（无密码）。
 - 选项 3：读取 `start-kimi-web.vbs` 中保存的命令，启动外网访问模式。
-- 选项 4：执行 `kimi server kill` 停止所有 Kimi Code Web 进程。
+- 选项 4：执行 `kimi web kill` 停止所有 Kimi Code Web 进程。
 - 选项 5：执行 `kimi upgrade` 更新 Kimi Code CLI。
 - 选项 6：在 Dashboard 目录执行 `git pull origin master` 更新面板代码。
 - 选项 7：删除 wrapper 和 dashboard 目录（需输入 yes 确认，Kimi Code CLI 不受影响）。

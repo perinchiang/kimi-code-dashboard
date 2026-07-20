@@ -6,7 +6,7 @@
 1. 启动 Dashboard
 2. 启动本地 Kimi Code Web
 3. 启动外网访问 Kimi Code Web
-4. 停止 Kimi Code Web（kimi server kill）
+4. 停止 Kimi Code Web（kimi web kill）
 5. 更新 Kimi Code
 6. 更新 Dashboard
 7. 完全卸载 Dashboard
@@ -93,6 +93,21 @@ def _start_detached(args: list[str], cwd: str | None = None) -> subprocess.Popen
     return subprocess.Popen(args, **kwargs)
 
 
+def _migrate_kimi_cmd(cmd: list[str]) -> list[str]:
+    """将旧版 kimi server run 命令迁移为 kimi web（kimi-code >= 0.28）。"""
+    if len(cmd) >= 3 and cmd[1] == "server" and cmd[2] == "run":
+        cmd = [cmd[0], "web"] + cmd[3:]
+    elif len(cmd) >= 2 and cmd[1] == "server":
+        cmd = [cmd[0], "web"] + cmd[2:]
+    cmd = [arg for arg in cmd if arg != "--foreground"]
+    if "--host" in cmd and "--allow-remote-terminals" not in cmd:
+        # 新版非回环绑定默认禁用 PTY 路由，需显式开启
+        cmd.append("--allow-remote-terminals")
+    if "--no-open" not in cmd:
+        cmd.append("--no-open")
+    return cmd
+
+
 def start_dashboard() -> None:
     """启动 Dashboard 并打开浏览器。"""
     if _tcp_open("127.0.0.1", 8080):
@@ -126,7 +141,7 @@ def start_kimi_web_local() -> None:
             return
         if mode == "external":
             print(f"Kimi Code Web 当前在外网模式运行：http://127.0.0.1:{KIMI_WEB_PORT}")
-            print("如需切换到本地模式，请先执行 `kimi server kill` 停止现有服务。")
+            print("如需切换到本地模式，请先执行 `kimi web kill` 停止现有服务。")
             return
         print(f"Kimi Code Web 已经在 http://127.0.0.1:{KIMI_WEB_PORT} 运行。")
         return
@@ -136,7 +151,7 @@ def start_kimi_web_local() -> None:
         print(f"未找到 Kimi CLI: {kimi_bin}")
         return
 
-    cmd = [str(kimi_bin), "server", "run", "--port", str(KIMI_WEB_PORT), "--dangerous-bypass-auth", "--foreground"]
+    cmd = [str(kimi_bin), "web", "--port", str(KIMI_WEB_PORT), "--dangerous-bypass-auth", "--no-open"]
     print("启动本地 Kimi Code Web...")
     print(" ".join(cmd))
     _start_detached(cmd)
@@ -151,7 +166,7 @@ def start_kimi_web_external() -> None:
             return
         if mode == "local":
             print(f"Kimi Code Web 当前在本地模式运行：http://127.0.0.1:{KIMI_WEB_PORT}")
-            print("如需切换到外网模式，请先执行 `kimi server kill` 停止现有服务。")
+            print("如需切换到外网模式，请先执行 `kimi web kill` 停止现有服务。")
             return
         print(f"Kimi Code Web 已经在 http://127.0.0.1:{KIMI_WEB_PORT} 运行。")
         return
@@ -185,20 +200,21 @@ def start_kimi_web_external() -> None:
         except ValueError as exc:
             print(f"解析启动命令失败: {exc}")
             return
+        cmd = _migrate_kimi_cmd(cmd)
     else:
         # macOS / Linux：VBS 不存在，使用默认外网参数
         print("未找到 start-kimi-web.vbs，使用默认外网启动参数。")
         print("如需自定义 allowed-host，请在 Dashboard「设置」页保存配置（Windows）或手动编辑本脚本。")
         cmd = [
             str(kimi_bin),
-            "server",
-            "run",
+            "web",
             "--host",
             "0.0.0.0",
             "--port",
             str(KIMI_WEB_PORT),
             "--dangerous-bypass-auth",
-            "--foreground",
+            "--allow-remote-terminals",
+            "--no-open",
         ]
 
     print("启动外网访问 Kimi Code Web...")
@@ -207,7 +223,7 @@ def start_kimi_web_external() -> None:
 
 
 def stop_kimi_web() -> None:
-    """执行 kimi server kill 停止所有 Kimi Code Web 进程。"""
+    """执行 kimi web kill 停止所有 Kimi Code Web 进程。"""
     kimi_bin = _kimi_bin()
     if not kimi_bin.exists():
         print(f"未找到 Kimi CLI: {kimi_bin}")
@@ -215,7 +231,7 @@ def stop_kimi_web() -> None:
 
     print("正在停止 Kimi Code Web...")
     result = subprocess.run(
-        [str(kimi_bin), "server", "kill"],
+        [str(kimi_bin), "web", "kill"],
         capture_output=True,
         text=True,
         errors="replace",
@@ -319,7 +335,7 @@ def show_menu() -> str:
     print("1. 启动 Dashboard")
     print("2. 启动本地 Kimi Code Web")
     print("3. 启动外网访问 Kimi Code Web")
-    print("4. 停止 Kimi Code Web（kimi server kill）")
+    print("4. 停止 Kimi Code Web（kimi web kill）")
     print("5. 更新 Kimi Code")
     print("6. 更新 Dashboard")
     print("7. 完全卸载 Dashboard")

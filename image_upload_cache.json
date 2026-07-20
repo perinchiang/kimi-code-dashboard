@@ -64,5 +64,23 @@
     "name": "561f28c937f19e76",
     "key": "561f28c937f19e76",
     "sha256": "561f28c937f19e7644564fa60818547b8fac6a4f886dfaa24270ee49d88bba41"
+  },
+  "f_01KX32F45F7AE5287EAC": {
+    "url": "image.pathos.dpdns.org/f_01KX32F45F7AE5287EAC",
+    "uploaded_at": "2026-07-16T02:41:10.428396",
+    "name": "cute_cat.png",
+    "key": "f_01KX32F45F7AE5287EAC"
+  },
+  "f_22d59e666a6245dab98b13c731": {
+    "url": "image.pathos.dpdns.org/f_22d59e666a6245dab98b13c731",
+    "uploaded_at": "2026-07-16T03:19:18.604605",
+    "name": "visualization-test.html",
+    "key": "f_22d59e666a6245dab98b13c731"
+  },
+  "f_621dc4c40bf14887a80e4f65b3": {
+    "url": "image.pathos.dpdns.org/f_621dc4c40bf14887a80e4f65b3",
+    "uploaded_at": "2026-07-16T03:29:08.930295",
+    "name": "可视化测试报告",
+    "key": "f_621dc4c40bf14887a80e4f65b3"
   }
 }

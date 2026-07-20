@@ -172,13 +172,13 @@ def _kill_kimi_server():
     """Kill 当前运行的 kimi server 进程并清理 lock。"""
     try:
         subprocess.run(
-            [str(KIMI_BIN), "server", "kill"],
+            [str(KIMI_BIN), "web", "kill"],
             capture_output=True, text=True, errors="replace", timeout=10,
             **no_window_kwargs(),
         )
         time.sleep(1)
     except Exception as e:
-        log.warning("kimi server kill failed: %s", e)
+        log.warning("kimi web kill failed: %s", e)
     # 确保 lock 文件被清理
     lock_path = KIMI_CODE_DIR / "server" / "lock"
     if lock_path.exists():
@@ -199,8 +199,8 @@ def _extract_host(url_str: str) -> str:
 
 
 def _build_cmd(cfg):
-    """根据配置组装 kimi server run 命令。"""
-    cmd = [str(KIMI_BIN), "server", "run", "--port", str(cfg.get("port", 5494))]
+    """根据配置组装 kimi web 启动命令（kimi-code >= 0.28）。"""
+    cmd = [str(KIMI_BIN), "web", "--port", str(cfg.get("port", 5494))]
     bind = cfg.get("bind", "127.0.0.1")
     if bind == "0.0.0.0":
         cmd.extend(["--host", "0.0.0.0"])
@@ -209,6 +209,9 @@ def _build_cmd(cfg):
     # 127.0.0.1 时不传 --host
     if cfg.get("bypass_auth", True):
         cmd.append("--dangerous-bypass-auth")
+    # 非回环绑定时新版默认禁用 PTY 路由，需显式开启，否则 Web 终端不可用
+    if bind and bind != "127.0.0.1":
+        cmd.append("--allow-remote-terminals")
     # 合并 allowed_hosts 和从 public_urls 提取的主机名
     allowed_hosts = list(cfg.get("allowed_hosts_list", []))
     pubs = cfg.get("public_urls") or []
@@ -224,7 +227,8 @@ def _build_cmd(cfg):
             allowed_hosts.append(pub_host)
     for h in allowed_hosts:
         cmd.extend(["--allowed-host", h])
-    cmd.append("--foreground")
+    # 后台启动时不弹浏览器
+    cmd.append("--no-open")
     return cmd
 
 
@@ -265,7 +269,7 @@ def api_kimi_web_status():
 
 @bp.route("/api/launch-kimi-web", methods=["POST"])
 def api_launch_kimi_web():
-    """根据前端 POST 的配置启动 kimi server run。"""
+    """根据前端 POST 的配置启动 kimi web。"""
     cfg = request.get_json(silent=True) or {}
     # 规范化
     port = int(cfg.get("port", 5494))
@@ -428,7 +432,7 @@ def _macos_create_dashboard_plist() -> None:
 def _macos_create_kimi_plist(cfg: dict) -> None:
     plist_path = _macos_plist_path("kimi")
     log_path = str((KIMI_CODE_DIR / "kimi-server.log").resolve())
-    # Reuse command builder but ensure --foreground is present for launchd
+    # Reuse command builder for launchd
     cmd = _build_cmd(cfg)
     args_xml = "\n".join(f"        <string>{_escape_xml(str(arg))}</string>" for arg in cmd)
     plist = f'''<?xml version="1.0" encoding="UTF-8"?>
