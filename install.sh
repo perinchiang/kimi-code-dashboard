@@ -92,7 +92,9 @@ import sys
 
 try:
     with open(sys.argv[1], encoding="utf-8-sig") as f:
-        port = json.load(f).get("port")
+        config = json.load(f)
+    dashboard = config.get("dashboard", {})
+    port = dashboard.get("port")
     if type(port) is int and 1 <= port <= 65535:
         print(port)
 except (OSError, ValueError, AttributeError):
@@ -129,7 +131,7 @@ import json
 import sys
 
 with open(sys.argv[1], "w", encoding="utf-8") as f:
-    json.dump({"port": int(sys.argv[2])}, f, ensure_ascii=False, indent=2)
+    json.dump({"dashboard": {"port": int(sys.argv[2])}}, f, ensure_ascii=False, indent=2)
     f.write("\n")
 PY
     _ok "Dashboard 端口已配置: $PORT"

@@ -141,17 +141,18 @@
 
         <div class="card">
             <h2>现象</h2>
-            <p>通过 SakuraFrp、ngrok 等内网穿透访问 Kimi Web 时，消息里的图片显示裂图或 <code>Image failed to load</code>。但在本机直接访问 <code>http://127.0.0.1:5494</code> 时图片完全正常。</p>
+            <p>通过 SakuraFrp、ngrok 等内网穿透访问 Kimi Web 时，消息里的图片显示裂图或 <code>Image failed to load</code>。</p>
+            <p><strong>注意（kimi-code ≥ 0.25）：CSP 按服务端绑定地址决定是否下发，与你怎么访问无关。</strong>只要 Kimi Web 是用 <code>--host</code>（0.0.0.0）启动的，即使是在本机打开 <code>http://127.0.0.1:5494</code>，图床外链图片同样会裂；只有服务端绑定 127.0.0.1 时才完全不下发 CSP。</p>
             <p>另外，<strong>AI 发送的本地文件路径图片（如 <code>C:/Users/...</code> 或 <code>file://</code>）在外网也是看不到的</strong>，因为路径指向的是 AI 所在电脑的本地磁盘，不是你的电脑。</p>
         </div>
 
         <div class="card">
             <h2>原因</h2>
-            <p>Kimi Code Web 默认在 HTTP 响应头中返回严格的 CSP 策略：</p>
-            <pre><code>Content-Security-Policy: default-src 'self'</code></pre>
-            <p>这表示浏览器<strong>只允许加载和 Kimi Web 同域名的资源</strong>。任何外部图片 URL（如 <code>https://pub-xxx.r2.dev/...</code>、<code>https://image.pathos.dpdns.org/...</code>）都会被浏览器直接拦截。</p>
+            <p>Kimi Code Web 在非回环绑定（<code>--host</code> / 0.0.0.0）时会在 HTTP 响应头中下发严格的 CSP 策略（0.28 实测）：</p>
+            <pre><code>Content-Security-Policy: default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'self'</code></pre>
+            <p>其中 <code>img-src 'self' data: blob:</code> 表示浏览器<strong>只允许加载同域名、Base64 内嵌和 blob 图片</strong>。任何外部图床 URL（如 <code>https://pub-xxx.r2.dev/...</code>、<code>https://image.pathos.dpdns.org/...</code>）都会被浏览器直接拦截；Base64 内嵌图（<code>data:</code>）不受影响。</p>
             <p>在浏览器 DevTools Console 中可以看到类似报错：</p>
-            <pre><code>Loading the image 'https://...' violates the following Content Security Policy directive: "default-src 'self'".</code></pre>
+            <pre><code>Loading the image 'https://...' violates the following Content Security Policy directive: "img-src 'self' data: blob:".</code></pre>
         </div>
 
         <div class="card">
@@ -208,7 +209,7 @@
                     <tr>
                         <td>本机 127.0.0.1</td>
                         <td><span class="tag tag-success">无需处理</span></td>
-                        <td>同源访问，不会触发限制</td>
+                        <td>仅当服务端绑定 127.0.0.1 时无 CSP；若服务端绑定了 0.0.0.0，本机访问同样被拦，需走方案 A/C</td>
                     </tr>
                     <tr>
                         <td>SakuraFrp / ngrok</td>
@@ -260,6 +261,9 @@
 
             <h3>3. 启动 Caddy</h3>
             <pre><code>caddy run --config /path/to/Caddyfile</code></pre>
+            <div class="note">
+                <strong>Windows 开机自启建议：</strong>不要用 WinGet Links 里的 shim（<code>...\WinGet\Links\caddy.exe</code>）配合 <code>caddy start</code> 做自启，登录时序下不稳定。推荐在「启动」文件夹放一个 VBS，直接调用真实路径的 <code>caddy.exe run</code>（真实路径形如 <code>%LOCALAPPDATA%\Microsoft\WinGet\Packages\CaddyServer.Caddy_...\caddy.exe</code>），隐藏窗口前台运行最可靠。
+            </div>
 
             <h3>4. 修改 SakuraFrp 隧道</h3>
             <p>把隧道的<strong>本地端口</strong>从 <code>5494</code> 改成 <code>8088</code>，其他保持不变。</p>

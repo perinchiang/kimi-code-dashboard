@@ -29,7 +29,6 @@ from pathlib import Path
 from config import DASHBOARD_PORT, DASHBOARD_URL, load_dashboard_config
 
 DASHBOARD_DIR = Path(__file__).resolve().parent
-VBS_PATH = DASHBOARD_DIR / "start-kimi-web.vbs"
 
 KIMI_WEB_PORT = load_dashboard_config()["kimi_web"]["port"]
 
@@ -98,21 +97,6 @@ def _start_detached(args: list[str], cwd: str | None = None) -> subprocess.Popen
     return subprocess.Popen(args, **kwargs)
 
 
-def _migrate_kimi_cmd(cmd: list[str]) -> list[str]:
-    """将旧版 kimi server run 命令迁移为 kimi web（kimi-code >= 0.28）。"""
-    if len(cmd) >= 3 and cmd[1] == "server" and cmd[2] == "run":
-        cmd = [cmd[0], "web"] + cmd[3:]
-    elif len(cmd) >= 2 and cmd[1] == "server":
-        cmd = [cmd[0], "web"] + cmd[2:]
-    cmd = [arg for arg in cmd if arg != "--foreground"]
-    if "--host" in cmd and "--allow-remote-terminals" not in cmd:
-        # 新版非回环绑定默认禁用 PTY 路由，需显式开启
-        cmd.append("--allow-remote-terminals")
-    if "--no-open" not in cmd:
-        cmd.append("--no-open")
-    return cmd
-
-
 def start_dashboard() -> None:
     """启动 Dashboard 并打开浏览器。"""
     if _tcp_open("127.0.0.1", DASHBOARD_PORT):
@@ -163,17 +147,19 @@ def start_kimi_web_local() -> None:
 
 
 def start_kimi_web_external() -> None:
-    """读取 start-kimi-web.vbs 中的命令并启动外网访问。"""
-    if _tcp_open("127.0.0.1", KIMI_WEB_PORT):
+    """按持久化配置启动外网访问的 Kimi Code Web。"""
+    cfg = load_dashboard_config()["kimi_web"]
+    port = cfg["port"]
+    if _tcp_open("127.0.0.1", port):
         mode = _kimi_server_bind_mode()
         if mode == "external":
-            print(f"Kimi Code Web 已经在外网模式运行：http://127.0.0.1:{KIMI_WEB_PORT}")
+            print(f"Kimi Code Web 已经在外网模式运行：http://127.0.0.1:{port}")
             return
         if mode == "local":
-            print(f"Kimi Code Web 当前在本地模式运行：http://127.0.0.1:{KIMI_WEB_PORT}")
+            print(f"Kimi Code Web 当前在本地模式运行：http://127.0.0.1:{port}")
             print("如需切换到外网模式，请先执行 `kimi web kill` 停止现有服务。")
             return
-        print(f"Kimi Code Web 已经在 http://127.0.0.1:{KIMI_WEB_PORT} 运行。")
+        print(f"Kimi Code Web 已经在 http://127.0.0.1:{port} 运行。")
         return
 
     kimi_bin = _kimi_bin()
@@ -181,46 +167,14 @@ def start_kimi_web_external() -> None:
         print(f"未找到 Kimi CLI: {kimi_bin}")
         return
 
-    if VBS_PATH.exists():
-        # Windows：读取 Dashboard 设置页保存的 VBS 命令
-        text = VBS_PATH.read_text(encoding="utf-8")
-        run_line = ""
-        for line in text.splitlines():
-            if "WshShell.Run" in line:
-                run_line = line
-                break
-        if not run_line:
-            print("无法解析 start-kimi-web.vbs 中的启动命令，请检查文件格式。")
-            return
-
-        first = run_line.find('"')
-        last = run_line.rfind('"')
-        if first == -1 or last == -1 or last <= first:
-            print("无法解析 start-kimi-web.vbs 中的启动命令，请检查引号格式。")
-            return
-
-        full_cmd = run_line[first : last + 1]
-        try:
-            cmd = [arg.strip('"') for arg in shlex.split(full_cmd, posix=False)]
-        except ValueError as exc:
-            print(f"解析启动命令失败: {exc}")
-            return
-        cmd = _migrate_kimi_cmd(cmd)
-    else:
-        # macOS / Linux：VBS 不存在，使用默认外网参数
-        print("未找到 start-kimi-web.vbs，使用默认外网启动参数。")
-        print("如需自定义 allowed-host，请在 Dashboard「设置」页保存配置（Windows）或手动编辑本脚本。")
-        cmd = [
-            str(kimi_bin),
-            "web",
-            "--host",
-            "0.0.0.0",
-            "--port",
-            str(KIMI_WEB_PORT),
-            "--dangerous-bypass-auth",
-            "--allow-remote-terminals",
-            "--no-open",
-        ]
+    bind = cfg["bind"] if cfg["bind"] != "127.0.0.1" else "0.0.0.0"
+    cmd = [str(kimi_bin), "web", "--host", bind, "--port", str(port)]
+    if cfg["bypass_auth"]:
+        cmd.append("--dangerous-bypass-auth")
+    cmd.append("--allow-remote-terminals")
+    for host in [item.strip() for item in cfg["allowed_hosts"].split(",") if item.strip()]:
+        cmd.extend(["--allowed-host", host])
+    cmd.append("--no-open")
 
     print("启动外网访问 Kimi Code Web...")
     print(" ".join(cmd))

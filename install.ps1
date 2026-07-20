@@ -80,7 +80,7 @@ $PORT = $null
 if (Test-Path $CONFIG_FILE) {
     try {
         $existingConfig = Get-Content -Raw -Path $CONFIG_FILE | ConvertFrom-Json
-        $existingPort = $existingConfig.port
+        $existingPort = $existingConfig.dashboard.port
         $isInteger = ($existingPort -is [byte]) -or ($existingPort -is [sbyte]) -or `
                      ($existingPort -is [int16]) -or ($existingPort -is [uint16]) -or `
                      ($existingPort -is [int32]) -or ($existingPort -is [uint32]) -or `
@@ -112,7 +112,7 @@ if ($null -ne $PORT) {
     } else {
         Log "非交互环境,使用默认 Dashboard 端口: $PORT"
     }
-    $configJson = @{ port = $PORT } | ConvertTo-Json
+    $configJson = @{ dashboard = @{ port = $PORT } } | ConvertTo-Json -Depth 2
     [IO.File]::WriteAllText($CONFIG_FILE, "$configJson`n", (New-Object Text.UTF8Encoding $false))
     Ok "Dashboard 端口已配置: $PORT"
 }
