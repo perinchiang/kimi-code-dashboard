@@ -141,7 +141,7 @@
 
         <div class="card">
             <h2>现象</h2>
-            <p>通过 SakuraFrp、ngrok 等内网穿透访问 Kimi Web 时，消息里的图片显示裂图或 <code>Image failed to load</code>。</p>
+            <p>通过 frp、ngrok 等内网穿透访问 Kimi Web 时，消息里的图片显示裂图或 <code>Image failed to load</code>。</p>
             <p><strong>注意（kimi-code ≥ 0.25）：CSP 按服务端绑定地址决定是否下发，与你怎么访问无关。</strong>只要 Kimi Web 是用 <code>--host</code>（0.0.0.0）启动的，即使是在本机打开 <code>http://127.0.0.1:5494</code>，图床外链图片同样会裂；只有服务端绑定 127.0.0.1 时才完全不下发 CSP。</p>
             <p>另外，<strong>AI 发送的本地文件路径图片（如 <code>C:/Users/...</code> 或 <code>file://</code>）在外网也是看不到的</strong>，因为路径指向的是 AI 所在电脑的本地磁盘，不是你的电脑。</p>
         </div>
@@ -212,7 +212,7 @@
                         <td>仅当服务端绑定 127.0.0.1 时无 CSP；若服务端绑定了 0.0.0.0，本机访问同样被拦，需走方案 A/C</td>
                     </tr>
                     <tr>
-                        <td>SakuraFrp / ngrok</td>
+                        <td>frp / ngrok 等端口穿透</td>
                         <td><span class="tag tag-danger">不能</span></td>
                         <td>本机加 Caddy 反向代理（见方案 A）</td>
                     </tr>
@@ -231,8 +231,8 @@
         </div>
 
         <div class="card">
-            <h2>方案 A：SakuraFrp + 本地 Caddy</h2>
-            <p>在 Kimi Web 和 SakuraFrp 之间加一层 Caddy，让 Caddy 修改响应头。</p>
+            <h2>方案 A：frp + 本地 Caddy</h2>
+            <p>在 Kimi Web 和 frp 之间加一层 Caddy，让 Caddy 修改响应头。适用于 SakuraFrp、自建 frps、ngrok 等一切「本地端口穿透」场景。</p>
             <h3>1. 安装 Caddy</h3>
             <p>Windows 推荐用 WinGet：</p>
             <pre><code>winget install Caddy.Caddy</code></pre>
@@ -265,9 +265,9 @@
                 <strong>Windows 开机自启建议：</strong>不要用 WinGet Links 里的 shim（<code>...\WinGet\Links\caddy.exe</code>）配合 <code>caddy start</code> 做自启，登录时序下不稳定。推荐在「启动」文件夹放一个 VBS，直接调用真实路径的 <code>caddy.exe run</code>（真实路径形如 <code>%LOCALAPPDATA%\Microsoft\WinGet\Packages\CaddyServer.Caddy_...\caddy.exe</code>），隐藏窗口前台运行最可靠。
             </div>
 
-            <h3>4. 修改 SakuraFrp 隧道</h3>
-            <p>把隧道的<strong>本地端口</strong>从 <code>5494</code> 改成 <code>8088</code>，其他保持不变。</p>
-            <p>之后通过 frp 域名访问时，流量会先经过 Caddy，CSP 头被移除，外部图片即可正常显示。</p>
+            <h3>4. 修改 frp 隧道</h3>
+            <p>把隧道的<strong>本地端口</strong>从 <code>5494</code> 改成 <code>8088</code>，其他保持不变。SakuraFrp 在面板里改隧道配置，自建 frps 改 frpc 配置文件的 <code>local_port</code>。</p>
+            <p>之后通过 frp 域名访问时，流量会先经过 Caddy，CSP 头被改写，外部图片即可正常显示。</p>
         </div>
 
         <div class="card">
