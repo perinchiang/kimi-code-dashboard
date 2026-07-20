@@ -55,7 +55,7 @@ var SETTINGS_GROUPS = [
                 { v: '0.0.0.0',   t: '外网可访问' }
             ]},
             { key: 'kw_port', label: '端口', desc: '默认 5494', type: 'number', row: true },
-            { key: 'kw_bypass_auth', label: '关闭密码认证', desc: '无需密码直接访问', row: true },
+            { key: 'kw_bypass_auth', label: '关闭密码认证', desc: '开启时无需密码直接访问；关闭时 Kimi Web 会自动生成一次性 Token 并拼到访问 URL 中（无需手动输入密码，打开链接即认证）', row: true },
             { key: 'kw_public_urls', label: '自定义访问 URL', desc: '域名会自动加入信任列表，可添加多个；启动 Kimi Web 时默认打开置顶的链接', type: 'public_urls', row: true, wide: true },
             { key: 'default_permission_mode', label: '默认权限模式', desc: 'Kimi Code 新建会话时的默认审批模式；修改后需重启 Kimi Web', type: 'segment', row: true, options: [
                 { v: 'manual', t: '逐条确认' },
