@@ -250,12 +250,11 @@
 
     # 其他请求转发到 Kimi Web
     handle {
-        reverse_proxy http://127.0.0.1:5494
-
-        # 移除默认的严格 CSP
-        header -Content-Security-Policy
-        # 可选：设置一个宽松的 CSP
-        header Content-Security-Policy "default-src 'self'; img-src * data: blob:; font-src 'self' data:; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: http: https:; style-src 'self' 'unsafe-inline';"
+        reverse_proxy http://127.0.0.1:5494 {
+            # 用 header_down 直接改写上游响应头（注意：header -CSP 是延迟删除，
+            # 会把后面 header 指令新设置的 CSP 一并删掉，不要那样写）
+            header_down Content-Security-Policy "default-src 'self'; img-src * data: blob:; font-src 'self' data:; script-src 'self'; connect-src 'self' ws: wss: http: https:; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'self';"
+        }
     }
 }</code></pre>
 

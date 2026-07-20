@@ -77,7 +77,7 @@ timeout = 5
 
 ### 优先：通过 Dashboard API（推荐）
 
-如果 Kimi Code Dashboard 在运行（默认 `http://127.0.0.1:8080`）：
+如果 Kimi Code Dashboard 在运行（默认 `http://127.0.0.1:18080`）：
 
 1. 先 `GET /api/hooks` 查看现有 hooks，避免重复。
 2. 根据用户需求构造 body：

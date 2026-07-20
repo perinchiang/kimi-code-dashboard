@@ -18,8 +18,6 @@
 import json
 import os
 import platform
-import re
-import shlex
 import shutil
 import socket
 import subprocess
@@ -28,11 +26,12 @@ import time
 import webbrowser
 from pathlib import Path
 
+from config import DASHBOARD_PORT, DASHBOARD_URL, load_dashboard_config
+
 DASHBOARD_DIR = Path(__file__).resolve().parent
 VBS_PATH = DASHBOARD_DIR / "start-kimi-web.vbs"
 
-DASHBOARD_URL = "http://127.0.0.1:8080"
-KIMI_WEB_PORT = 5494
+KIMI_WEB_PORT = load_dashboard_config()["kimi_web"]["port"]
 
 
 def _kimi_bin() -> Path:
@@ -116,8 +115,8 @@ def _migrate_kimi_cmd(cmd: list[str]) -> list[str]:
 
 def start_dashboard() -> None:
     """启动 Dashboard 并打开浏览器。"""
-    if _tcp_open("127.0.0.1", 8080):
-        print("Dashboard 已经在 http://127.0.0.1:8080 运行，直接打开浏览器...")
+    if _tcp_open("127.0.0.1", DASHBOARD_PORT):
+        print(f"Dashboard 已经在 {DASHBOARD_URL} 运行，直接打开浏览器...")
         webbrowser.open(DASHBOARD_URL)
         return
 
@@ -301,8 +300,8 @@ def _pid_listening_on(port: int) -> int | None:
 
 
 def restart_dashboard() -> None:
-    """重启 Dashboard：结束占用 8080 的旧进程并重新启动。"""
-    pid = _pid_listening_on(8080)
+    """重启 Dashboard：结束占用配置端口的旧进程并重新启动。"""
+    pid = _pid_listening_on(DASHBOARD_PORT)
     if pid:
         print(f"正在停止旧 Dashboard 进程 (pid {pid})...")
         killed = False
@@ -328,7 +327,7 @@ def restart_dashboard() -> None:
             return
         # 等待端口释放，最多 5 秒
         for _ in range(10):
-            if not _tcp_open("127.0.0.1", 8080):
+            if not _tcp_open("127.0.0.1", DASHBOARD_PORT):
                 break
             time.sleep(0.5)
     start_dashboard()

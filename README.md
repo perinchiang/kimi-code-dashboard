@@ -89,7 +89,7 @@ python -m venv .venv
 .venv/bin/python app.py
 ```
 
-然后浏览器打开：http://127.0.0.1:8080
+然后浏览器打开：http://127.0.0.1:18080
 
 ### 控制台启动菜单
 
@@ -116,7 +116,7 @@ python -m venv .venv
 - 选项 5：执行 `kimi upgrade` 更新 Kimi Code CLI。
 - 选项 6：在 Dashboard 目录执行 `git pull origin master` 更新面板代码，有更新时自动重启生效。
 - 选项 7：删除 wrapper 和 dashboard 目录（需输入 yes 确认，Kimi Code CLI 不受影响）。
-- 选项 8：结束占用 8080 的旧进程并重新启动 Dashboard。
+- 选项 8：结束占用 18080 的旧进程并重新启动 Dashboard。
 
 也可以直接传入选项数字跳过菜单，例如 `kimi-dashboard 2`。
 

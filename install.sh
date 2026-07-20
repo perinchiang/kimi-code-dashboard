@@ -18,6 +18,8 @@ INSTALL_DIR="$HOME/.kimi-code"
 DASHBOARD_DIR="$INSTALL_DIR/dashboard"
 BIN_DIR="$INSTALL_DIR/bin"
 REPO_URL="https://github.com/perinchiang/kimi-code-dashboard.git"
+CONFIG_FILE="$DASHBOARD_DIR/dashboard-config.json"
+DEFAULT_PORT=18080
 
 # Colors
 if [ -t 1 ]; then
@@ -81,7 +83,59 @@ else
     fi
 fi
 
-# --- 3. venv + dependencies ---
+# --- 3. Configure Dashboard port ---
+PORT=""
+if [ -f "$CONFIG_FILE" ]; then
+    PORT=$("$PYTHON" - "$CONFIG_FILE" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8-sig") as f:
+        port = json.load(f).get("port")
+    if type(port) is int and 1 <= port <= 65535:
+        print(port)
+except (OSError, ValueError, AttributeError):
+    pass
+PY
+)
+fi
+
+if [ -n "$PORT" ]; then
+    _ok "保留已有 Dashboard 端口: $PORT"
+else
+    PORT="$DEFAULT_PORT"
+    if [ -c /dev/tty ] && { : < /dev/tty; } 2>/dev/null; then
+        while true; do
+            printf "Dashboard 端口 [%s]: " "$DEFAULT_PORT" > /dev/tty
+            IFS= read -r INPUT_PORT < /dev/tty || INPUT_PORT=""
+            [ -z "$INPUT_PORT" ] && INPUT_PORT="$DEFAULT_PORT"
+            case "$INPUT_PORT" in
+                *[!0-9]*|'') _warn "端口必须是 1..65535 的整数" ;;
+                *)
+                    if [ "$INPUT_PORT" -ge 1 ] && [ "$INPUT_PORT" -le 65535 ]; then
+                        PORT="$INPUT_PORT"
+                        break
+                    fi
+                    _warn "端口必须是 1..65535 的整数"
+                    ;;
+            esac
+        done
+    else
+        _log "非交互环境,使用默认 Dashboard 端口: $PORT"
+    fi
+    "$PYTHON" - "$CONFIG_FILE" "$PORT" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    json.dump({"port": int(sys.argv[2])}, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+PY
+    _ok "Dashboard 端口已配置: $PORT"
+fi
+
+# --- 4. venv + dependencies ---
 _log "创建虚拟环境..."
 if [ ! -d "$DASHBOARD_DIR/.venv" ]; then
     "$PYTHON" -m venv "$DASHBOARD_DIR/.venv"

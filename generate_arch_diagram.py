@@ -63,7 +63,7 @@ ax.text(11, 14.9, "Flask 后端 + 原生 JS 前端 + 本地数据源", ha="cente
         fontsize=12, color="#555555")
 
 # Layer 1: User / Browser
-box(ax, 9.5, 13.6, 3, 0.7, "用户浏览器\nhttp://127.0.0.1:8080", colors["user"], colors["user_edge"], fontsize=10, bold=True)
+box(ax, 9.5, 13.6, 3, 0.7, "用户浏览器\nhttp://127.0.0.1:18080", colors["user"], colors["user_edge"], fontsize=10, bold=True)
 
 # Layer 2: Flask Entry
 box(ax, 8.8, 12.0, 4.4, 0.9, "Flask 入口: app.py\n注册 9 个 Blueprint", colors["app"], colors["app_edge"], fontsize=11, bold=True)

@@ -16,6 +16,8 @@ $INSTALL_DIR = "$env:USERPROFILE\.kimi-code"
 $DASHBOARD_DIR = "$INSTALL_DIR\dashboard"
 $BIN_DIR = "$INSTALL_DIR\bin"
 $REPO_URL = "https://github.com/perinchiang/kimi-code-dashboard.git"
+$CONFIG_FILE = "$DASHBOARD_DIR\dashboard-config.json"
+$DEFAULT_PORT = 18080
 
 function Log($msg)  { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Ok($msg)   { Write-Host "==> $msg" -ForegroundColor Green }
@@ -73,7 +75,49 @@ if (Test-Path "$DASHBOARD_DIR\.git") {
     git clone --depth 1 $REPO_URL $DASHBOARD_DIR
 }
 
-# --- 3. venv + dependencies ---
+# --- 3. Configure Dashboard port ---
+$PORT = $null
+if (Test-Path $CONFIG_FILE) {
+    try {
+        $existingConfig = Get-Content -Raw -Path $CONFIG_FILE | ConvertFrom-Json
+        $existingPort = $existingConfig.port
+        $isInteger = ($existingPort -is [byte]) -or ($existingPort -is [sbyte]) -or `
+                     ($existingPort -is [int16]) -or ($existingPort -is [uint16]) -or `
+                     ($existingPort -is [int32]) -or ($existingPort -is [uint32]) -or `
+                     ($existingPort -is [int64]) -or ($existingPort -is [uint64])
+        if ($isInteger -and $existingPort -ge 1 -and $existingPort -le 65535) {
+            $PORT = [int]$existingPort
+        }
+    } catch {}
+}
+
+if ($null -ne $PORT) {
+    Ok "保留已有 Dashboard 端口: $PORT"
+} else {
+    $PORT = $DEFAULT_PORT
+    $interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+    if ($interactive) {
+        while ($true) {
+            $inputPort = Read-Host "Dashboard 端口 [$DEFAULT_PORT]"
+            if ([string]::IsNullOrWhiteSpace($inputPort)) {
+                $inputPort = "$DEFAULT_PORT"
+            }
+            $parsedPort = 0
+            if ([int]::TryParse($inputPort, [ref]$parsedPort) -and $parsedPort -ge 1 -and $parsedPort -le 65535) {
+                $PORT = $parsedPort
+                break
+            }
+            Warn "端口必须是 1..65535 的整数"
+        }
+    } else {
+        Log "非交互环境,使用默认 Dashboard 端口: $PORT"
+    }
+    $configJson = @{ port = $PORT } | ConvertTo-Json
+    [IO.File]::WriteAllText($CONFIG_FILE, "$configJson`n", (New-Object Text.UTF8Encoding $false))
+    Ok "Dashboard 端口已配置: $PORT"
+}
+
+# --- 4. venv + dependencies ---
 Log "创建虚拟环境..."
 if (-not (Test-Path "$DASHBOARD_DIR\.venv")) {
     & $PYTHON -m venv "$DASHBOARD_DIR\.venv"

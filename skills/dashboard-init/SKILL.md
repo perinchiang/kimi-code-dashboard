@@ -53,7 +53,7 @@ AI 在本地 Kimi Code 里生成的截图/产物默认存在 `~/.kimi-code/files
 
 ### 3.2 前提
 
-1. Dashboard 已启动（默认 http://127.0.0.1:8080）。
+1. Dashboard 已启动（默认 http://127.0.0.1:18080）。
 2. Dashboard 设置页已配置好 `[image_bed]` 图床凭证并测试连接通过。
 3. 建议开启 Dashboard 开机自启，否则 AI 调用时会提示"无法连接 Dashboard"。
 
@@ -206,7 +206,7 @@ body = {
     "taskName": "BarkNotify-Weekly",
 }
 
-r = requests.post("http://127.0.0.1:8080/api/tasks/create", json=body)
+r = requests.post("http://127.0.0.1:18080/api/tasks/create", json=body)
 print(r.json())
 ```
 
@@ -269,7 +269,7 @@ body = {
     "enabled": True,
 }
 
-r = requests.post("http://127.0.0.1:8080/api/hooks", json=body)
+r = requests.post("http://127.0.0.1:18080/api/hooks", json=body)
 print(r.json())
 ```
 
@@ -318,20 +318,20 @@ API 端点：
 ==============================
 ```
 
-- **选项 1**：后台启动 Dashboard，默认打开 `http://127.0.0.1:8080`。
+- **选项 1**：后台启动 Dashboard，默认打开 `http://127.0.0.1:18080`。
 - **选项 6**：在 Dashboard 目录执行 `git pull origin master`，有更新时自动重启 Dashboard 生效。
-- **选项 8**：结束占用 8080 的旧进程并重新启动 Dashboard。
+- **选项 8**：结束占用 18080 的旧进程并重新启动 Dashboard。
 
 ### 6.2 更新后何时重启
 
 - 修改了 `static/js/app.js`、`static/css/style.css`、`templates/index.html` 等前端文件：刷新浏览器即可（建议 `Ctrl + F5` 硬刷新，模板里的 `?v=N` 会强制客户端加载新版本）。
-- 修改了 `routes/`、`config.py`、`services/` 等后端文件：必须重启 Dashboard 进程才能生效。选项 1 会先检测 8080 端口是否被占用，如果旧进程还在，只会打开浏览器而不会重启；此时用选项 8（`kimi dashboard 8`）重启。
+- 修改了 `routes/`、`config.py`、`services/` 等后端文件：必须重启 Dashboard 进程才能生效。选项 1 会先检测 18080 端口是否被占用，如果旧进程还在，只会打开浏览器而不会重启；此时用选项 8（`kimi dashboard 8`）重启。
 
 ### 6.3 快速重启方法
 
 如果用户发现更新没生效，可以：
 
-1. 执行 `kimi dashboard 8` 一键重启；或手动结束占用 8080 端口的进程（Windows 可用 `netstat -ano | findstr :8080` 找 PID，然后 `taskkill /F /PID <PID>`）。
+1. 执行 `kimi dashboard 8` 一键重启；或手动结束占用 18080 端口的进程（Windows 可用 `netstat -ano | findstr :18080` 找 PID，然后 `taskkill /F /PID <PID>`）。
 2. 再执行 `kimi dashboard 1` 重新启动。
 
 ## 7. 可选 MCP 搭档推荐

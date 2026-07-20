@@ -15,6 +15,7 @@ dashboard.log
 
 # User-specific
 tasks.json
+dashboard-config.json
 *.bak
 .trae/
 

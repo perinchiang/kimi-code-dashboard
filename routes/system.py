@@ -13,7 +13,16 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify, render_template, request
 
-from config import APP_DIR, DASHBOARD_VERSION, KIMI_BIN, KIMI_CODE_DIR, log
+from config import (
+    APP_DIR,
+    DASHBOARD_VERSION,
+    KIMI_BIN,
+    KIMI_CODE_DIR,
+    load_dashboard_config,
+    log,
+    save_dashboard_config,
+    validate_port,
+)
 from services.helpers import atomic_write_text, config_lock, lock_for, no_window_kwargs, tcp_open
 
 bp = Blueprint("system", __name__)
@@ -220,6 +229,35 @@ def _build_cmd(cfg):
     return cmd
 
 
+def _normalize_kimi_web_config(cfg: dict | None, persist: bool = False) -> dict:
+    """Merge request values with persisted Kimi Web settings and validate the port."""
+    cfg = cfg if isinstance(cfg, dict) else {}
+    saved = load_dashboard_config()
+    current = saved["kimi_web"]
+    allowed_hosts_raw = cfg.get("allowed_hosts", current["allowed_hosts"]) or ""
+    if isinstance(allowed_hosts_raw, list):
+        allowed_hosts_raw = ",".join(str(item).strip() for item in allowed_hosts_raw if str(item).strip())
+    allowed_hosts_list = [h.strip() for h in str(allowed_hosts_raw).split(",") if h.strip()]
+    public_urls = cfg.get("public_urls", current["public_urls"]) or []
+    if isinstance(public_urls, str):
+        public_urls = [public_urls]
+    legacy_public_url = (cfg.get("public_url") or "").strip().strip("`'").strip()
+    if legacy_public_url:
+        public_urls = [legacy_public_url] + [p for p in public_urls if p != legacy_public_url]
+
+    persisted = {
+        "bind": str(cfg.get("bind", current["bind"]) or "127.0.0.1").strip(),
+        "port": validate_port(cfg.get("port", current["port"]), "port"),
+        "bypass_auth": bool(cfg.get("bypass_auth", current["bypass_auth"])),
+        "allowed_hosts": str(allowed_hosts_raw),
+        "public_urls": [str(url).strip() for url in public_urls if str(url).strip()],
+    }
+    if persist:
+        saved["kimi_web"] = persisted
+        save_dashboard_config(saved)
+    return {**persisted, "allowed_hosts_list": allowed_hosts_list}
+
+
 def _capture_token(proc, timeout=4):
     """尝试从进程 stdout 捕获 bearer token。"""
     if not proc.stdout:
@@ -248,38 +286,29 @@ def _capture_token(proc, timeout=4):
 
 @bp.route("/api/kimi-web-status", methods=["POST"])
 def api_kimi_web_status():
-    """检查 Kimi Web 是否在指定端口运行。"""
-    cfg = request.get_json(silent=True) or {}
-    port = int(cfg.get("port", 5494))
+    """检查 Kimi Web 是否在请求或持久化配置的端口运行。"""
+    try:
+        cfg = _normalize_kimi_web_config(request.get_json(silent=True))
+    except ValueError as exc:
+        return jsonify({"running": False, "error": str(exc)}), 400
+    port = cfg["port"]
     running = tcp_open("127.0.0.1", port)
     return jsonify({"running": running, "port": port, "url": _build_url(cfg)})
 
 
 @bp.route("/api/launch-kimi-web", methods=["POST"])
 def api_launch_kimi_web():
-    """根据前端 POST 的配置启动 kimi web。"""
-    cfg = request.get_json(silent=True) or {}
-    # 规范化
-    port = int(cfg.get("port", 5494))
-    bind = cfg.get("bind", "127.0.0.1")
-    bypass_auth = cfg.get("bypass_auth", True)
-    allowed_hosts_raw = cfg.get("allowed_hosts", "") or ""
-    allowed_hosts_list = [h.strip() for h in allowed_hosts_raw.split(",") if h.strip()]
-    public_urls = cfg.get("public_urls") or []
-    if isinstance(public_urls, str):
-        public_urls = [public_urls]
-    # 兼容旧版单个 public_url
-    legacy_public_url = (cfg.get("public_url") or "").strip().strip("`'").strip()
-    if legacy_public_url:
-        public_urls = [legacy_public_url] + [p for p in public_urls if p != legacy_public_url]
-
-    norm_cfg = {
-        "bind": bind,
-        "port": port,
-        "bypass_auth": bypass_auth,
-        "allowed_hosts_list": allowed_hosts_list,
-        "public_urls": public_urls,
-    }
+    """持久化前端配置并据此启动 kimi web。"""
+    try:
+        norm_cfg = _normalize_kimi_web_config(request.get_json(silent=True), persist=True)
+    except ValueError as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 400
+    except OSError as exc:
+        log.error("Failed to save dashboard config: %s", exc)
+        return jsonify({"status": "error", "error": "保存 Dashboard 配置失败"}), 500
+    port = norm_cfg["port"]
+    bind = norm_cfg["bind"]
+    bypass_auth = norm_cfg["bypass_auth"]
     url = _build_url(norm_cfg)
     log.info("launch-kimi-web cfg: %s -> url=%s", norm_cfg, url)
 
@@ -740,22 +769,13 @@ def api_startup_toggle():
     enable = bool(body.get("enable"))
     cfg = {}
     if service == "kimi":
-        allowed_hosts_raw = body.get("allowed_hosts", "") or ""
-        allowed_hosts_list = [h.strip() for h in allowed_hosts_raw.split(",") if h.strip()]
-        public_urls = body.get("public_urls") or []
-        if isinstance(public_urls, str):
-            public_urls = [public_urls]
-        # 兼容旧版单个 public_url
-        legacy_public_url = (body.get("public_url") or "").strip()
-        if legacy_public_url:
-            public_urls = [legacy_public_url] + [p for p in public_urls if p != legacy_public_url]
-        cfg = {
-            "port": int(body.get("port", 5494)),
-            "bind": body.get("bind", "0.0.0.0"),
-            "bypass_auth": bool(body.get("bypass_auth", True)),
-            "allowed_hosts_list": allowed_hosts_list,
-            "public_urls": public_urls,
-        }
+        try:
+            cfg = _normalize_kimi_web_config(body, persist=enable)
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+        except OSError as exc:
+            log.error("Failed to save dashboard config: %s", exc)
+            return jsonify({"success": False, "error": "保存 Dashboard 配置失败"}), 500
     result = _set_startup_service(service, enable, cfg)
     return jsonify(result)
 
@@ -797,6 +817,29 @@ def api_startup_elevated_toggle():
 def api_dashboard_version():
     """Return dashboard version."""
     return jsonify({"version": DASHBOARD_VERSION})
+
+
+@bp.route("/api/dashboard-port")
+def api_dashboard_port():
+    """Return the persisted Dashboard listen port."""
+    return jsonify({"port": load_dashboard_config()["dashboard"]["port"]})
+
+
+@bp.route("/api/dashboard-port", methods=["POST"])
+def api_update_dashboard_port():
+    """Validate and persist the Dashboard listen port for the next restart."""
+    body = request.get_json(silent=True) or {}
+    try:
+        port = validate_port(body.get("port"), "port")
+        cfg = load_dashboard_config()
+        cfg["dashboard"]["port"] = port
+        save_dashboard_config(cfg)
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except OSError as exc:
+        log.error("Failed to save dashboard port: %s", exc)
+        return jsonify({"success": False, "error": "保存 Dashboard 配置失败"}), 500
+    return jsonify({"success": True, "port": port})
 
 
 @bp.route("/")

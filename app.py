@@ -12,12 +12,12 @@ A local web dashboard for Kimi Code CLI status:
 - Scheduled task monitoring
 
 Run: python app.py
-Open: http://127.0.0.1:8080
+Open: the configured dashboard URL (default http://127.0.0.1:18080)
 """
 
 from flask import Flask
 
-from config import log
+from config import DASHBOARD_HOST, DASHBOARD_PORT, DASHBOARD_URL, log
 from routes import artifacts, hooks, image_bed, kimi, mcp, memory, model_config, skills, system, tasks
 
 
@@ -43,5 +43,5 @@ def create_app() -> Flask:
 app = create_app()
 
 if __name__ == "__main__":
-    log.info("Starting Kimi Code Dashboard on http://127.0.0.1:8080")
-    app.run(host="127.0.0.1", port=8080, debug=False)
+    log.info("Starting Kimi Code Dashboard on %s", DASHBOARD_URL)
+    app.run(host=DASHBOARD_HOST, port=DASHBOARD_PORT, debug=False)

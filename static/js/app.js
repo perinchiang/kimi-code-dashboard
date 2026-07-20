@@ -39,6 +39,7 @@ var SETTINGS_DEFAULTS = {
     kw_allowed_hosts: '',         // 允许的域名 (逗号分隔)
     kw_public_urls: [],          // 自定义访问URL列表 (留空自动生成; 多个域名都会加入信任列表)
     default_permission_mode: 'manual', // Kimi Code 默认权限模式 (manual/auto/yolo)
+    dashboard_port: 18080,       // Dashboard 服务端口
     enable_pwa_icons: false,     // 是否启用 PWA 图标（添加到手机主屏幕）
     __startup_dashboard_mode: 'off', // Dashboard 开机启动模式 (normal/elevated/off)
 };
@@ -68,6 +69,7 @@ var SETTINGS_GROUPS = [
         desc: '登录时自动启动服务',
         icon: '<path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6v6l4 2"/>',
         items: [
+            { key: 'dashboard_port', label: 'Dashboard 服务端口', desc: '默认 18080；修改后需重启 Dashboard', type: 'dashboard_port', row: true },
             { key: '__startup_dashboard_mode', label: 'Dashboard 开机启动', desc: '选择 Dashboard 的启动方式', type: 'segment', row: true, options: [
                 { v: 'normal', t: '开机自启' },
                 { v: 'elevated', t: '管理员启动' },
@@ -334,6 +336,7 @@ function resetSettings() {
     saveSettings(settings);
     renderSettings();
     applySettings();
+    saveDashboardPort(SETTINGS_DEFAULTS.dashboard_port);
 }
 
 // === Theme ===
@@ -2146,6 +2149,10 @@ function renderSettings() {
             var val = settings[item.key] || 0;
             return '<input type="number" class="search-box" style="width:100px" value="' + escapeHtml(String(val)) + '" onchange="setSetting(\'' + item.key + '\', parseInt(this.value,10) || 5494)">';
         }
+        if (item.type === 'dashboard_port') {
+            var dashboardPort = settings.dashboard_port || SETTINGS_DEFAULTS.dashboard_port;
+            return '<input type="number" min="1" max="65535" class="search-box" style="width:100px" value="' + escapeHtml(String(dashboardPort)) + '" onchange="saveDashboardPort(this.value)">';
+        }
         if (item.type === 'startup_toggle') {
             if (!startupServiceState.loaded) {
                 return '<span style="color:var(--text-tertiary);font-size:0.8rem">检测中...</span>';
@@ -3180,6 +3187,44 @@ async function loadDashboardVersion() {
 }
 
 // === Startup service (macOS launchd / Windows Task Scheduler) ===
+async function loadDashboardPort() {
+    try {
+        var data = await fetchJSON('/api/dashboard-port');
+        var port = parseInt(data.port, 10);
+        if (port >= 1 && port <= 65535) {
+            settings.dashboard_port = port;
+            saveSettings(settings);
+        }
+    } catch (e) {
+        console.warn('Failed to load dashboard port:', e.message);
+    }
+    if (location.hash === '#/settings') renderSettings();
+}
+
+async function saveDashboardPort(value) {
+    var port = parseInt(value, 10);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        showToast('端口必须在 1–65535 之间', 4000);
+        renderSettings();
+        return;
+    }
+    try {
+        var data = await postJSON('/api/dashboard-port', { port: port });
+        if (data.success) {
+            settings.dashboard_port = parseInt(data.port, 10) || port;
+            saveSettings(settings);
+            renderSettings();
+            showToast('Dashboard 端口已保存，重启 Dashboard 后生效', 5000);
+        } else {
+            showToast('保存失败: ' + (data.error || '未知错误'), 5000);
+            renderSettings();
+        }
+    } catch (e) {
+        showToast('保存失败: ' + e.message, 5000);
+        renderSettings();
+    }
+}
+
 async function loadKimiConfig() {
     try {
         var data = await fetchJSON('/api/kimi-config');
@@ -3445,7 +3490,7 @@ async function loadAll() {
 }
 
 // === Init ===
-Promise.all([loadDashboardVersion(), loadStartupServiceStatus(), loadKimiConfig()]).then(loadAll);
+Promise.all([loadDashboardVersion(), loadDashboardPort(), loadStartupServiceStatus(), loadKimiConfig()]).then(loadAll);
 checkKimiWebStatus();
 var kimiWebTimer = setInterval(checkKimiWebStatus, 10000);
 document.addEventListener('visibilitychange', function() {
