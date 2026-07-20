@@ -2103,7 +2103,7 @@ function modelFormHtml(m) {
     var effortBubbles = MODEL_EFFORT_OPTIONS.map(function(o) {
         return '<div class="option-bubble' + (effortEnabled && o.value === currentEffort ? ' selected' : '') + '" role="button" onclick="toggleOptionBubble(this, \'effort-bubble-group\')" data-value="' + escapeHtml(o.value) + '">' + escapeHtml(o.label) + '</div>';
     }).join('');
-    var effortToggleHtml = '<label class="effort-toggle-row"><span>推理强度（K3 同款三档）</span><label class="switch"><input type="checkbox" id="model-effort_enabled"' + (effortEnabled ? ' checked' : '') + '><span class="slider"></span></label></label>';
+    var effortToggleHtml = '<div class="effort-toggle-row"><span>推理强度（K3 同款三档）</span><label class="switch"><input type="checkbox" id="model-effort_enabled"' + (effortEnabled ? ' checked' : '') + '><span class="slider"></span></label></div>';
 
     return '<div class="config-form">' +
         '<label>API Model</label><input type="text" id="model-api_model" value="' + escapeHtml(m.model || m.id || '') + '" placeholder="例如 gpt-4.1">' +
