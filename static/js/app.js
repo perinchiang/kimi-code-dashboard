@@ -1815,7 +1815,7 @@ var MODEL_MAX_TOKENS_OPTIONS = [
     { value: 128000, label: '128K' },
 ];
 var MODEL_EFFORT_OPTIONS = [
-    { value: '', label: '关闭' },
+    { value: '', label: '默认' },
     { value: 'low', label: 'low' },
     { value: 'high', label: 'high' },
     { value: 'max', label: 'max' },
@@ -2110,7 +2110,7 @@ function modelFormHtml(m) {
         '<label>Provider</label><select id="model-provider">' + providerOptions + '</select>' +
         '<label>上下文长度</label><div class="option-bubble-group ctx-bubble-group">' + ctxBubbles + '</div>' +
         '<label>Max Tokens</label><div class="option-bubble-group maxtokens-bubble-group">' + maxTokensBubbles + '</div>' +
-        '<label>思考强度（同 K3）</label><div class="option-bubble-group effort-bubble-group">' + effortBubbles + '</div>' +
+        '<label>推理强度</label><div class="option-bubble-group effort-bubble-group">' + effortBubbles + '</div>' +
         '<label>Capabilities</label><div class="option-bubble-group cap-bubble-group">' + capBubbles + '</div>' +
         '<div class="config-form-actions">' +
             '<button class="btn-task" onclick="saveModel()">保存</button>' +
