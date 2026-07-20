@@ -414,24 +414,6 @@ function formatNumberPlain(n) {
     return n.toLocaleString('zh-CN');
 }
 
-// Per-corner rounded rect path so a stack reads as one cohesive pill:
-// top segment gets rounded top corners, bottom segment rounded bottom, middle square.
-function _roundedRectPath(x, y, w, h, rTL, rTR, rBR, rBL) {
-    var maxR = Math.max(0, Math.min(w / 2, h / 2));
-    rTL = Math.min(rTL, maxR); rTR = Math.min(rTR, maxR);
-    rBR = Math.min(rBR, maxR); rBL = Math.min(rBL, maxR);
-    return 'M ' + (x + rTL) + ',' + y +
-        ' L ' + (x + w - rTR) + ',' + y +
-        ' A ' + rTR + ',' + rTR + ' 0 0 1 ' + (x + w) + ',' + (y + rTR) +
-        ' L ' + (x + w) + ',' + (y + h - rBR) +
-        ' A ' + rBR + ',' + rBR + ' 0 0 1 ' + (x + w - rBR) + ',' + (y + h) +
-        ' L ' + (x + rBL) + ',' + (y + h) +
-        ' A ' + rBL + ',' + rBL + ' 0 0 1 ' + x + ',' + (y + h - rBL) +
-        ' L ' + x + ',' + (y + rTL) +
-        ' A ' + rTL + ',' + rTL + ' 0 0 1 ' + (x + rTL) + ',' + y +
-        ' Z';
-}
-
 function _prepareModelTrendData(data) {
     if (!data || data.length === 0) return [];
 
@@ -509,26 +491,11 @@ function renderStackedBarChart(data, modelColors) {
         return '<line x1="' + pad.left + '" y1="' + y + '" x2="' + (width - pad.right) + '" y2="' + y + '" stroke="var(--border)" stroke-width="1" stroke-dasharray="3,5" opacity="0.22"/>';
     }).join('');
 
-    var defs = '<defs>' +
-        '<filter id="barSoftShadow" x="-20%" y="-10%" width="140%" height="120%">' +
-            '<feGaussianBlur in="SourceAlpha" stdDeviation="1.4"/>' +
-            '<feOffset dy="1.2"/>' +
-            '<feComponentTransfer><feFuncA type="linear" slope="0.28"/></feComponentTransfer>' +
-            '<feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>' +
-        '</filter>' +
-        '<linearGradient id="barGloss" x1="0" y1="0" x2="0" y2="1">' +
-            '<stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/>' +
-            '<stop offset="55%" stop-color="#ffffff" stop-opacity="0"/>' +
-        '</linearGradient>' +
-    '</defs>';
-
     var bars = chartData.map(function(d, i) {
         var cx = xFor(i);
         var x = cx - barWidth / 2;
         var segs = [];
         var stackBottom = 0;
-        var presentModels = models.filter(function(m) { return (d.models[m] || 0) > 0; });
-        var cornerR = Math.min(5, barWidth / 2);
         models.forEach(function(m) {
             var val = d.models[m] || 0;
             if (val <= 0) return;
@@ -536,13 +503,8 @@ function renderStackedBarChart(data, modelColors) {
             var yBot = yFor(stackBottom);
             var h = yBot - yTop;
             var color = modelColors[m] || 'var(--accent)';
-            var isTop = (m === presentModels[presentModels.length - 1]);
-            var isBottom = (m === presentModels[0]);
-            var rTL = isTop ? cornerR : 0, rTR = isTop ? cornerR : 0;
-            var rBL = isBottom ? cornerR : 0, rBR = isBottom ? cornerR : 0;
-            var path = _roundedRectPath(x, yTop, barWidth, h, rTL, rTR, rBR, rBL);
-            segs.push('<path class="stacked-bar-seg" data-model="' + escapeHtml(m) + '" data-value="' + val + '" d="' + path + '" fill="' + color + '" filter="url(#barSoftShadow)"/>');
-            segs.push('<path d="' + _roundedRectPath(x, yTop, barWidth, h, rTL, rTR, rBR, rBL) + '" fill="url(#barGloss)" pointer-events="none"/>');
+            // Flat segments: only the top of the whole stack gets a subtle top radius
+            segs.push('<rect class="stacked-bar-seg" data-model="' + escapeHtml(m) + '" data-value="' + val + '" x="' + x + '" y="' + yTop + '" width="' + barWidth + '" height="' + h + '" fill="' + color + '"/>');
             stackBottom += val;
         });
         // Total label sits above each bar
@@ -567,7 +529,7 @@ function renderStackedBarChart(data, modelColors) {
     var crosshair = '<line id="stackedCrosshair" x1="0" y1="' + pad.top + '" x2="0" y2="' + (pad.top + chartH) + '" stroke="var(--text-secondary)" stroke-width="1" stroke-dasharray="3,3" opacity="0" pointer-events="none"/>';
 
     return '<svg id="stackedBarSvg" viewBox="0 0 ' + width + ' ' + height + '" style="width:100%;height:240px" preserveAspectRatio="xMidYMid meet">' +
-        defs + gridLines + baseline + bars + labels + yLabels + crosshair + overlay +
+        gridLines + baseline + bars + labels + yLabels + crosshair + overlay +
     '</svg>';
 }
 
