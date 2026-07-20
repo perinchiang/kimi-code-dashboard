@@ -247,13 +247,102 @@ function renderDonut(values, total, colorMap, centerLabel) {
     var circles = segments.map(function(s) {
         if (s.length <= 0) return '';
         var pct = _formatPct(s.fraction);
-        return '<circle class="donut-segment" data-label="' + escapeHtml(s.label) + '" data-value="' + s.value + '" data-pct="' + pct + '" cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + s.color + '" stroke-width="' + strokeWidth + '" stroke-dasharray="' + s.length + ' ' + (circumference - s.length) + '" stroke-dashoffset="' + s.offset + '" transform="rotate(-90 ' + cx + ' ' + cy + ')" style="transition: stroke-dasharray 0.6s ease; cursor: pointer"/>';
+        return '<circle class="donut-segment" data-label="' + escapeHtml(s.label) + '" data-value="' + s.value + '" data-pct="' + pct + '" data-color="' + s.color + '" cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + s.color + '" stroke-width="' + strokeWidth + '" stroke-dasharray="' + s.length + ' ' + (circumference - s.length) + '" stroke-dashoffset="' + s.offset + '" transform="rotate(-90 ' + cx + ' ' + cy + ')" style="transition: stroke-dasharray 0.6s ease; cursor: pointer"/>';
     }).join('');
     var legend = segments.map(function(s) {
         var pct = _formatPct(s.fraction);
         return '<div class="legend-item"><span class="legend-swatch" style="background:' + s.color + '"></span><div class="legend-text"><div class="legend-name">' + escapeHtml(s.label) + '</div><div class="legend-meta">' + formatTokens(s.value) + ' · ' + pct + '%</div></div></div>';
     }).join('');
     return '<div class="donut-wrap"><div class="donut-container"><svg viewBox="0 0 ' + size + ' ' + size + '" style="width:100%;height:100%">' + circles + '</svg><div class="donut-center"><div class="donut-total">' + formatTokens(total) + '</div><div class="donut-label">' + escapeHtml(centerLabel) + '</div></div></div><div class="memory-legend">' + legend + '</div></div>';
+}
+
+// === Model distribution: donut + sortable table (mirror of Helicone-style panel) ===
+function renderModelDistribution(values, total, colorMap, mode) {
+    if (!values || values.length === 0 || total === 0) return '<div class="trend-empty">暂无数据</div>';
+    mode = mode || 'token';
+    var donutHtml = renderDonut(values, total, colorMap, mode === 'calls' ? '总调用' : '总 Token');
+
+    var rows = values.map(function(v) {
+        var pct = _formatPct(v.value / total);
+        var color = (colorMap && colorMap[v.rawModel]) || 'var(--accent)';
+        var calls = v.calls != null ? v.calls : 0;
+        var tok = v.total != null ? v.total : 0;
+        return '<tr class="md-table-row" data-model="' + escapeHtml(v.rawModel || v.label) + '" data-color="' + color + '" data-calls="' + calls + '" data-total="' + tok + '" data-pct="' + pct + '">' +
+            '<td class="md-name"><span class="md-dot" style="background:' + color + '"></span><span title="' + escapeHtml(v.rawModel || v.label) + '">' + escapeHtml(v.label) + '</span></td>' +
+            '<td class="md-num md-calls">' + calls.toLocaleString() + '</td>' +
+            '<td class="md-num md-tok">' + formatTokens(tok) + '</td>' +
+            '<td class="md-num md-pct">' + pct + '%</td>' +
+        '</tr>';
+    }).join('');
+
+    var tableHtml =
+        '<div class="md-table-scroll"><table class="md-table">' +
+            '<thead><tr>' +
+                '<th class="md-th-name">模型</th>' +
+                '<th class="md-th-num">请求</th>' +
+                '<th class="md-th-num">Token</th>' +
+                '<th class="md-th-num">占比</th>' +
+            '</tr></thead>' +
+            '<tbody>' + rows + '</tbody>' +
+        '</table></div>';
+
+    return '<div class="md-panel">' + donutHtml + tableHtml + '</div>';
+}
+
+function attachModelDistributionTableHover(containerId, tooltipId, colorMap, mode) {
+    var container = document.getElementById(containerId);
+    var tooltip = document.getElementById(tooltipId);
+    if (!container || !tooltip) return;
+    var rows = container.querySelectorAll('.md-table-row');
+    var segments = container.querySelectorAll('.donut-segment');
+    var card = container.closest('.card');
+
+    function showTip(model, color, calls, totalTok, pct) {
+        tooltip.innerHTML =
+            '<div class="tt-label">' + escapeHtml(model.replace('kimi-code/', '')) + '</div>' +
+            '<div class="tt-row"><span class="tt-swatch" style="background:' + color + '"></span>请求 ' + Number(calls).toLocaleString() + '</div>' +
+            '<div class="tt-row"><span class="tt-swatch" style="background:' + color + '"></span>Token ' + formatTokens(Number(totalTok)) + '</div>' +
+            '<div class="tt-row">占比 ' + pct + '%</div>';
+        tooltip.classList.add('show');
+    }
+    function positionTip(e) {
+        if (!card) return;
+        var cardRect = card.getBoundingClientRect();
+        var tipW = 180;
+        var tipX = e.clientX - cardRect.left + 12;
+        if (tipX + tipW > cardRect.width) tipX = e.clientX - cardRect.left - tipW - 10;
+        var tipY = e.clientY - cardRect.top - 30;
+        if (tipY < 8) tipY = e.clientY - cardRect.top + 15;
+        tooltip.style.left = tipX + 'px';
+        tooltip.style.top = tipY + 'px';
+    }
+
+    rows.forEach(function(row) {
+        row.addEventListener('mouseenter', function(e) {
+            var model = row.getAttribute('data-model');
+            var color = row.getAttribute('data-color');
+            var calls = row.getAttribute('data-calls');
+            var totalTok = row.getAttribute('data-total');
+            var pct = row.getAttribute('data-pct');
+            row.classList.add('is-active');
+            segments.forEach(function(seg) {
+                if (seg.getAttribute('data-label') === (model || '').replace('kimi-code/', '')) {
+                    seg.style.strokeWidth = '26';
+                    seg.style.opacity = '1';
+                } else {
+                    seg.style.opacity = '0.3';
+                }
+            });
+            showTip(model, color, calls, totalTok, pct);
+            positionTip(e);
+        });
+        row.addEventListener('mousemove', positionTip);
+        row.addEventListener('mouseleave', function() {
+            row.classList.remove('is-active');
+            segments.forEach(function(seg) { seg.style.strokeWidth = ''; seg.style.opacity = ''; });
+            tooltip.classList.remove('show');
+        });
+    });
 }
 
 // === Model usage bars ===
@@ -323,6 +412,24 @@ function formatNumberPlain(n) {
     return n.toLocaleString('zh-CN');
 }
 
+// Per-corner rounded rect path so a stack reads as one cohesive pill:
+// top segment gets rounded top corners, bottom segment rounded bottom, middle square.
+function _roundedRectPath(x, y, w, h, rTL, rTR, rBR, rBL) {
+    var maxR = Math.max(0, Math.min(w / 2, h / 2));
+    rTL = Math.min(rTL, maxR); rTR = Math.min(rTR, maxR);
+    rBR = Math.min(rBR, maxR); rBL = Math.min(rBL, maxR);
+    return 'M ' + (x + rTL) + ',' + y +
+        ' L ' + (x + w - rTR) + ',' + y +
+        ' A ' + rTR + ',' + rTR + ' 0 0 1 ' + (x + w) + ',' + (y + rTR) +
+        ' L ' + (x + w) + ',' + (y + h - rBR) +
+        ' A ' + rBR + ',' + rBR + ' 0 0 1 ' + (x + w - rBR) + ',' + (y + h) +
+        ' L ' + (x + rBL) + ',' + (y + h) +
+        ' A ' + rBL + ',' + rBL + ' 0 0 1 ' + x + ',' + (y + h - rBL) +
+        ' L ' + x + ',' + (y + rTL) +
+        ' A ' + rTL + ',' + rTL + ' 0 0 1 ' + (x + rTL) + ',' + y +
+        ' Z';
+}
+
 function _prepareModelTrendData(data) {
     if (!data || data.length === 0) return [];
 
@@ -373,8 +480,8 @@ function renderStackedBarChart(data, modelColors) {
     var chartData = data;
     if (chartData.length === 0) return '<div class="trend-empty">暂无数据</div>';
 
-    var width = 620, height = 220;
-    var pad = { top: 14, right: 56, bottom: 36, left: 12 };
+    var width = 620, height = 240;
+    var pad = { top: 22, right: 56, bottom: 38, left: 12 };
     var chartW = width - pad.left - pad.right;
     var chartH = height - pad.top - pad.bottom;
     var max = Math.max.apply(null, chartData.map(function(d) { return d.total; }).concat([1]));
@@ -390,20 +497,36 @@ function renderStackedBarChart(data, modelColors) {
     if (models.length === 0) return '<div class="trend-empty">暂无数据</div>';
 
     var barGap = chartW / chartData.length;
-    var barWidth = Math.min(32, barGap * 0.55);
+    var barWidth = Math.min(34, barGap * 0.58);
     var xFor = function(i) { return pad.left + (i + 0.5) * barGap; };
     var yFor = function(val) { return pad.top + chartH - (val / max) * chartH; };
 
+    // Soft horizontal grid lines
     var gridLines = [0, 0.25, 0.5, 0.75, 1].map(function(r) {
         var y = pad.top + chartH - r * chartH;
-        return '<line x1="' + pad.left + '" y1="' + y + '" x2="' + (width - pad.right) + '" y2="' + y + '" stroke="var(--border)" stroke-width="1" stroke-dasharray="4,4" opacity="0.25"/>';
+        return '<line x1="' + pad.left + '" y1="' + y + '" x2="' + (width - pad.right) + '" y2="' + y + '" stroke="var(--border)" stroke-width="1" stroke-dasharray="3,5" opacity="0.22"/>';
     }).join('');
+
+    var defs = '<defs>' +
+        '<filter id="barSoftShadow" x="-20%" y="-10%" width="140%" height="120%">' +
+            '<feGaussianBlur in="SourceAlpha" stdDeviation="1.4"/>' +
+            '<feOffset dy="1.2"/>' +
+            '<feComponentTransfer><feFuncA type="linear" slope="0.28"/></feComponentTransfer>' +
+            '<feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>' +
+        '</filter>' +
+        '<linearGradient id="barGloss" x1="0" y1="0" x2="0" y2="1">' +
+            '<stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/>' +
+            '<stop offset="55%" stop-color="#ffffff" stop-opacity="0"/>' +
+        '</linearGradient>' +
+    '</defs>';
 
     var bars = chartData.map(function(d, i) {
         var cx = xFor(i);
         var x = cx - barWidth / 2;
         var segs = [];
         var stackBottom = 0;
+        var presentModels = models.filter(function(m) { return (d.models[m] || 0) > 0; });
+        var cornerR = Math.min(5, barWidth / 2);
         models.forEach(function(m) {
             var val = d.models[m] || 0;
             if (val <= 0) return;
@@ -411,31 +534,38 @@ function renderStackedBarChart(data, modelColors) {
             var yBot = yFor(stackBottom);
             var h = yBot - yTop;
             var color = modelColors[m] || 'var(--accent)';
-            segs.push('<rect class="stacked-bar-seg" data-model="' + escapeHtml(m) + '" data-value="' + val + '" x="' + x + '" y="' + yTop + '" width="' + barWidth + '" height="' + h + '" fill="' + color + '" rx="3"/>');
+            var isTop = (m === presentModels[presentModels.length - 1]);
+            var isBottom = (m === presentModels[0]);
+            var rTL = isTop ? cornerR : 0, rTR = isTop ? cornerR : 0;
+            var rBL = isBottom ? cornerR : 0, rBR = isBottom ? cornerR : 0;
+            var path = _roundedRectPath(x, yTop, barWidth, h, rTL, rTR, rBR, rBL);
+            segs.push('<path class="stacked-bar-seg" data-model="' + escapeHtml(m) + '" data-value="' + val + '" d="' + path + '" fill="' + color + '" filter="url(#barSoftShadow)"/>');
+            segs.push('<path d="' + _roundedRectPath(x, yTop, barWidth, h, rTL, rTR, rBR, rBL) + '" fill="url(#barGloss)" pointer-events="none"/>');
             stackBottom += val;
         });
-        // Add subtle total label on top of bar if enough space
+        // Total label sits above each bar
         var topY = yFor(d.total);
-        var totalLabel = d.total > 0 ? '<text x="' + cx + '" y="' + (topY - 4) + '" text-anchor="middle" font-size="9" fill="var(--text-secondary)" font-family="var(--mono)">' + formatNumberPlain(d.total) + '</text>' : '';
-        return '<g data-key="' + d.key + '" data-total="' + d.total + '">' + segs.join('') + totalLabel + '</g>';
+        var totalLabel = d.total > 0 ? '<text x="' + cx + '" y="' + (topY - 6) + '" text-anchor="middle" font-size="9" fill="var(--text-secondary)" font-family="var(--mono)">' + formatNumberPlain(d.total) + '</text>' : '';
+        return '<g class="stacked-bar-group" data-key="' + d.key + '" data-total="' + d.total + '">' + segs.join('') + totalLabel + '</g>';
     }).join('');
 
     var labels = chartData.map(function(d, i) {
         var cx = xFor(i);
-        return '<text x="' + cx + '" y="' + (height - 10) + '" text-anchor="middle" font-size="10" fill="var(--text-secondary)" font-family="var(--mono)">' + d.label + '</text>';
+        return '<text x="' + cx + '" y="' + (height - 12) + '" text-anchor="middle" font-size="10" fill="var(--text-secondary)" font-family="var(--mono)">' + d.label + '</text>';
     }).join('');
 
     var yLabels = [0, 0.25, 0.5, 0.75, 1].map(function(r) {
         var y = yFor(max * r);
         var val = Math.round(max * r);
-        return '<text x="' + (width - pad.right + 5) + '" y="' + (y + 3) + '" font-size="9" fill="var(--text-tertiary)" font-family="var(--mono)">' + formatNumberPlain(val) + '</text>';
+        return '<text x="' + (width - pad.right + 6) + '" y="' + (y + 3) + '" font-size="9" fill="var(--text-tertiary)" font-family="var(--mono)">' + formatNumberPlain(val) + '</text>';
     }).join('');
 
+    var baseline = '<line x1="' + pad.left + '" y1="' + (pad.top + chartH) + '" x2="' + (width - pad.right) + '" y2="' + (pad.top + chartH) + '" stroke="var(--border)" stroke-width="1" opacity="0.5"/>';
     var overlay = '<rect id="stackedBarOverlay" x="' + pad.left + '" y="' + pad.top + '" width="' + chartW + '" height="' + chartH + '" fill="transparent" style="cursor:crosshair"/>';
     var crosshair = '<line id="stackedCrosshair" x1="0" y1="' + pad.top + '" x2="0" y2="' + (pad.top + chartH) + '" stroke="var(--text-secondary)" stroke-width="1" stroke-dasharray="3,3" opacity="0" pointer-events="none"/>';
 
-    return '<svg id="stackedBarSvg" viewBox="0 0 ' + width + ' ' + height + '" style="width:100%;height:220px" preserveAspectRatio="xMidYMid meet">' +
-        gridLines + bars + labels + yLabels + crosshair + overlay +
+    return '<svg id="stackedBarSvg" viewBox="0 0 ' + width + ' ' + height + '" style="width:100%;height:240px" preserveAspectRatio="xMidYMid meet">' +
+        defs + gridLines + baseline + bars + labels + yLabels + crosshair + overlay +
     '</svg>';
 }
 
@@ -448,11 +578,25 @@ function attachStackedBarHover(data, tooltipId, modelColors) {
     var tooltip = document.getElementById(tooltipId);
     if (!svg || !overlay || !tooltip) return;
 
-    var width = 620, height = 220;
-    var pad = { top: 14, right: 56, bottom: 36, left: 12 };
+    var width = 620, height = 240;
+    var pad = { top: 22, right: 56, bottom: 38, left: 12 };
     var chartW = width - pad.left - pad.right;
     var chartH = height - pad.top - pad.bottom;
     var barGap = chartW / data.length;
+    var groups = svg.querySelectorAll('.stacked-bar-group');
+
+    function highlight(idx) {
+        groups.forEach(function(g, i) {
+            if (i === idx) g.classList.add('is-active');
+            else g.classList.add('is-dim');
+        });
+    }
+    function clearHighlight() {
+        groups.forEach(function(g) {
+            g.classList.remove('is-active');
+            g.classList.remove('is-dim');
+        });
+    }
 
     overlay.addEventListener('mousemove', function(e) {
         var ctm = svg.getScreenCTM();
@@ -474,6 +618,7 @@ function attachStackedBarHover(data, tooltipId, modelColors) {
         crosshair.setAttribute('x1', crossX);
         crosshair.setAttribute('x2', crossX);
         crosshair.setAttribute('opacity', '0.6');
+        highlight(idx);
 
         var containerRect = svg.parentElement.getBoundingClientRect();
         var tipW = 200;
@@ -502,6 +647,7 @@ function attachStackedBarHover(data, tooltipId, modelColors) {
     overlay.addEventListener('mouseleave', function() {
         crosshair.setAttribute('opacity', '0');
         tooltip.classList.remove('show');
+        clearHighlight();
     });
 }
 

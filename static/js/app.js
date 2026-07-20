@@ -1594,12 +1594,14 @@ function _renderModelColorLegend(models, colorMap) {
     return '<div class="bar-chart-legend">' + items + '</div>';
 }
 
-function _getModelDistributionData() {
+function _getModelDistributionData(mode) {
     var data = statusData.modelUsage;
     if (!data || !data.models) return [];
+    var field = mode === 'calls' ? 'calls' : 'total';
     return data.models.map(function(m) {
-        return { label: m.model.replace('kimi-code/', ''), value: m.total, rawModel: m.model };
-    });
+        return { label: m.model.replace('kimi-code/', ''), value: m[field] || 0, rawModel: m.model,
+                 calls: m.calls || 0, total: m.total || 0 };
+    }).filter(function(d) { return d.value > 0; });
 }
 
 // === Tool Usage mini card ===
@@ -1706,17 +1708,36 @@ function renderModelUsageDetail() {
         }
     }
 
-    // Distribution donut chart
+    // Distribution donut + table
     var distChartEl = document.getElementById('modelDistributionChart');
-    var distData = _getModelDistributionData();
+    var distMode = (statusData.modelDistMode || 'token');
+    var distData = _getModelDistributionData(distMode);
     if (distChartEl) {
         if (distData.length > 0) {
             var total = distData.reduce(function(s, d) { return s + d.value; }, 0);
-            distChartEl.innerHTML = renderDonut(distData, total, modelColorMap);
-            attachDonutHover('modelDistributionChart', 'modelDistributionTooltip', function(v) { return formatTokens(Number(v)); });
+            distChartEl.innerHTML = renderModelDistribution(distData, total, modelColorMap, distMode);
+            attachDonutHover('modelDistributionChart', 'modelDistributionTooltip', function(v) { return distMode === 'calls' ? Number(v).toLocaleString() + ' 次' : formatTokens(Number(v)); });
+            attachModelDistributionTableHover('modelDistributionChart', 'modelDistributionTooltip', modelColorMap, distMode);
         } else {
             distChartEl.innerHTML = '<div class="empty">暂无模型分布数据</div>';
         }
+    }
+
+    // Mode toggle (按 Token / 按调用次数)
+    var modeSeg = document.getElementById('modelDistMode');
+    if (modeSeg && !modeSeg.dataset.bound) {
+        modeSeg.dataset.bound = '1';
+        modeSeg.addEventListener('click', function(e) {
+            var btn = e.target.closest('.segment-btn');
+            if (!btn) return;
+            var mode = btn.getAttribute('data-mode');
+            if (mode === (statusData.modelDistMode || 'token')) return;
+            statusData.modelDistMode = mode;
+            modeSeg.querySelectorAll('.segment-btn').forEach(function(b) {
+                b.classList.toggle('active', b === btn);
+            });
+            renderModelUsageDetail();
+        });
     }
 }
 

@@ -487,10 +487,13 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 .model-usage-chart-section:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
 .model-usage-chart-section .lb-subheader { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
 .model-usage-chart-section .lb-subheader .seg-filter { margin: 0; }
-.model-trend-chart { position: relative; min-height: 220px; }
+.model-trend-chart { position: relative; min-height: 240px; }
 .bar-chart-legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px dashed var(--border); }
 .bar-legend-item { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: var(--text-secondary); font-family: var(--mono); }
-.bar-legend-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.bar-legend-swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.stacked-bar-group { transition: opacity 0.15s; }
+.stacked-bar-group.is-active { opacity: 1; }
+.stacked-bar-group.is-dim { opacity: 0.35; }
 .model-distribution-chart { position: relative; min-height: 200px; }
 .model-distribution-chart .donut-wrap { justify-content: center; gap: 2.5rem; }
 .model-distribution-chart .donut-container { width: 190px; height: 190px; }
@@ -498,6 +501,29 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 .model-distribution-chart .donut-label { font-size: 0.65rem; }
 .model-distribution-chart .memory-legend { max-width: 320px; grid-template-columns: 1fr; }
 .model-distribution-chart .legend-item { font-size: 0.78rem; }
+
+/* New: donut + table panel (Helicone-style) */
+.md-panel { display: flex; align-items: flex-start; gap: 2.5rem; flex-wrap: wrap; }
+.md-panel .donut-wrap { flex-direction: column; align-items: center; gap: 0.75rem; margin: 0; flex-shrink: 0; }
+.md-panel .memory-legend { width: 190px; max-width: 190px; grid-template-columns: 1fr; gap: 0.35rem; }
+.md-panel .memory-legend .legend-item { font-size: 0.76rem; }
+.md-table-scroll { flex: 1 1 280px; max-height: 260px; overflow-y: auto; min-width: 0; }
+.md-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.md-table thead th { position: sticky; top: 0; background: var(--surface); color: var(--text-secondary); font-weight: 600; font-size: 0.72rem; text-transform: none; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); z-index: 1; }
+.md-th-name { text-align: left; }
+.md-th-num { text-align: right; }
+.md-table tbody tr { border-bottom: 1px solid var(--border); transition: background 0.12s; }
+.md-table tbody tr:hover { background: var(--surface-hover); }
+.md-table tbody tr.is-active { background: var(--surface-hover); }
+.md-name { text-align: left; padding: 0.4rem 0.5rem; color: var(--text); font-weight: 500; max-width: 160px; }
+.md-name .md-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 0.45rem; vertical-align: middle; flex-shrink: 0; }
+.md-name span:last-child { vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; max-width: 132px; }
+.md-num { text-align: right; padding: 0.4rem 0.5rem; color: var(--text-secondary); white-space: nowrap; }
+.md-calls { color: var(--text-secondary); }
+.md-tok { color: var(--text); font-weight: 600; }
+.md-pct { color: var(--text-tertiary); }
+.md-seg { display: inline-flex; align-items: center; gap: 0.25rem; }
+.md-seg .segment-btn { padding: 0.28rem 0.7rem; font-size: 0.74rem; }
 .model-usage-item { flex-wrap: wrap; }
 .model-usage-meta { width: 100%; display: flex; gap: 0.75rem; padding-left: calc(20px + 0.5rem + 200px); font-size: 0.72rem; color: var(--text-tertiary); font-family: var(--mono); }
 .model-usage-meta span { white-space: nowrap; }
@@ -507,6 +533,10 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
     .model-distribution-chart .donut-wrap { flex-direction: column; align-items: center; gap: 1.25rem; }
     .model-distribution-chart .donut-container { width: 180px; height: 180px; }
     .model-distribution-chart .memory-legend { width: 100%; max-width: none; grid-template-columns: 1fr; }
+    .md-panel { flex-direction: column; align-items: stretch; gap: 1.25rem; }
+    .md-panel .donut-wrap { flex-direction: row; justify-content: center; }
+    .md-panel .memory-legend { width: 100%; max-width: none; grid-template-columns: 1fr 1fr; }
+    .md-table-scroll { max-height: 220px; }
 }
 
 /* === Tasks === */

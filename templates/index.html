@@ -19,7 +19,7 @@
         } catch (e) {}
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=68">
+    <link rel="stylesheet" href="/static/css/style.css?v=70">
 </head>
 <body>
     <header>
@@ -353,6 +353,10 @@
             <div class="model-usage-chart-section">
                 <div class="lb-subheader">
                     <span class="lb-title lb-title-model">模型分布</span>
+                    <div class="segment-control seg-filter md-seg" id="modelDistMode">
+                        <button type="button" class="segment-btn active" data-mode="token">按 Token</button>
+                        <button type="button" class="segment-btn" data-mode="calls">按调用次数</button>
+                    </div>
                 </div>
                 <div id="modelDistributionChart" class="model-distribution-chart"></div>
                 <div id="modelDistributionTooltip" class="chart-tooltip"></div>
@@ -790,7 +794,7 @@
         </div>
     </div>
 
-    <script src="/static/js/charts.js?v=19"></script>
+    <script src="/static/js/charts.js?v=20"></script>
     <script src="/static/js/app.js?v=109"></script>
 </body>
 </html>
