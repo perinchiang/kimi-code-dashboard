@@ -18,7 +18,7 @@ Open: the configured dashboard URL (default http://127.0.0.1:18080)
 from flask import Flask
 
 from config import DASHBOARD_HOST, DASHBOARD_PORT, DASHBOARD_URL, log
-from routes import artifacts, hooks, image_bed, kimi, mcp, memory, model_config, skills, system, tasks
+from routes import agents, artifacts, hooks, image_bed, kimi, mcp, memory, model_config, skills, system, tasks
 
 
 def create_app() -> Flask:
@@ -26,6 +26,7 @@ def create_app() -> Flask:
     app.config["TEMPLATES_AUTO_RELOAD"] = True
 
     # Register blueprints
+    app.register_blueprint(agents.bp)
     app.register_blueprint(skills.bp)
     app.register_blueprint(hooks.bp)
     app.register_blueprint(mcp.bp)

@@ -12,6 +12,8 @@ var currentArtifactQuery = '';
 var kimiUpdateState = { checking: false, updateAvailable: false, error: null };
 var updateRetryCount = 0;
 var selectedProvider = null;
+var activeModelDrag = null;
+var suppressNextProviderClick = false;
 var currentSkillStatusFilter = 'all';
 var currentSkillSort = 'name';
 var currentMcpStatusFilter = 'all';
@@ -20,6 +22,18 @@ var currentHookStatusFilter = 'all';
 var _currentSkillDetailId = null;
 var _currentHookEditId = null;
 var _currentHookCreate = false;
+var agentsState = {
+    scopes: [],
+    currentScope: 'global',
+    content: '',
+    revision: '',
+    exists: false,
+    dirty: false,
+    loading: false,
+    saving: false,
+    conflict: null,
+    loaded: false,
+};
 
 // === Settings ===
 var SETTINGS_KEY = 'kimi_dashboard_settings_v1';
@@ -62,6 +76,7 @@ var SETTINGS_GROUPS = [
                 { v: 'auto', t: '自动模式' },
                 { v: 'yolo', t: 'YOLO 模式' },
             ]},
+            { key: 'agents_editor', label: 'Agent 指令', desc: '编辑 Kimi Code 读取的 AGENTS.md；文件不存在时，首次保存才会创建', type: 'agents_link', row: true },
         ]
     },
     {
@@ -654,6 +669,7 @@ function handleRoute() {
     document.getElementById('view-artifacts').style.display = (hash === '#/artifacts') ? '' : 'none';
     document.getElementById('view-memory').style.display = (hash === '#/memory') ? '' : 'none';
     document.getElementById('view-settings').style.display = (hash === '#/settings') ? '' : 'none';
+    document.getElementById('view-agents').style.display = (hash === '#/agents') ? '' : 'none';
     document.getElementById('view-tool-model').style.display = (hash === '#/tool-model') ? '' : 'none';
     document.getElementById('view-model-usage').style.display = (hash === '#/model-usage') ? '' : 'none';
     window.scrollTo(0, 0);
@@ -665,6 +681,10 @@ function handleRoute() {
     else if (hash === '#/artifacts') renderArtifactsDetail();
     else if (hash === '#/memory') renderMemoryDetail();
     else if (hash === '#/settings') renderSettings();
+    else if (hash === '#/agents') {
+        if (!agentsState.loaded) loadAgents();
+        else renderAgentsPage();
+    }
     else if (hash === '#/tool-model') renderToolModelDetail();
     else if (hash === '#/model-usage') renderModelUsageDetail();
 }
@@ -1790,6 +1810,13 @@ var MODEL_CONFIG_TYPE_LABEL = {
     'vertexai': 'Google Vertex AI',
 };
 var MODEL_CONFIG_CAPS = ['thinking', 'always_thinking', 'image_in', 'video_in', 'tool_use'];
+var MODEL_CONFIG_CAP_LABEL = {
+    'thinking': '思考',
+    'always_thinking': '持续思考',
+    'image_in': '识图',
+    'video_in': '视频理解',
+    'tool_use': '工具调用',
+};
 var PROVIDER_PRESETS = [
     { name: 'MiniMax Token 计划', id: 'minimax', base_url: 'https://api.minimaxi.com/v1' },
     { name: 'DeepSeek API', id: 'deepseek', base_url: 'https://api.deepseek.com/v1' },
@@ -1798,8 +1825,7 @@ var PROVIDER_PRESETS = [
     { name: '阿里云百炼', id: 'bailian', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
 ];
 var MODEL_CONTEXT_OPTIONS = [
-    { value: 8192, label: '8K' },
-    { value: 32768, label: '32K' },
+    { value: 64000, label: '64K' },
     { value: 128000, label: '128K' },
     { value: 200000, label: '200K' },
     { value: 256000, label: '256K' },
@@ -1807,9 +1833,6 @@ var MODEL_CONTEXT_OPTIONS = [
     { value: 1048576, label: '1M' },
 ];
 var MODEL_MAX_TOKENS_OPTIONS = [
-    { value: 4096, label: '4K' },
-    { value: 8192, label: '8K' },
-    { value: 16384, label: '16K' },
     { value: 32768, label: '32K' },
     { value: 64000, label: '64K' },
     { value: 128000, label: '128K' },
@@ -1849,8 +1872,193 @@ async function loadModelConfig() {
 }
 
 function selectProvider(id) {
+    if (suppressNextProviderClick) {
+        suppressNextProviderClick = false;
+        return;
+    }
     selectedProvider = id || null;
     renderModelConfigDetail();
+}
+
+function configCardFromEvent(event) {
+    var card = event.currentTarget;
+    return card && card.classList.contains('sortable-config-item') ? card : null;
+}
+
+function beginConfigCardDrag(event, type, id) {
+    var card = configCardFromEvent(event);
+    if (!card || !event.dataTransfer) return;
+    if (event.target.closest && event.target.closest('button, a, input, select, textarea, .config-form')) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+    }
+    if (activeModelDrag) cancelConfigCardDrag();
+    var originalOrder = Array.prototype.slice.call(card.parentNode.children).filter(function(item) {
+        return item.classList.contains('sortable-config-item') && item.getAttribute('data-sort-id');
+    }).map(function(item) { return item.getAttribute('data-sort-id'); });
+    activeModelDrag = {
+        type: type,
+        id: id,
+        provider: type === 'model' ? selectedProvider : null,
+        card: card,
+        list: card.parentNode,
+        originalOrder: originalOrder,
+        targetIndex: originalOrder.indexOf(id),
+        targetCard: null,
+        targetId: null,
+        pendingY: null,
+        pendingContainer: null,
+        pendingType: null,
+        rafId: 0
+    };
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', type + ':' + id);
+    card.classList.add('drag-source');
+}
+
+function clearConfigDragTarget() {
+    document.querySelectorAll('.sortable-config-item.drag-target').forEach(function(card) {
+        card.classList.remove('drag-target');
+    });
+}
+
+function getConfigCards(container, drag) {
+    return Array.prototype.slice.call(container.children).filter(function(item) {
+        return item.classList.contains('sortable-config-item') && item !== drag.card && item.getAttribute('data-sort-id');
+    });
+}
+
+function findConfigDropPosition(clientY, container, drag) {
+    var cards = getConfigCards(container, drag);
+    var sourceIndex = drag.originalOrder.indexOf(drag.id);
+    var sourceTop = drag.card.getBoundingClientRect().top;
+    var sourceOffsetTop = drag.card.offsetTop;
+    var sourceHeight = drag.card.offsetHeight;
+    if (clientY >= sourceTop && clientY <= sourceTop + sourceHeight) {
+        return { targetCard: null, targetIndex: sourceIndex };
+    }
+
+    var targetCard = null;
+    var nearestDistance = Infinity;
+    for (var i = 0; i < cards.length; i++) {
+        // 用 offsetTop 计算原始布局位置，完全忽略撬起动画的 transform 和过渡中间态。
+        var layoutTop = sourceTop + (cards[i].offsetTop - sourceOffsetTop);
+        var layoutBottom = layoutTop + cards[i].offsetHeight;
+        if (clientY >= layoutTop && clientY <= layoutBottom) {
+            targetCard = cards[i];
+            break;
+        }
+        var distance = clientY < layoutTop ? layoutTop - clientY : clientY - layoutBottom;
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            targetCard = cards[i];
+        }
+    }
+
+    var targetIndex = targetCard ? drag.originalOrder.indexOf(targetCard.getAttribute('data-sort-id')) : sourceIndex;
+    var maxIndex = drag.originalOrder.length - 1;
+    targetIndex = Math.max(0, Math.min(maxIndex, targetIndex));
+    return { targetCard: targetCard, targetIndex: targetIndex };
+}
+
+function updateConfigDragTarget(event, container, type) {
+    var drag = activeModelDrag;
+    if (!drag || drag.type !== type || drag.list !== container) return;
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    // 目标卡片的 transform 不参与位置判断；同一目标不重复切换 class，避免动画被反复重置。
+    var position = findConfigDropPosition(event.clientY, container, drag);
+    var nextTargetId = position.targetCard ? position.targetCard.getAttribute('data-sort-id') : null;
+    if (nextTargetId !== drag.targetId) {
+        clearConfigDragTarget();
+        if (position.targetCard) position.targetCard.classList.add('drag-target');
+        drag.targetId = nextTargetId;
+    }
+    drag.targetCard = position.targetCard;
+    drag.targetIndex = position.targetIndex;
+}
+
+function flushConfigDragTarget() {
+    var drag = activeModelDrag;
+    if (!drag || drag.pendingY === null || !drag.pendingContainer) return;
+    updateConfigDragTarget({ clientY: drag.pendingY, dataTransfer: null }, drag.pendingContainer, drag.pendingType);
+    drag.pendingY = null;
+}
+
+function dragOverConfigList(event, type) {
+    event.preventDefault();
+    var drag = activeModelDrag;
+    if (!drag || drag.type !== type) return;
+    drag.pendingY = event.clientY;
+    drag.pendingContainer = event.currentTarget;
+    drag.pendingType = type;
+    if (!drag.rafId) {
+        drag.rafId = requestAnimationFrame(function() {
+            drag.rafId = 0;
+            flushConfigDragTarget();
+        });
+    }
+}
+
+function clearConfigCardDragState() {
+    if (activeModelDrag && activeModelDrag.rafId) {
+        cancelAnimationFrame(activeModelDrag.rafId);
+        activeModelDrag.rafId = 0;
+    }
+    document.querySelectorAll('.sortable-config-item.drag-source, .sortable-config-item.drag-target').forEach(function(card) {
+        card.classList.remove('drag-source', 'drag-target');
+    });
+}
+
+function reorderConfigCard(event, list, drag) {
+    clearConfigDragTarget();
+    var position = findConfigDropPosition(event.clientY, list, drag);
+    var remaining = drag.originalOrder.filter(function(id) { return id !== drag.id; });
+    remaining.splice(position.targetIndex, 0, drag.id);
+    return remaining;
+}
+
+function sameConfigOrder(first, second) {
+    return first.length === second.length && first.every(function(id, index) { return id === second[index]; });
+}
+
+function suppressProviderClickAfterDrag() {
+    suppressNextProviderClick = true;
+    setTimeout(function() { suppressNextProviderClick = false; }, 500);
+}
+
+async function finishConfigCardDrop(event, type) {
+    event.preventDefault();
+    event.stopPropagation();
+    var drag = activeModelDrag;
+    if (!drag || drag.type !== type || drag.list !== event.currentTarget) return;
+    flushConfigDragTarget();
+    var list = drag.list;
+    var reordered = reorderConfigCard({ clientY: event.clientY }, list, drag);
+    var moved = !sameConfigOrder(reordered, drag.originalOrder);
+    if (type === 'provider') suppressProviderClickAfterDrag();
+    activeModelDrag = null;
+    clearConfigCardDragState();
+    if (!moved) return;
+    try {
+        await fetchJSON('/api/model-config/' + (type === 'provider' ? 'provider-order' : 'model-order'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order: reordered, provider: type === 'model' ? drag.provider : undefined })
+        });
+        await loadModelConfig();
+    } catch (e) {
+        showToast('排序保存失败: ' + e.message, 5000);
+        await loadModelConfig();
+    }
+}
+
+function cancelConfigCardDrag() {
+    if (activeModelDrag && activeModelDrag.type === 'provider') {
+        suppressProviderClickAfterDrag();
+    }
+    clearConfigCardDragState();
+    activeModelDrag = null;
 }
 
 function renderModelConfigDetail() {
@@ -1881,10 +2089,10 @@ function renderModelConfigDetail() {
             '</div>';
         var badgeHtml = '<span class="badge badge-local">' + escapeHtml(MODEL_CONFIG_TYPE_LABEL[p.type] || p.type) + '</span>' +
             (protected ? '<span class="badge badge-remote">内置</span>' : '');
-        return '<div class="config-item provider-selectable' + (isSelected ? ' selected' : '') + '" id="provider-row-' + escapeHtml(p.id) + '" onclick="selectProvider(\'' + escapeJsString(p.id) + '\')">' +
-            '<div class="config-item-title"><span>' + escapeHtml(p.id) + '</span>' + badgeHtml + '</div>' +
+        return '<div class="config-item provider-selectable sortable-config-item' + (isSelected ? ' selected' : '') + '" draggable="true" id="provider-row-' + escapeHtml(p.id) + '" data-sort-id="' + escapeHtml(p.id) + '" ondragstart="beginConfigCardDrag(event, \'provider\', \'' + escapeJsString(p.id) + '\')" ondragend="cancelConfigCardDrag()" onclick="selectProvider(\'' + escapeJsString(p.id) + '\')">' +
+            '<div class="config-item-content"><div class="config-item-title"><span>' + escapeHtml(p.id) + '</span>' + badgeHtml + '</div>' +
             '<div class="config-item-meta">' + escapeHtml(p.base_url) + '</div>' +
-            actionsHtml +
+            actionsHtml + '</div>' +
         '</div>';
     }).join('');
     if (!providersHtml) providersHtml = '<div class="empty">暂无 Provider，点击右上角添加</div>';
@@ -1909,11 +2117,11 @@ function renderModelConfigDetail() {
                 '<button class="btn-task" onclick="editModel(\'' + escapeJsString(m.id) + '\')">编辑</button>' +
                 '<button class="btn-task" onclick="deleteModel(\'' + escapeJsString(m.id) + '\')">删除</button>' +
             '</div>';
-        return '<div class="config-item" id="model-row-' + escapeHtml(m.id) + '">' +
-            '<div class="config-item-title"><span>' + escapeHtml(m.id) + '</span>' + defaultBtn + '</div>' +
+        return '<div class="config-item sortable-config-item" draggable="true" id="model-row-' + escapeHtml(m.id) + '" data-sort-id="' + escapeHtml(m.id) + '" ondragstart="beginConfigCardDrag(event, \'model\', \'' + escapeJsString(m.id) + '\')" ondragend="cancelConfigCardDrag()">' +
+            '<div class="config-item-content"><div class="config-item-title"><span>' + escapeHtml(m.id) + '</span>' + defaultBtn + '</div>' +
             '<div class="config-item-meta">' + meta + '</div>' +
-            '<div class="config-item-caps">' + (m.capabilities || []).map(function(c) { return '<span class="cap-badge">' + escapeHtml(c) + '</span>'; }).join('') + '</div>' +
-            modelActionsHtml +
+            '<div class="config-item-caps">' + (m.capabilities || []).map(function(c) { return '<span class="cap-badge">' + escapeHtml(MODEL_CONFIG_CAP_LABEL[c] || c) + '</span>'; }).join('') + '</div>' +
+            modelActionsHtml + '</div>' +
         '</div>';
     }).join('');
     if (!modelsHtml) {
@@ -1962,6 +2170,8 @@ function editProvider(id) {
     var p = id ? (data.providers || []).find(function(x) { return x.id === id; }) : null;
     var row = document.getElementById(id ? 'provider-row-' + id : 'providersList');
     if (!row) return;
+    row.classList.add('config-item-editing');
+    row.removeAttribute('draggable');
     row.innerHTML = providerFormHtml(p);
 }
 
@@ -2051,6 +2261,7 @@ async function addDetectedModels(id) {
                     max_context_size: m.ctx,
                     max_output_size: m.max_output_size,
                     capabilities: m.caps,
+                    capabilities_auto: true,
                 })
             });
         } catch (e) {
@@ -2072,55 +2283,148 @@ function toggleOptionBubble(el, groupClass) {
     el.classList.add('selected');
 }
 
+function inferModelCapabilities(provider, model) {
+    var p = String(provider || '').toLowerCase();
+    var id = String(model || '').toLowerCase();
+    var caps = [];
+    var specialized = /embedding|moderation|whisper|transcri|tts|speech|dall-e|gpt-image|image-generation|music/.test(id);
+    var mainstream = /minimax|kimi|moonshot|gpt|openai|claude|anthropic|gemini|google|deepseek|qwen|mistral|llama/.test(p + ' ' + id);
+
+    if (!specialized && (mainstream || /vision|multimodal|vl|omni/.test(id))) {
+        caps.push('tool_use');
+    }
+    if (!specialized && (
+        /minimax|kimi|moonshot|openai|anthropic|claude|gemini|google/.test(p) ||
+        /gpt-4|gpt-5|(^|[-_.])o[1-4]([-.]|$)|claude|gemini|kimi|moonshot|minimax-m[235]|vision|multimodal|[-_.]vl([-.]|$)|omni/.test(id)
+    )) {
+        caps.push('image_in');
+    }
+    if (!specialized && (
+        /gemini|google/.test(p) ||
+        /kimi-k(?:2\.5|2\.6|2\.7|3)|moonshot.*vision|minimax-m3|video/.test(id)
+    )) {
+        caps.push('video_in');
+    }
+    if (!specialized && /thinking|reasoning|reasoner|deepseek-reasoner|(^|[-_.])o[1-4]([-.]|$)|(^|[-_.])r[12]([-.]|$)|kimi-k(?:2\.5|2\.6|2\.7|3)|minimax-m[237]|claude-(?:3-7|4)/.test(id)) {
+        caps.push('thinking');
+    }
+    if (!specialized && /(^|[-_.])(?:thinking|reasoner|reasoning)|deepseek-reasoner|(^|[-_.])o[1-4]([-.]|$)|(^|[-_.])r[12]([-.]|$)|kimi-k3/.test(id)) {
+        caps.push('always_thinking');
+    }
+    return MODEL_CONFIG_CAPS.filter(function(cap) { return caps.indexOf(cap) !== -1; });
+}
+
+function setModelCapabilitiesAuto(enabled) {
+    var mode = document.getElementById('model-cap_mode');
+    var group = document.querySelector('.cap-bubble-group');
+    var status = document.getElementById('model-cap-mode');
+    if (!mode || !group) return;
+    mode.value = enabled ? 'auto' : 'manual';
+    if (status) status.textContent = enabled ? '自动识别' : '手动设置';
+    if (enabled) {
+        var provider = document.getElementById('model-provider');
+        var model = document.getElementById('model-api_model');
+        var inferred = inferModelCapabilities(provider && provider.value, model && model.value);
+        group.querySelectorAll('.option-bubble').forEach(function(bubble) {
+            bubble.classList.toggle('selected', inferred.indexOf(bubble.getAttribute('data-value')) !== -1);
+        });
+    }
+}
+
+function refreshModelCapabilitiesIfAuto() {
+    var mode = document.getElementById('model-cap_mode');
+    if (mode && mode.value === 'auto') setModelCapabilitiesAuto(true);
+}
+
+function getModelCapabilitiesForForm(m) {
+    var saved = Array.isArray(m.capabilities) ? m.capabilities.filter(function(cap) {
+        return MODEL_CONFIG_CAPS.indexOf(cap) !== -1;
+    }) : [];
+    var hasExplicitMode = typeof m.capabilities_auto === 'boolean';
+    var auto = hasExplicitMode ? m.capabilities_auto : !(!!m.id && saved.length > 0);
+    return {
+        values: auto ? inferModelCapabilities(m.provider, m.model || m.id) : saved,
+        auto: auto,
+    };
+}
+
 function toggleCapBubble(el) {
+    setModelCapabilitiesAuto(false);
     el.classList.toggle('selected');
+}
+
+function nearestModelOptionIndex(options, value) {
+    var nearestIndex = 0;
+    var nearestDistance = Infinity;
+    options.forEach(function(o, i) {
+        var distance = Math.abs(o.value - value);
+        if (distance < nearestDistance) {
+            nearestIndex = i;
+            nearestDistance = distance;
+        }
+    });
+    return nearestIndex;
+}
+
+function updateModelRangeValue(el, outputId) {
+    if (!el) return;
+    var labels = (el.getAttribute('data-labels') || '').split('|');
+    var index = parseInt(el.value, 10) || 0;
+    var output = document.getElementById(outputId);
+    if (output) output.textContent = labels[index] || '';
+    var max = parseInt(el.max, 10) || 0;
+    var percent = max ? (index / max) * 100 : 0;
+    el.style.background = 'linear-gradient(to right, var(--accent) 0%, var(--accent) ' + percent + '%, var(--surface-2) ' + percent + '%, var(--surface-2) 100%)';
+}
+
+function getModelRangeValue(el, options, fallback) {
+    if (!el) return fallback;
+    var index = parseInt(el.value, 10);
+    return options[index] ? options[index].value : fallback;
+}
+
+function modelRangeHtml(id, outputId, label, options, currentValue) {
+    var index = nearestModelOptionIndex(options, currentValue);
+    var labels = options.map(function(o) { return o.label; });
+    var values = options.map(function(o) { return o.value; });
+    var scale = labels.map(function(item) { return '<span>' + escapeHtml(item) + '</span>'; }).join('');
+    return '<label class="model-range-label" for="' + id + '">' + escapeHtml(label) + '<output id="' + outputId + '" class="model-range-value">' + escapeHtml(labels[index]) + '</output></label>' +
+        '<div class="model-range-control">' +
+        '<input type="range" class="model-range" id="' + id + '" min="0" max="' + (options.length - 1) + '" step="1" value="' + index + '" data-labels="' + escapeHtml(labels.join('|')) + '" data-values="' + values.join(',') + '" oninput="updateModelRangeValue(this, \'' + outputId + '\')">' +
+        '<div class="model-range-scale">' + scale + '</div>' +
+        '</div>';
 }
 
 function modelFormHtml(m) {
     m = m || {};
     var isEdit = !!m.id;
-    var providers = (statusData.modelConfig && statusData.modelConfig.providers) || [];
-    var providerOptions = providers.map(function(p) {
-        return '<option value="' + escapeHtml(p.id) + '"' + (m.provider === p.id ? ' selected' : '') + '>' + escapeHtml(p.id) + '</option>';
-    }).join('');
-
     var currentCtx = m.max_context_size || 128000;
-    // 如果当前值不匹配任何预置选项，找最接近的并选中
-    var ctxExactMatch = MODEL_CONTEXT_OPTIONS.some(function(o) { return o.value === currentCtx; });
-    var ctxBubbles = MODEL_CONTEXT_OPTIONS.map(function(o) {
-        var selected = (ctxExactMatch && o.value === currentCtx) ||
-                       (!ctxExactMatch && Math.abs(o.value - currentCtx) <= 50000);
-        return '<div class="option-bubble' + (selected ? ' selected' : '') + '" role="button" onclick="toggleOptionBubble(this, \'ctx-bubble-group\')" data-value="' + o.value + '">' + escapeHtml(o.label) + '</div>';
-    }).join('');
-
     var currentMaxTokens = m.max_output_size || 4096;
-    var mtExactMatch = MODEL_MAX_TOKENS_OPTIONS.some(function(o) { return o.value === currentMaxTokens; });
-    var maxTokensBubbles = MODEL_MAX_TOKENS_OPTIONS.map(function(o) {
-        var selected = (mtExactMatch && o.value === currentMaxTokens) ||
-                       (!mtExactMatch && Math.abs(o.value - currentMaxTokens) <= 5000);
-        return '<div class="option-bubble' + (selected ? ' selected' : '') + '" role="button" onclick="toggleOptionBubble(this, \'maxtokens-bubble-group\')" data-value="' + o.value + '">' + escapeHtml(o.label) + '</div>';
-    }).join('');
-
+    var contextRange = modelRangeHtml('model-context_range', 'model-context_value', '上下文长度', MODEL_CONTEXT_OPTIONS, currentCtx);
+    var maxTokensRange = modelRangeHtml('model-maxtokens_range', 'model-maxtokens_value', 'Max Tokens', MODEL_MAX_TOKENS_OPTIONS, currentMaxTokens);
+    var capState = getModelCapabilitiesForForm(m);
     var capBubbles = MODEL_CONFIG_CAPS.map(function(c) {
-        return '<div class="option-bubble cap-bubble' + ((m.capabilities || []).indexOf(c) !== -1 ? ' selected' : '') + '" role="button" onclick="toggleCapBubble(this)" data-value="' + c + '">' + escapeHtml(c) + '</div>';
+        return '<div class="option-bubble cap-bubble' + (capState.values.indexOf(c) !== -1 ? ' selected' : '') + '" role="button" onclick="toggleCapBubble(this)" data-value="' + c + '">' + escapeHtml(MODEL_CONFIG_CAP_LABEL[c] || c) + '</div>';
     }).join('');
+    var capModeHtml = '<input type="hidden" id="model-cap_mode" value="' + (capState.auto ? 'auto' : 'manual') + '"><label>能力</label>';
 
     var effortEnabled = !!(m.support_efforts && m.support_efforts.length);
     var currentEffort = m.default_effort || 'high';
     var effortBubbles = MODEL_EFFORT_OPTIONS.map(function(o) {
         return '<div class="option-bubble' + (effortEnabled && o.value === currentEffort ? ' selected' : '') + '" role="button" onclick="toggleOptionBubble(this, \'effort-bubble-group\')" data-value="' + escapeHtml(o.value) + '">' + escapeHtml(o.label) + '</div>';
     }).join('');
-    var effortToggleHtml = '<div class="effort-toggle-row"><span>推理强度（K3 同款三档）</span><label class="switch"><input type="checkbox" id="model-effort_enabled"' + (effortEnabled ? ' checked' : '') + '><span class="slider"></span></label></div>';
+    var effortToggleHtml = '<div class="effort-toggle-row"><span>推理强度</span><label class="switch"><input type="checkbox" id="model-effort_enabled"' + (effortEnabled ? ' checked' : '') + '><span class="slider"></span></label></div>';
 
-    return '<div class="config-form">' +
+    return '<div class="config-form" onclick="event.stopPropagation()">' +
         '<label>API Model</label><input type="text" id="model-api_model" value="' + escapeHtml(m.model || m.id || '') + '" placeholder="例如 gpt-4.1">' +
         (isEdit ? '<input type="hidden" id="model-id" value="' + escapeHtml(m.id) + '">' : '') +
-        '<label>Provider</label><select id="model-provider">' + providerOptions + '</select>' +
-        '<label>上下文长度</label><div class="option-bubble-group ctx-bubble-group">' + ctxBubbles + '</div>' +
-        '<label>Max Tokens</label><div class="option-bubble-group maxtokens-bubble-group">' + maxTokensBubbles + '</div>' +
+        '<input type="hidden" id="model-provider" value="' + escapeHtml(m.provider || '') + '">' +
+        contextRange +
+        maxTokensRange +
         effortToggleHtml +
         '<div class="option-bubble-group effort-bubble-group"' + (effortEnabled ? '' : ' style="opacity:0.4;pointer-events:none"') + '>' + effortBubbles + '</div>' +
-        '<label>Capabilities</label><div class="option-bubble-group cap-bubble-group">' + capBubbles + '</div>' +
+        capModeHtml +
+        '<div class="option-bubble-group cap-bubble-group">' + capBubbles + '</div>' +
         '<div class="config-form-actions">' +
             '<button class="btn-task" onclick="saveModel()">保存</button>' +
             '<button class="btn-task" onclick="renderModelConfigDetail()">取消</button>' +
@@ -2137,7 +2441,11 @@ function editModel(id, preferredProvider) {
     var m = id ? (data.models || []).find(function(x) { return x.id === id; }) : { provider: preferredProvider || '' };
     var row = document.getElementById(id ? 'model-row-' + id : 'modelsList');
     if (!row) return;
+    row.classList.add('config-item-editing');
+    row.removeAttribute('draggable');
     row.innerHTML = modelFormHtml(m);
+    updateModelRangeValue(document.getElementById('model-context_range'), 'model-context_value');
+    updateModelRangeValue(document.getElementById('model-maxtokens_range'), 'model-maxtokens_value');
     // 推理强度开关：切换时启用/禁用档位气泡
     var effortCb = document.getElementById('model-effort_enabled');
     if (effortCb) {
@@ -2160,6 +2468,11 @@ function editModel(id, preferredProvider) {
             }
         });
     }
+
+    var providerInput = document.getElementById('model-provider');
+    var modelInput = document.getElementById('model-api_model');
+    if (providerInput) providerInput.addEventListener('change', refreshModelCapabilitiesIfAuto);
+    if (modelInput) modelInput.addEventListener('input', refreshModelCapabilitiesIfAuto);
 }
 
 async function saveModel() {
@@ -2169,8 +2482,8 @@ async function saveModel() {
     var id = idInput ? idInput.value.trim() : apiModel;
     if (!id || !apiModel) { showToast('API Model 不能为空', 5000); return; }
 
-    var ctxEl = document.querySelector('.ctx-bubble-group .option-bubble.selected');
-    var maxTokensEl = document.querySelector('.maxtokens-bubble-group .option-bubble.selected');
+    var ctxEl = document.getElementById('model-context_range');
+    var maxTokensEl = document.getElementById('model-maxtokens_range');
     var effortEnabledEl = document.getElementById('model-effort_enabled');
     var effortEnabled = effortEnabledEl ? effortEnabledEl.checked : false;
     var effortEl = document.querySelector('.effort-bubble-group .option-bubble.selected');
@@ -2183,9 +2496,10 @@ async function saveModel() {
         provider: document.getElementById('model-provider').value,
         model: apiModel,
         display_name: apiModel,
-        max_context_size: ctxEl ? parseInt(ctxEl.getAttribute('data-value'), 10) : (m.max_context_size || 128000),
-        max_output_size: maxTokensEl ? parseInt(maxTokensEl.getAttribute('data-value'), 10) : (m.max_output_size || 4096),
+        max_context_size: getModelRangeValue(ctxEl, MODEL_CONTEXT_OPTIONS, 128000),
+        max_output_size: getModelRangeValue(maxTokensEl, MODEL_MAX_TOKENS_OPTIONS, 4096),
         capabilities: caps,
+        capabilities_auto: document.getElementById('model-cap_mode').value === 'auto',
         effort_enabled: effortEnabled,
         default_effort: effortVal,
     };
@@ -2214,6 +2528,173 @@ async function setDefaultModel(id) {
     } catch (e) { showToast('设置默认模型失败: ' + e.message, 5000); }
 }
 
+// === Agent instructions ===
+function agentScopeById(scopeId) {
+    return agentsState.scopes.find(function(scope) { return scope.id === scopeId; }) || null;
+}
+
+function agentStatusText(scope) {
+    if (!scope) return '未知状态';
+    if (scope.exists) return '已存在';
+    return '未创建';
+}
+
+function agentStatusClass(scope) {
+    return scope && scope.exists ? 'ok' : 'empty';
+}
+
+function renderAgentsPage() {
+    var root = document.getElementById('agentsPageContent');
+    if (!root) return;
+    if (agentsState.loading && !agentsState.scopes.length) {
+        root.innerHTML = '<div class="agents-loading">正在读取 Agent 指令...</div>';
+        return;
+    }
+    if (!agentsState.scopes.length) {
+        root.innerHTML = '<div class="error">暂时无法读取 Agent 指令作用域</div>';
+        return;
+    }
+    var scopeItems = agentsState.scopes.map(function(scope) {
+        var active = scope.id === agentsState.currentScope ? ' active' : '';
+        var status = scope.error ? '读取失败' : agentStatusText(scope);
+        var statusClass = scope.error ? 'error' : agentStatusClass(scope);
+        return '<button type="button" class="agents-scope-item' + active + '" onclick="selectAgentScope(\'' + escapeJsString(scope.id) + '\')">' +
+            '<span class="agents-scope-item-top"><strong>' + escapeHtml(scope.label) + '</strong><span class="agents-scope-status ' + statusClass + '">' + escapeHtml(status) + '</span></span>' +
+            '<span class="agents-scope-desc">' + escapeHtml(scope.description || '') + '</span>' +
+            '<code>' + escapeHtml(scope.path || '路径不可用') + '</code>' +
+            '</button>';
+    }).join('');
+    var current = agentScopeById(agentsState.currentScope);
+    var dirtyLabel = agentsState.saving ? '保存中...' : (agentsState.dirty ? '未保存更改' : (current && current.exists ? '已读取' : '尚未创建'));
+    var dirtyClass = agentsState.saving ? 'saving' : (agentsState.dirty ? 'dirty' : 'clean');
+    var conflictHtml = agentsState.conflict ? '<div class="agents-conflict"><strong>文件已被外部修改</strong><span>重新载入会放弃当前编辑内容；覆盖保存会使用当前编辑内容覆盖磁盘文件。</span><div class="agents-conflict-actions"><button class="btn-task" onclick="reloadAgentContent(true)">重新载入</button><button class="btn-task btn-danger" onclick="forceSaveAgent()">覆盖保存</button></div></div>' : '';
+    root.innerHTML = '<div class="agents-layout">' +
+        '<aside class="agents-scope-list" aria-label="Agent 指令作用域">' + scopeItems + '</aside>' +
+        '<section class="agents-editor-panel" aria-label="Agent 指令编辑器">' +
+            '<div class="agents-editor-header"><div><div class="agents-editor-title">' + escapeHtml(current ? current.label : '') + '</div><code>' + escapeHtml(current ? current.path : '') + '</code></div><span class="agents-editor-status ' + dirtyClass + '">' + dirtyLabel + '</span></div>' +
+            '<div class="agents-editor-toolbar"><button class="btn-task" onclick="reloadAgentContent(false)"' + (agentsState.saving ? ' disabled' : '') + '>重新读取</button><button class="btn-task agents-save-btn" onclick="saveAgent()"' + (agentsState.saving || !agentsState.dirty ? ' disabled' : '') + '>' + (agentsState.saving ? '保存中...' : (current && current.exists ? '保存' : '创建并保存')) + '</button></div>' +
+            conflictHtml +
+            '<textarea id="agentsEditor" class="agents-editor" spellcheck="false" placeholder="在这里输入 Agent 指令，例如：\n\n- 每个对话都要叫我 Pat。" oninput="onAgentEditorInput(this.value)">' + escapeHtml(agentsState.content) + '</textarea>' +
+            '<div class="agents-help"><strong>生效说明</strong><span>首次点击保存时才会创建这个文件。之后再次打开此页面，会自动读取并展示文件内容。未保存的编辑不会改变磁盘文件。</span></div>' +
+        '</section>' +
+    '</div>';
+}
+
+async function loadAgents() {
+    if (agentsState.loading) return;
+    agentsState.loading = true;
+    renderAgentsPage();
+    try {
+        var data = await fetchJSON('/api/agents');
+        agentsState.scopes = data.scopes || [];
+        agentsState.loaded = true;
+        if (!agentScopeById(agentsState.currentScope) && agentsState.scopes.length) agentsState.currentScope = agentsState.scopes[0].id;
+        await loadAgentContent(false);
+    } catch (e) {
+        agentsState.scopes = [];
+        agentsState.loading = false;
+        renderAgentsPage();
+        showToast('读取 Agent 指令失败: ' + e.message, 5000);
+    }
+}
+
+async function loadAgentContent(force) {
+    var scope = agentsState.currentScope;
+    if (!scope) return;
+    if (agentsState.dirty && !force) return;
+    agentsState.loading = true;
+    renderAgentsPage();
+    try {
+        var data = await fetchJSON('/api/agents/' + encodeURIComponent(scope));
+        agentsState.content = data.content || '';
+        agentsState.revision = data.revision || '';
+        agentsState.exists = data.exists === true;
+        agentsState.dirty = false;
+        agentsState.conflict = null;
+        var listed = agentScopeById(scope);
+        if (listed) Object.assign(listed, data);
+    } catch (e) {
+        showToast('读取 Agent 指令失败: ' + e.message, 5000);
+    } finally {
+        agentsState.loading = false;
+        renderAgentsPage();
+    }
+}
+
+function onAgentEditorInput(content) {
+    agentsState.content = content;
+    agentsState.dirty = true;
+    agentsState.conflict = null;
+    var status = document.querySelector('.agents-editor-status');
+    var saveBtn = document.querySelector('.agents-save-btn');
+    if (status) {
+        status.className = 'agents-editor-status dirty';
+        status.textContent = '未保存更改';
+    }
+    if (saveBtn) saveBtn.disabled = false;
+}
+
+function selectAgentScope(scope) {
+    if (scope === agentsState.currentScope) return;
+    if (agentsState.dirty) {
+        confirmDialog('当前作用域有未保存更改，切换后将放弃这些内容。继续吗？', function() {
+            agentsState.currentScope = scope;
+            agentsState.dirty = false;
+            agentsState.conflict = null;
+            loadAgentContent(true);
+        }, { danger: false });
+        return;
+    }
+    agentsState.currentScope = scope;
+    agentsState.conflict = null;
+    loadAgentContent(true);
+}
+
+async function saveAgent(force) {
+    if (agentsState.saving || (!agentsState.dirty && !force)) return;
+    agentsState.saving = true;
+    renderAgentsPage();
+    try {
+        var data = await fetchJSON('/api/agents/' + encodeURIComponent(agentsState.currentScope), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: agentsState.content, revision: agentsState.revision, force: force === true }),
+        });
+        agentsState.revision = data.revision || '';
+        agentsState.exists = true;
+        agentsState.dirty = false;
+        agentsState.conflict = null;
+        var listed = agentScopeById(agentsState.currentScope);
+        if (listed) Object.assign(listed, data, { exists: true });
+        showToast('Agent 指令已保存，后续新会话会读取最新内容', 4000);
+    } catch (e) {
+        if (e.message === 'HTTP 409') {
+            try {
+                var conflict = await fetchJSON('/api/agents/' + encodeURIComponent(agentsState.currentScope));
+                agentsState.conflict = conflict;
+            } catch (ignored) {}
+            showToast('文件已被外部修改，请选择重新载入或覆盖保存', 5000);
+        } else {
+            showToast('保存 Agent 指令失败: ' + e.message, 5000);
+        }
+    } finally {
+        agentsState.saving = false;
+        renderAgentsPage();
+    }
+}
+
+function forceSaveAgent() {
+    saveAgent(true);
+}
+
+function reloadAgentContent(force) {
+    if (agentsState.dirty && !force) {
+        confirmDialog('重新读取会放弃当前未保存更改，继续吗？', function() { loadAgentContent(true); }, { danger: false });
+        return;
+    }
+    loadAgentContent(true);
+}
+
 // === Settings ===
 function renderSettings() {
     var isLocal = settings.kw_bind === '127.0.0.1';
@@ -2221,6 +2702,9 @@ function renderSettings() {
     function buildControl(item) {
         if (item.type === 'link') {
             return '<a href="' + escapeHtml(item.href || '#') + '" target="_blank" class="btn-task" style="text-decoration:none;padding:0.45rem 0.75rem;font-size:0.85rem;">🌐 查看教程</a>';
+        }
+        if (item.type === 'agents_link') {
+            return '<button type="button" class="btn-task" onclick="location.hash=\'#/agents\'">打开编辑器</button>';
         }
         if (item.type === 'select') {
             var cur = settings[item.key];
@@ -3607,6 +4091,11 @@ document.addEventListener('click', function(e) {
     if (dd && !dd.contains(e.target)) closeSkillSortDropdown();
 });
 document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && location.hash === '#/agents') {
+        e.preventDefault();
+        saveAgent(false);
+        return;
+    }
     if (e.key !== 'Escape') return;
     var modals = document.querySelectorAll('.modal-overlay');
     for (var i = modals.length - 1; i >= 0; i--) {

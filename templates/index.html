@@ -19,7 +19,7 @@
         } catch (e) {}
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=73">
+    <link rel="stylesheet" href="/static/css/style.css?v=86">
 </head>
 <body>
     <header>
@@ -276,14 +276,14 @@
                     <h3>Providers</h3>
                     <button class="btn-task" onclick="editProvider()">+ 添加 Provider</button>
                 </div>
-                <div id="providersList" class="config-list"></div>
+                <div id="providersList" class="config-list" ondragover="dragOverConfigList(event, 'provider')" ondrop="finishConfigCardDrop(event, 'provider')"></div>
             </section>
             <section class="config-section card">
                 <div class="config-section-header">
                     <h3>Models</h3>
                     <button class="btn-task" onclick="editModelForSelectedProvider()">+ 添加 Model</button>
                 </div>
-                <div id="modelsList" class="config-list"></div>
+                <div id="modelsList" class="config-list" ondragover="dragOverConfigList(event, 'model')" ondrop="finishConfigCardDrop(event, 'model')"></div>
             </section>
         </div>
     </div>
@@ -381,6 +381,18 @@
             </h2>
         </div>
         <div id="settingsList" class="config-list settings-list"></div>
+    </div>
+
+    <div id="view-agents" class="detail-page agents-page" style="display:none">
+        <div class="detail-header">
+            <a href="#/settings" class="back-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>返回设置</a>
+            <h2>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg>
+                Agent 指令
+            </h2>
+            <span class="agents-page-subtitle">编辑 Kimi Code 读取的 AGENTS.md</span>
+        </div>
+        <div id="agentsPageContent"></div>
     </div>
 
     <div id="view-tasks" class="detail-page" style="display:none">
@@ -803,6 +815,6 @@
     </div>
 
     <script src="/static/js/charts.js?v=22"></script>
-    <script src="/static/js/app.js?v=118"></script>
+    <script src="/static/js/app.js?v=140"></script>
 </body>
 </html>
