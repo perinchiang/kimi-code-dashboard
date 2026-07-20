@@ -485,6 +485,13 @@ async function launchKimiWeb() {
     var text = document.getElementById('kimiWebBtnText');
     var publicUrls = (settings.kw_public_urls || []).map(normalizePublicUrl).filter(Boolean);
 
+    if (btn.classList.contains('running')) {
+        confirmDialog('kimiweb 已经在运行了，是否重启 kimiweb？', function() {
+            _launchKimiWebInternal(btn, text, publicUrls, true);
+        }, { danger: false });
+        return;
+    }
+
     // 如果没填自定义 URL，提示用户
     if (publicUrls.length === 0) {
         confirmDialog('未配置自定义访问 URL，将使用本地地址 http://127.0.0.1:' + (settings.kw_port || 5494) + '\n\n是否继续？\n（点击「取消」去设置页填写自定义 URL）', function() {
@@ -498,7 +505,7 @@ async function launchKimiWeb() {
     _launchKimiWebInternal(btn, text, publicUrls);
 }
 
-async function _launchKimiWebInternal(btn, text, publicUrls) {
+async function _launchKimiWebInternal(btn, text, publicUrls, restart) {
     btn.disabled = true;
     text.textContent = '启动中...';
     var wasRunning = btn.classList.contains('running');
@@ -508,7 +515,8 @@ async function _launchKimiWebInternal(btn, text, publicUrls) {
             bind: settings.kw_bind || '0.0.0.0',
             port: parseInt(settings.kw_port, 10) || 5494,
             bypass_auth: settings.kw_bypass_auth !== false,
-            public_urls: publicUrls
+            public_urls: publicUrls,
+            restart: restart === true
         };
         var data = await postJSON('/api/launch-kimi-web', cfg);
         if (data.status === 'launched' || data.status === 'already_running') {
@@ -1806,6 +1814,12 @@ var MODEL_MAX_TOKENS_OPTIONS = [
     { value: 64000, label: '64K' },
     { value: 128000, label: '128K' },
 ];
+var MODEL_EFFORT_OPTIONS = [
+    { value: '', label: '关闭' },
+    { value: 'low', label: 'low' },
+    { value: 'high', label: 'high' },
+    { value: 'max', label: 'max' },
+];
 var MASKED_KEY = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
 
 function isProtectedProvider(p) {
@@ -1887,6 +1901,7 @@ function renderModelConfigDetail() {
         var providerProtected = modelProvider && isProtectedProvider(modelProvider);
         var meta = 'model=' + escapeHtml(m.model) + ' &middot; ctx=' + (m.max_context_size || 0).toLocaleString();
         if (m.max_output_size) meta += ' &middot; max_output=' + m.max_output_size.toLocaleString();
+        if (m.default_effort) meta += ' &middot; effort=' + escapeHtml(m.default_effort);
         var defaultBtn = isDefault
             ? '<span class="badge badge-local">默认</span>'
             : '<button class="btn-task btn-sm" onclick="setDefaultModel(\'' + escapeJsString(m.id) + '\')">设为默认</button>';
@@ -2084,12 +2099,18 @@ function modelFormHtml(m) {
         return '<div class="option-bubble cap-bubble' + ((m.capabilities || []).indexOf(c) !== -1 ? ' selected' : '') + '" role="button" onclick="toggleCapBubble(this)" data-value="' + c + '">' + escapeHtml(c) + '</div>';
     }).join('');
 
+    var currentEffort = m.default_effort || '';
+    var effortBubbles = MODEL_EFFORT_OPTIONS.map(function(o) {
+        return '<div class="option-bubble' + (o.value === currentEffort ? ' selected' : '') + '" role="button" onclick="toggleOptionBubble(this, \'effort-bubble-group\')" data-value="' + escapeHtml(o.value) + '">' + escapeHtml(o.label) + '</div>';
+    }).join('');
+
     return '<div class="config-form">' +
         '<label>API Model</label><input type="text" id="model-api_model" value="' + escapeHtml(m.model || m.id || '') + '" placeholder="例如 gpt-4.1">' +
         (isEdit ? '<input type="hidden" id="model-id" value="' + escapeHtml(m.id) + '">' : '') +
         '<label>Provider</label><select id="model-provider">' + providerOptions + '</select>' +
         '<label>上下文长度</label><div class="option-bubble-group ctx-bubble-group">' + ctxBubbles + '</div>' +
         '<label>Max Tokens</label><div class="option-bubble-group maxtokens-bubble-group">' + maxTokensBubbles + '</div>' +
+        '<label>思考强度（同 K3）</label><div class="option-bubble-group effort-bubble-group">' + effortBubbles + '</div>' +
         '<label>Capabilities</label><div class="option-bubble-group cap-bubble-group">' + capBubbles + '</div>' +
         '<div class="config-form-actions">' +
             '<button class="btn-task" onclick="saveModel()">保存</button>' +
@@ -2119,6 +2140,8 @@ async function saveModel() {
 
     var ctxEl = document.querySelector('.ctx-bubble-group .option-bubble.selected');
     var maxTokensEl = document.querySelector('.maxtokens-bubble-group .option-bubble.selected');
+    var effortEl = document.querySelector('.effort-bubble-group .option-bubble.selected');
+    var effortVal = effortEl ? effortEl.getAttribute('data-value') : '';
     var caps = [];
     document.querySelectorAll('.cap-bubble-group .option-bubble.selected').forEach(function(b) { caps.push(b.getAttribute('data-value')); });
 
@@ -2130,6 +2153,8 @@ async function saveModel() {
         max_context_size: ctxEl ? parseInt(ctxEl.getAttribute('data-value'), 10) : 128000,
         max_output_size: maxTokensEl ? parseInt(maxTokensEl.getAttribute('data-value'), 10) : 4096,
         capabilities: caps,
+        default_effort: effortVal,
+        support_efforts: effortVal ? ['low', 'high', 'max'] : [],
     };
     try {
         await fetchJSON('/api/model-config/model', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

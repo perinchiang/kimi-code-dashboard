@@ -124,6 +124,8 @@ def _models_list(cfg: dict):
             "max_context_size": m.get("max_context_size", 0),
             "max_output_size": m.get("max_output_size") or m.get("max_tokens", 0),
             "capabilities": m.get("capabilities", []),
+            "support_efforts": m.get("support_efforts", []),
+            "default_effort": m.get("default_effort", ""),
         })
     return result
 
@@ -356,6 +358,14 @@ def api_save_model():
                 entry["display_name"] = body["display_name"]
             elif "display_name" in old:
                 entry["display_name"] = old["display_name"]
+
+            # 思考强度（同 K3 三档：low / high / max）
+            if body.get("default_effort"):
+                entry["default_effort"] = body["default_effort"]
+                entry["support_efforts"] = body.get("support_efforts") or ["low", "high", "max"]
+            elif "default_effort" in old:
+                entry["default_effort"] = old["default_effort"]
+                entry["support_efforts"] = old.get("support_efforts", ["low", "high", "max"])
 
             models[mid] = entry
             _save(cfg)

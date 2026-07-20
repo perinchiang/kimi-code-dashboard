@@ -299,8 +299,9 @@ def api_kimi_web_status():
 @bp.route("/api/launch-kimi-web", methods=["POST"])
 def api_launch_kimi_web():
     """持久化前端配置并据此启动 kimi web。"""
+    request_cfg = request.get_json(silent=True) or {}
     try:
-        norm_cfg = _normalize_kimi_web_config(request.get_json(silent=True), persist=True)
+        norm_cfg = _normalize_kimi_web_config(request_cfg, persist=True)
     except ValueError as exc:
         return jsonify({"status": "error", "error": str(exc)}), 400
     except OSError as exc:
@@ -315,11 +316,11 @@ def api_launch_kimi_web():
     # 检查端口是否已被占用
     if tcp_open("127.0.0.1", port):
         running_bind = _get_running_bind(port)
-        if running_bind == bind:
-            # bind 模式相同，无需重启
+        if running_bind == bind and not bool(request_cfg.get("restart", False)):
+            # bind 模式相同且未请求重启，无需重复启动
             return jsonify({"status": "already_running", "port": port, "url": url})
-        # bind 模式不同，需要 kill 旧进程再重启
-        log.info("bind changed (%s -> %s), killing old server", running_bind, bind)
+        # bind 模式变化，或用户确认重启，需要先停止旧进程
+        log.info("restarting kimi web (bind=%s, running_bind=%s)", bind, running_bind)
         _kill_kimi_server()
 
     # 清理僵尸 instance 文件
