@@ -359,11 +359,18 @@ def api_save_model():
             elif "display_name" in old:
                 entry["display_name"] = old["display_name"]
 
-            # 思考强度（同 K3 三档：low / high / max）
-            if body.get("default_effort"):
-                entry["default_effort"] = body["default_effort"]
-                entry["support_efforts"] = body.get("support_efforts") or ["low", "high", "max"]
+            # 推理强度开关（同 K3 三档：low / high / max）
+            # 前端传 effort_enabled=true → 写入 support_efforts + default_effort
+            # 前端传 effort_enabled=false → 删除这两个字段
+            effort_enabled = body.get("effort_enabled")
+            if effort_enabled is True:
+                entry["support_efforts"] = ["low", "high", "max"]
+                entry["default_effort"] = body.get("default_effort") or "high"
+            elif effort_enabled is False:
+                # 显式关闭：不写入，也不保留旧值
+                pass
             elif "default_effort" in old:
+                # 未传 effort_enabled：保留旧值
                 entry["default_effort"] = old["default_effort"]
                 entry["support_efforts"] = old.get("support_efforts", ["low", "high", "max"])
 

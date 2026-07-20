@@ -1815,7 +1815,6 @@ var MODEL_MAX_TOKENS_OPTIONS = [
     { value: 128000, label: '128K' },
 ];
 var MODEL_EFFORT_OPTIONS = [
-    { value: '', label: '默认' },
     { value: 'low', label: 'low' },
     { value: 'high', label: 'high' },
     { value: 'max', label: 'max' },
@@ -2099,10 +2098,12 @@ function modelFormHtml(m) {
         return '<div class="option-bubble cap-bubble' + ((m.capabilities || []).indexOf(c) !== -1 ? ' selected' : '') + '" role="button" onclick="toggleCapBubble(this)" data-value="' + c + '">' + escapeHtml(c) + '</div>';
     }).join('');
 
-    var currentEffort = m.default_effort || '';
+    var effortEnabled = !!(m.support_efforts && m.support_efforts.length);
+    var currentEffort = m.default_effort || 'high';
     var effortBubbles = MODEL_EFFORT_OPTIONS.map(function(o) {
-        return '<div class="option-bubble' + (o.value === currentEffort ? ' selected' : '') + '" role="button" onclick="toggleOptionBubble(this, \'effort-bubble-group\')" data-value="' + escapeHtml(o.value) + '">' + escapeHtml(o.label) + '</div>';
+        return '<div class="option-bubble' + (effortEnabled && o.value === currentEffort ? ' selected' : '') + '" role="button" onclick="toggleOptionBubble(this, \'effort-bubble-group\')" data-value="' + escapeHtml(o.value) + '">' + escapeHtml(o.label) + '</div>';
     }).join('');
+    var effortToggleHtml = '<label class="effort-toggle-row"><span>推理强度（K3 同款三档）</span><label class="switch"><input type="checkbox" id="model-effort_enabled"' + (effortEnabled ? ' checked' : '') + '><span class="slider"></span></label></label>';
 
     return '<div class="config-form">' +
         '<label>API Model</label><input type="text" id="model-api_model" value="' + escapeHtml(m.model || m.id || '') + '" placeholder="例如 gpt-4.1">' +
@@ -2110,7 +2111,8 @@ function modelFormHtml(m) {
         '<label>Provider</label><select id="model-provider">' + providerOptions + '</select>' +
         '<label>上下文长度</label><div class="option-bubble-group ctx-bubble-group">' + ctxBubbles + '</div>' +
         '<label>Max Tokens</label><div class="option-bubble-group maxtokens-bubble-group">' + maxTokensBubbles + '</div>' +
-        '<label>推理强度</label><div class="option-bubble-group effort-bubble-group">' + effortBubbles + '</div>' +
+        effortToggleHtml +
+        '<div class="option-bubble-group effort-bubble-group"' + (effortEnabled ? '' : ' style="opacity:0.4;pointer-events:none"') + '>' + effortBubbles + '</div>' +
         '<label>Capabilities</label><div class="option-bubble-group cap-bubble-group">' + capBubbles + '</div>' +
         '<div class="config-form-actions">' +
             '<button class="btn-task" onclick="saveModel()">保存</button>' +
@@ -2129,6 +2131,28 @@ function editModel(id, preferredProvider) {
     var row = document.getElementById(id ? 'model-row-' + id : 'modelsList');
     if (!row) return;
     row.innerHTML = modelFormHtml(m);
+    // 推理强度开关：切换时启用/禁用档位气泡
+    var effortCb = document.getElementById('model-effort_enabled');
+    if (effortCb) {
+        effortCb.addEventListener('change', function() {
+            var group = document.querySelector('.effort-bubble-group');
+            if (!group) return;
+            if (effortCb.checked) {
+                group.style.opacity = '1';
+                group.style.pointerEvents = 'auto';
+                // 默认选中 high
+                var sel = group.querySelector('.option-bubble.selected');
+                if (!sel) {
+                    var high = group.querySelector('.option-bubble[data-value="high"]');
+                    if (high) high.classList.add('selected');
+                }
+            } else {
+                group.style.opacity = '0.4';
+                group.style.pointerEvents = 'none';
+                group.querySelectorAll('.option-bubble.selected').forEach(function(b) { b.classList.remove('selected'); });
+            }
+        });
+    }
 }
 
 async function saveModel() {
@@ -2140,8 +2164,10 @@ async function saveModel() {
 
     var ctxEl = document.querySelector('.ctx-bubble-group .option-bubble.selected');
     var maxTokensEl = document.querySelector('.maxtokens-bubble-group .option-bubble.selected');
+    var effortEnabledEl = document.getElementById('model-effort_enabled');
+    var effortEnabled = effortEnabledEl ? effortEnabledEl.checked : false;
     var effortEl = document.querySelector('.effort-bubble-group .option-bubble.selected');
-    var effortVal = effortEl ? effortEl.getAttribute('data-value') : '';
+    var effortVal = effortEl ? effortEl.getAttribute('data-value') : 'high';
     var caps = [];
     document.querySelectorAll('.cap-bubble-group .option-bubble.selected').forEach(function(b) { caps.push(b.getAttribute('data-value')); });
 
@@ -2153,8 +2179,8 @@ async function saveModel() {
         max_context_size: ctxEl ? parseInt(ctxEl.getAttribute('data-value'), 10) : 128000,
         max_output_size: maxTokensEl ? parseInt(maxTokensEl.getAttribute('data-value'), 10) : 4096,
         capabilities: caps,
+        effort_enabled: effortEnabled,
         default_effort: effortVal,
-        support_efforts: effortVal ? ['low', 'high', 'max'] : [],
     };
     try {
         await fetchJSON('/api/model-config/model', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
