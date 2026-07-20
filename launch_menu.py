@@ -10,11 +10,13 @@
 5. 更新 Kimi Code
 6. 更新 Dashboard
 7. 完全卸载 Dashboard
+8. 重启 Dashboard
 
 也可以直接传入选项数字跳过菜单，例如 `kimi dashboard 1`。
 """
 
 import json
+import os
 import platform
 import re
 import shlex
@@ -259,12 +261,77 @@ def update_kimi_code() -> None:
     result = subprocess.run(cmd)
     if result.returncode == 0:
         print("Kimi Code 更新完成。")
+        if _tcp_open("127.0.0.1", KIMI_WEB_PORT):
+            print("提示：Kimi Code Web 正在运行，请用选项 4 停止后重新启动，以使用新版本。")
     else:
         print(f"更新命令返回非零退出码: {result.returncode}")
 
 
+def _pid_listening_on(port: int) -> int | None:
+    """返回监听指定端口的进程 PID，找不到返回 None。"""
+    try:
+        if sys.platform == "win32":
+            result = subprocess.run(
+                ["netstat", "-ano"], capture_output=True, text=True, errors="replace"
+            )
+            for line in result.stdout.splitlines():
+                parts = line.split()
+                if (
+                    len(parts) >= 5
+                    and "LISTENING" in line
+                    and parts[1].endswith(f":{port}")
+                    and parts[-1].isdigit()
+                ):
+                    return int(parts[-1])
+        else:
+            result = subprocess.run(
+                ["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
+                capture_output=True, text=True, errors="replace",
+            )
+            pids = result.stdout.strip().splitlines()
+            if pids and pids[0].strip().isdigit():
+                return int(pids[0].strip())
+    except Exception:
+        pass
+    return None
+
+
+def restart_dashboard() -> None:
+    """重启 Dashboard：结束占用 8080 的旧进程并重新启动。"""
+    pid = _pid_listening_on(8080)
+    if pid:
+        print(f"正在停止旧 Dashboard 进程 (pid {pid})...")
+        killed = False
+        try:
+            if sys.platform == "win32":
+                result = subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/F"], capture_output=True
+                )
+                killed = result.returncode == 0
+            else:
+                import signal
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                    killed = True
+                except OSError:
+                    killed = False
+        except Exception as exc:
+            print(f"停止旧进程失败: {exc}")
+            return
+        if not killed:
+            print("无法结束旧 Dashboard 进程（权限不足，旧进程可能是以管理员身份启动的）。")
+            print("请以管理员身份运行终端后重试，或在任务管理器中手动结束 pythonw.exe。")
+            return
+        # 等待端口释放，最多 5 秒
+        for _ in range(10):
+            if not _tcp_open("127.0.0.1", 8080):
+                break
+            time.sleep(0.5)
+    start_dashboard()
+
+
 def update_dashboard() -> None:
-    """在 Dashboard 目录执行 git pull origin master 更新代码。"""
+    """在 Dashboard 目录执行 git pull origin master 更新代码并重启生效。"""
     if shutil.which("git") is None:
         print("未找到 git 命令，请确认 Git 已安装并加入 PATH。")
         return
@@ -272,11 +339,18 @@ def update_dashboard() -> None:
     cmd = ["git", "-C", str(DASHBOARD_DIR), "pull", "origin", "master"]
     print("正在更新 Dashboard...")
     print(" ".join(cmd))
-    result = subprocess.run(cmd)
-    if result.returncode == 0:
-        print("Dashboard 更新完成，请用选项 1 重新启动以生效。")
-    else:
+    result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+    output = (result.stdout or "") + (result.stderr or "")
+    if output.strip():
+        print(output.strip())
+    if result.returncode != 0:
         print(f"更新命令返回非零退出码: {result.returncode}")
+        return
+    if "Already up to date" in output:
+        print("Dashboard 已是最新。")
+        return
+    print("Dashboard 更新完成，正在重启以生效...")
+    restart_dashboard()
 
 
 def uninstall_dashboard() -> None:
@@ -339,6 +413,7 @@ def show_menu() -> str:
     print("5. 更新 Kimi Code")
     print("6. 更新 Dashboard")
     print("7. 完全卸载 Dashboard")
+    print("8. 重启 Dashboard")
     print("0. 退出")
     print("==============================")
     return input("请输入数字选项: ").strip()
@@ -361,10 +436,12 @@ def main() -> None:
         update_dashboard()
     elif choice == "7":
         uninstall_dashboard()
+    elif choice == "8":
+        restart_dashboard()
     elif choice in ("0", "q", "quit", "exit"):
         print("已取消")
     else:
-        print("无效选项，请输入 1/2/3/4/5/6/7/0。")
+        print("无效选项，请输入 1/2/3/4/5/6/7/8/0。")
         sys.exit(1)
 
 

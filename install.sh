@@ -128,5 +128,6 @@ printf "  kimi-dashboard 4        # 停止 Kimi Code Web\n"
 printf "  kimi-dashboard 5        # 更新 Kimi Code\n"
 printf "  kimi-dashboard 6        # 更新 Dashboard\n"
 printf "  kimi-dashboard 7        # 完全卸载 Dashboard\n"
+printf "  kimi-dashboard 8        # 重启 Dashboard\n"
 echo
 printf "或直接启动面板: ${BOLD}$DASHBOARD_DIR/.venv/bin/python app.py${RESET}\n"

@@ -1,4 +1,4 @@
-﻿# kimi-code-dashboard installer for Windows.
+# kimi-code-dashboard installer for Windows.
 #
 # Usage:
 #   irm https://raw.githubusercontent.com/perinchiang/kimi-code-dashboard/master/install.ps1 | iex
@@ -115,6 +115,7 @@ Write-Host "  kimi-dashboard 3        # 启动外网访问 Kimi Code Web"
 Write-Host "  kimi-dashboard 4        # 停止 Kimi Code Web"
 Write-Host "  kimi-dashboard 5        # 更新 Kimi Code"
 Write-Host "  kimi-dashboard 6        # 更新 Dashboard"
-Write-Host "  kimi-dashboard 7        # 完全卸载 Dashboard" -ForegroundColor White
+Write-Host "  kimi-dashboard 7        # 完全卸载 Dashboard"
+Write-Host "  kimi-dashboard 8        # 重启 Dashboard" -ForegroundColor White
 Write-Host ""
 Write-Host "或直接启动面板: $DASHBOARD_DIR\.venv\Scripts\python.exe app.py" -ForegroundColor White

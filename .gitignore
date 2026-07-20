@@ -17,3 +17,6 @@ dashboard.log
 tasks.json
 *.bak
 .trae/
+
+image_upload_cache.json
+image_upload_cache.json.lock
