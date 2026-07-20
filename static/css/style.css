@@ -507,7 +507,15 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 .md-panel .donut-wrap { flex-direction: column; align-items: center; gap: 0.75rem; margin: 0; flex-shrink: 0; }
 .md-panel .memory-legend { width: 190px; max-width: 190px; grid-template-columns: 1fr; gap: 0.35rem; }
 .md-panel .memory-legend .legend-item { font-size: 0.76rem; }
-.md-table-scroll { flex: 1 1 280px; max-height: 260px; overflow-y: auto; min-width: 0; }
+.md-table-scroll {
+    flex: 1 1 280px; max-height: 260px; overflow-y: auto; min-width: 0;
+    scrollbar-width: thin; scrollbar-color: var(--accent) transparent;
+}
+.md-table-scroll::-webkit-scrollbar { width: 6px; }
+.md-table-scroll::-webkit-scrollbar-track { background: transparent; }
+.md-table-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.md-table-scroll::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+.md-table-scroll::-webkit-scrollbar-corner { background: transparent; }
 .md-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .md-table thead th { position: sticky; top: 0; background: var(--surface); color: var(--text-secondary); font-weight: 600; font-size: 0.72rem; text-transform: none; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); z-index: 1; }
 .md-th-name { text-align: left; }
@@ -524,6 +532,12 @@ main { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem 2rem; }
 .md-pct { color: var(--text-tertiary); }
 .md-seg { display: inline-flex; align-items: center; gap: 0.25rem; }
 .md-seg .segment-btn { padding: 0.28rem 0.7rem; font-size: 0.74rem; }
+
+/* Toolbar: time range filter */
+.mu-toolbar { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.mu-toolbar-left { display: flex; align-items: center; gap: 0.5rem; }
+.mu-toolbar-label { font-size: 0.78rem; color: var(--text-secondary); font-weight: 500; }
+.mu-range .segment-btn { padding: 0.28rem 0.7rem; font-size: 0.74rem; }
 .model-usage-item { flex-wrap: wrap; }
 .model-usage-meta { width: 100%; display: flex; gap: 0.75rem; padding-left: calc(20px + 0.5rem + 200px); font-size: 0.72rem; color: var(--text-tertiary); font-family: var(--mono); }
 .model-usage-meta span { white-space: nowrap; }

@@ -1596,9 +1596,13 @@ function _renderModelColorLegend(models, colorMap) {
 
 function _getModelDistributionData(mode) {
     var data = statusData.modelUsage;
-    if (!data || !data.models) return [];
+    if (!data) return [];
+    var range = statusData.modelRange || 'all';
+    var windowKey = (range === '24h' || range === '7d' || range === '30d') ? range : 'all';
+    var win = (data.windows && data.windows[windowKey]) || data;
+    var models = win.models || data.models || [];
     var field = mode === 'calls' ? 'calls' : 'total';
-    return data.models.map(function(m) {
+    return models.map(function(m) {
         return { label: m.model.replace('kimi-code/', ''), value: m[field] || 0, rawModel: m.model,
                  calls: m.calls || 0, total: m.total || 0 };
     }).filter(function(d) { return d.value > 0; });
@@ -1677,20 +1681,23 @@ function renderToolModelDetail() {
 
 function renderModelUsageDetail() {
     var data = statusData.modelUsage;
+    var range = statusData.modelRange || 'all';
+    var windowKey = (range === '24h' || range === '7d' || range === '30d') ? range : 'all';
+    var win = (data && data.windows && data.windows[windowKey]) || data;
     var totalTokensEl = document.getElementById('modelTotalTokens');
     var totalCallsEl = document.getElementById('modelTotalCalls');
     var topModelEl = document.getElementById('modelTopModel');
 
-    if (!data) {
+    if (!data || !win) {
         if (totalTokensEl) totalTokensEl.textContent = '-';
         if (totalCallsEl) totalCallsEl.textContent = '-';
         if (topModelEl) topModelEl.textContent = '-';
         return;
     }
 
-    if (totalTokensEl) totalTokensEl.innerHTML = formatTokens(data.totalTokens || 0);
-    if (totalCallsEl) totalCallsEl.textContent = (data.totalCalls || 0).toLocaleString();
-    if (topModelEl) topModelEl.textContent = (data.models && data.models[0]) ? data.models[0].model.replace('kimi-code/', '') : '-';
+    if (totalTokensEl) totalTokensEl.innerHTML = formatTokens(win.totalTokens || 0);
+    if (totalCallsEl) totalCallsEl.textContent = (win.totalCalls || 0).toLocaleString();
+    if (topModelEl) topModelEl.textContent = (win.models && win.models[0]) ? win.models[0].model.replace('kimi-code/', '') : '-';
 
     var modelColorMap = getModelColorMap(data.models);
 
@@ -1734,6 +1741,23 @@ function renderModelUsageDetail() {
             if (mode === (statusData.modelDistMode || 'token')) return;
             statusData.modelDistMode = mode;
             modeSeg.querySelectorAll('.segment-btn').forEach(function(b) {
+                b.classList.toggle('active', b === btn);
+            });
+            renderModelUsageDetail();
+        });
+    }
+
+    // Time range toggle (全部 / 近30天 / 近7天 / 近24小时)
+    var rangeSeg = document.getElementById('modelRangeFilter');
+    if (rangeSeg && !rangeSeg.dataset.bound) {
+        rangeSeg.dataset.bound = '1';
+        rangeSeg.addEventListener('click', function(e) {
+            var btn = e.target.closest('.segment-btn');
+            if (!btn) return;
+            var range = btn.getAttribute('data-range');
+            if (range === (statusData.modelRange || 'all')) return;
+            statusData.modelRange = range;
+            rangeSeg.querySelectorAll('.segment-btn').forEach(function(b) {
                 b.classList.toggle('active', b === btn);
             });
             renderModelUsageDetail();

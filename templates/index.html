@@ -19,7 +19,7 @@
         } catch (e) {}
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=70">
+    <link rel="stylesheet" href="/static/css/style.css?v=71">
 </head>
 <body>
     <header>
@@ -329,6 +329,17 @@
             </h2>
         </div>
         <section class="card" style="animation-delay: 0s;">
+            <div class="mu-toolbar">
+                <div class="mu-toolbar-left">
+                    <span class="mu-toolbar-label">时间范围</span>
+                    <div class="segment-control mu-range" id="modelRangeFilter">
+                        <button type="button" class="segment-btn active" data-range="all">全部</button>
+                        <button type="button" class="segment-btn" data-range="30d">近 30 天</button>
+                        <button type="button" class="segment-btn" data-range="7d">近 7 天</button>
+                        <button type="button" class="segment-btn" data-range="24h">近 24 小时</button>
+                    </div>
+                </div>
+            </div>
             <div class="model-usage-summary" id="modelUsageSummary">
                 <div class="mu-summary-item">
                     <span class="mu-summary-label">总 Token</span>
@@ -795,6 +806,6 @@
     </div>
 
     <script src="/static/js/charts.js?v=21"></script>
-    <script src="/static/js/app.js?v=109"></script>
+    <script src="/static/js/app.js?v=110"></script>
 </body>
 </html>
