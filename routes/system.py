@@ -71,32 +71,23 @@ def _write_default_permission_mode(mode: str) -> bool:
         return False
 
 
-def _clean_stale_lock():
-    """Remove stale kimi server lock file if the PID is dead."""
-    lock_path = KIMI_CODE_DIR / "server" / "lock"
-    if not lock_path.exists():
+def _clean_stale_instances():
+    """Remove instance files of kimi servers whose PID is dead.
+
+    kimi-code >= 0.28 使用 server/instances/<id>.json，旧版 server/lock 已废弃。
+    """
+    instances_dir = KIMI_CODE_DIR / "server" / "instances"
+    if not instances_dir.exists():
         return
-    try:
-        data = json.loads(lock_path.read_text(encoding="utf-8"))
-        pid = data.get("pid")
-        if pid and not _pid_alive(pid):
-            log.info("Removing stale kimi server lock (pid=%s is dead)", pid)
-            try:
-                os.chmod(str(lock_path), 0o777)
-            except Exception:
-                pass
-            # Re-verify before unlink (kimi server may have restarted)
-            try:
-                data2 = json.loads(lock_path.read_text(encoding="utf-8"))
-                pid2 = data2.get("pid")
-                if pid2 != pid or _pid_alive(pid2):
-                    log.info("Lock file pid changed or still alive, skipping removal")
-                    return
-            except Exception:
-                return  # File may have been removed already
-            lock_path.unlink(missing_ok=True)
-    except Exception as e:
-        log.debug("Failed to check stale lock: %s", e)
+    for f in instances_dir.glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            pid = data.get("pid")
+            if pid and not _pid_alive(pid):
+                log.info("Removing stale kimi server instance %s (pid=%s is dead)", f.name, pid)
+                f.unlink(missing_ok=True)
+        except Exception as e:
+            log.debug("Failed to check stale instance %s: %s", f, e)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -156,20 +147,23 @@ def _build_url(cfg):
     return f"http://127.0.0.1:{port}"
 
 
-def _get_running_bind() -> str:
-    """读取 lock 文件获取当前运行的 bind 模式。"""
-    lock_path = KIMI_CODE_DIR / "server" / "lock"
-    if not lock_path.exists():
+def _get_running_bind(port: int) -> str:
+    """读取 server instances 获取指定端口当前运行的 bind 模式。"""
+    instances_dir = KIMI_CODE_DIR / "server" / "instances"
+    if not instances_dir.exists():
         return ""
-    try:
-        data = json.loads(lock_path.read_text(encoding="utf-8"))
-        return data.get("host", "")
-    except Exception:
-        return ""
+    for f in instances_dir.glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            if data.get("port") == port:
+                return data.get("host", "")
+        except Exception:
+            continue
+    return ""
 
 
 def _kill_kimi_server():
-    """Kill 当前运行的 kimi server 进程并清理 lock。"""
+    """Kill 当前运行的 kimi server 进程并清理已死实例。"""
     try:
         subprocess.run(
             [str(KIMI_BIN), "web", "kill"],
@@ -179,14 +173,8 @@ def _kill_kimi_server():
         time.sleep(1)
     except Exception as e:
         log.warning("kimi web kill failed: %s", e)
-    # 确保 lock 文件被清理
-    lock_path = KIMI_CODE_DIR / "server" / "lock"
-    if lock_path.exists():
-        try:
-            os.chmod(str(lock_path), 0o777)
-        except Exception:
-            pass
-        lock_path.unlink(missing_ok=True)
+    # 清理 PID 已死的 instance 文件
+    _clean_stale_instances()
 
 
 def _extract_host(url_str: str) -> str:
@@ -297,7 +285,7 @@ def api_launch_kimi_web():
 
     # 检查端口是否已被占用
     if tcp_open("127.0.0.1", port):
-        running_bind = _get_running_bind()
+        running_bind = _get_running_bind(port)
         if running_bind == bind:
             # bind 模式相同，无需重启
             return jsonify({"status": "already_running", "port": port, "url": url})
@@ -305,8 +293,8 @@ def api_launch_kimi_web():
         log.info("bind changed (%s -> %s), killing old server", running_bind, bind)
         _kill_kimi_server()
 
-    # 清理僵尸 lock 文件
-    _clean_stale_lock()
+    # 清理僵尸 instance 文件
+    _clean_stale_instances()
 
     try:
         cmd = _build_cmd(norm_cfg)
@@ -336,7 +324,7 @@ def api_launch_kimi_web():
             # 如果进程已退出（非 None），说明启动失败
             if proc.poll() is not None:
                 log.error("kimi server exited immediately with code %s", proc.returncode)
-                return jsonify({"status": "error", "error": "kimi server 启动后立即退出，请检查端口或 lock 文件"})
+                return jsonify({"status": "error", "error": "kimi server 启动后立即退出，请检查端口或实例文件"})
             if tcp_open("127.0.0.1", port):
                 try:
                     urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=2)

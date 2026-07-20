@@ -54,22 +54,26 @@ def _tcp_open(host: str, port: int) -> bool:
 
 
 def _kimi_server_bind_mode() -> str:
-    """根据 lock 文件判断当前 Kimi server 的绑定模式。
+    """根据 server instances 判断当前 Kimi server 的绑定模式。
 
     返回 "external"（0.0.0.0）、"local"（127.0.0.1）或 ""（未知）。
+    kimi-code >= 0.28 使用 server/instances/<id>.json，旧版 server/lock 已废弃。
     """
-    lock_path = Path.home() / ".kimi-code" / "server" / "lock"
-    if not lock_path.exists():
+    instances_dir = Path.home() / ".kimi-code" / "server" / "instances"
+    if not instances_dir.exists():
         return ""
-    try:
-        data = json.loads(lock_path.read_text(encoding="utf-8"))
+    for f in instances_dir.glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if data.get("port") != KIMI_WEB_PORT:
+            continue
         host = data.get("host", "")
         if host == "0.0.0.0":
             return "external"
         if host == "127.0.0.1":
             return "local"
-    except Exception:
-        pass
     return ""
 
 
