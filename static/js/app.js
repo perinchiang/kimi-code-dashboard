@@ -2085,13 +2085,20 @@ function modelFormHtml(m) {
     }).join('');
 
     var currentCtx = m.max_context_size || 128000;
+    // 如果当前值不匹配任何预置选项，找最接近的并选中
+    var ctxExactMatch = MODEL_CONTEXT_OPTIONS.some(function(o) { return o.value === currentCtx; });
     var ctxBubbles = MODEL_CONTEXT_OPTIONS.map(function(o) {
-        return '<div class="option-bubble' + (o.value === currentCtx ? ' selected' : '') + '" role="button" onclick="toggleOptionBubble(this, \'ctx-bubble-group\')" data-value="' + o.value + '">' + escapeHtml(o.label) + '</div>';
+        var selected = (ctxExactMatch && o.value === currentCtx) ||
+                       (!ctxExactMatch && Math.abs(o.value - currentCtx) <= 50000);
+        return '<div class="option-bubble' + (selected ? ' selected' : '') + '" role="button" onclick="toggleOptionBubble(this, \'ctx-bubble-group\')" data-value="' + o.value + '">' + escapeHtml(o.label) + '</div>';
     }).join('');
 
     var currentMaxTokens = m.max_output_size || 4096;
+    var mtExactMatch = MODEL_MAX_TOKENS_OPTIONS.some(function(o) { return o.value === currentMaxTokens; });
     var maxTokensBubbles = MODEL_MAX_TOKENS_OPTIONS.map(function(o) {
-        return '<div class="option-bubble' + (o.value === currentMaxTokens ? ' selected' : '') + '" role="button" onclick="toggleOptionBubble(this, \'maxtokens-bubble-group\')" data-value="' + o.value + '">' + escapeHtml(o.label) + '</div>';
+        var selected = (mtExactMatch && o.value === currentMaxTokens) ||
+                       (!mtExactMatch && Math.abs(o.value - currentMaxTokens) <= 5000);
+        return '<div class="option-bubble' + (selected ? ' selected' : '') + '" role="button" onclick="toggleOptionBubble(this, \'maxtokens-bubble-group\')" data-value="' + o.value + '">' + escapeHtml(o.label) + '</div>';
     }).join('');
 
     var capBubbles = MODEL_CONFIG_CAPS.map(function(c) {
@@ -2176,8 +2183,8 @@ async function saveModel() {
         provider: document.getElementById('model-provider').value,
         model: apiModel,
         display_name: apiModel,
-        max_context_size: ctxEl ? parseInt(ctxEl.getAttribute('data-value'), 10) : 128000,
-        max_output_size: maxTokensEl ? parseInt(maxTokensEl.getAttribute('data-value'), 10) : 4096,
+        max_context_size: ctxEl ? parseInt(ctxEl.getAttribute('data-value'), 10) : (m.max_context_size || 128000),
+        max_output_size: maxTokensEl ? parseInt(maxTokensEl.getAttribute('data-value'), 10) : (m.max_output_size || 4096),
         capabilities: caps,
         effort_enabled: effortEnabled,
         default_effort: effortVal,
