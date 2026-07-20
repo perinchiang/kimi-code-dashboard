@@ -1754,7 +1754,7 @@ var MODEL_CONTEXT_OPTIONS = [
     { value: 200000, label: '200K' },
     { value: 256000, label: '256K' },
     { value: 512000, label: '512K' },
-    { value: 1000000, label: '1M' },
+    { value: 1048576, label: '1M' },
 ];
 var MODEL_MAX_TOKENS_OPTIONS = [
     { value: 4096, label: '4K' },
