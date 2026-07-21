@@ -45,6 +45,9 @@ STARTUP_SERVICES = {
 
 # Windows elevated startup task name (separate from non-elevated Startup folder)
 WINDOWS_ELEVATED_TASK_NAME = "KimiCodeDashboardAdmin"
+_STARTUP_STATUS_CACHE = {"data": None, "at": 0.0}
+_STARTUP_STATUS_CACHE_TTL = 30
+_STARTUP_STATUS_CACHE_LOCK = threading.Lock()
 
 
 def _read_default_permission_mode() -> str:
@@ -809,11 +812,28 @@ def _set_dashboard_startup_mode(mode: str) -> dict:
 @bp.route("/api/startup-status")
 def api_startup_status():
     """Check whether dashboard and Kimi Code startup services are enabled."""
-    return jsonify({
-        "supported": _startup_service_supported(),
-        "dashboard": _get_startup_status("dashboard"),
-        "kimi": _get_startup_status("kimi"),
-    })
+    now = time.time()
+    if (
+        _STARTUP_STATUS_CACHE["data"] is not None
+        and now - _STARTUP_STATUS_CACHE["at"] <= _STARTUP_STATUS_CACHE_TTL
+    ):
+        return jsonify(_STARTUP_STATUS_CACHE["data"])
+
+    with _STARTUP_STATUS_CACHE_LOCK:
+        now = time.time()
+        if (
+            _STARTUP_STATUS_CACHE["data"] is not None
+            and now - _STARTUP_STATUS_CACHE["at"] <= _STARTUP_STATUS_CACHE_TTL
+        ):
+            return jsonify(_STARTUP_STATUS_CACHE["data"])
+        data = {
+            "supported": _startup_service_supported(),
+            "dashboard": _get_startup_status("dashboard"),
+            "kimi": _get_startup_status("kimi"),
+        }
+        _STARTUP_STATUS_CACHE["data"] = data
+        _STARTUP_STATUS_CACHE["at"] = time.time()
+        return jsonify(data)
 
 
 @bp.route("/api/startup-toggle", methods=["POST"])
@@ -824,6 +844,7 @@ def api_startup_toggle():
     if service == "dashboard":
         mode = body.get("mode", "off")
         result = _set_dashboard_startup_mode(mode)
+        _STARTUP_STATUS_CACHE["data"] = None
         return jsonify(result)
     if service not in STARTUP_SERVICES:
         return jsonify({"success": False, "error": f"service 必须是 {list(STARTUP_SERVICES.keys())} 之一"}), 400
@@ -839,6 +860,7 @@ def api_startup_toggle():
             log.error("Failed to save dashboard config: %s", exc)
             return jsonify({"success": False, "error": "保存 Dashboard 配置失败"}), 500
     result = _set_startup_service(service, enable, cfg)
+    _STARTUP_STATUS_CACHE["data"] = None
     return jsonify(result)
 
 

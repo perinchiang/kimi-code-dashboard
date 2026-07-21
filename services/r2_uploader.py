@@ -14,6 +14,7 @@
 
 import json
 import shutil
+import threading
 import tomllib
 from datetime import datetime
 from pathlib import Path
@@ -35,6 +36,9 @@ CONFIG_PATH = KIMI_CODE_DIR / "config.toml"
 CACHE_PATH = KIMI_CODE_DIR / "dashboard" / "image_upload_cache.json"
 FILES_DIR = KIMI_CODE_DIR / "files"
 SESSIONS_DIR = KIMI_CODE_DIR / "sessions"
+
+_blob_sources_cache = {"signature": None, "data": None}
+_blob_sources_cache_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +415,7 @@ def list_artifacts(file_type: str = "all", keyword: str = "", limit: int = 100, 
     }
 
 
-def _scan_blob_sources() -> dict:
+def _scan_blob_sources_uncached() -> dict:
     """扫描所有 wire.jsonl，返回 {sha256: source} 映射。
 
     source: 'user' / 'ai'
@@ -451,6 +455,35 @@ def _scan_blob_sources() -> dict:
         except Exception:
             continue
     return sources
+
+
+def _blob_sources_signature() -> tuple[tuple[str, int, int], ...]:
+    """Return a cheap signature for wire files used by blob source detection."""
+    wire_pattern = str(SESSIONS_DIR / "*" / "session_*" / "agents" / "*" / "wire.jsonl")
+    signature = []
+    for path_str in glob.glob(wire_pattern):
+        try:
+            stat = Path(path_str).stat()
+        except OSError:
+            continue
+        signature.append((path_str, stat.st_mtime_ns, stat.st_size))
+    return tuple(sorted(signature))
+
+
+def _scan_blob_sources() -> dict:
+    """Return cached blob sources and rescan only when wire files change."""
+    signature = _blob_sources_signature()
+    if _blob_sources_cache["signature"] == signature and _blob_sources_cache["data"] is not None:
+        return _blob_sources_cache["data"]
+
+    with _blob_sources_cache_lock:
+        signature = _blob_sources_signature()
+        if _blob_sources_cache["signature"] == signature and _blob_sources_cache["data"] is not None:
+            return _blob_sources_cache["data"]
+        data = _scan_blob_sources_uncached()
+        _blob_sources_cache["signature"] = signature
+        _blob_sources_cache["data"] = data
+        return data
 
 
 def list_all_artifacts(file_type: str = "all", keyword: str = "", limit: int = 200, offset: int = 0) -> dict:

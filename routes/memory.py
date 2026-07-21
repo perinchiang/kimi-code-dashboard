@@ -1,7 +1,10 @@
 """Memory status API blueprint (L0-L3 via TencentDB Gateway)."""
 
+import concurrent.futures
 import re
 import sqlite3
+import threading
+import time
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request
@@ -13,6 +16,9 @@ bp = Blueprint("memory", __name__)
 
 L0_DB_PATH = Path.home() / ".memory-tencentdb" / "memory-tdai" / "vectors.db"
 L0_PAGE_LIMIT = 500
+_MEMORY_SUMMARY_CACHE = {"data": None, "at": 0.0}
+_MEMORY_SUMMARY_CACHE_TTL = 30
+_MEMORY_SUMMARY_CACHE_LOCK = threading.Lock()
 
 
 def _read_l0_page(query: str, limit: int, before_timestamp: str = "", before_record_id: str = ""):
@@ -104,27 +110,58 @@ def _read_l0_page(query: str, limit: int, before_timestamp: str = "", before_rec
 
 @bp.route("/api/memory")
 def api_memory():
-    def count(path: str, payload: dict, parser) -> int:
-        resp = http_post(f"{GATEWAY_BASE}{path}", payload, timeout=15)
-        if resp is None:
-            return -1
-        return len(parser(resp.get("results", "")))
+    now = time.time()
+    if (
+        _MEMORY_SUMMARY_CACHE["data"] is not None
+        and now - _MEMORY_SUMMARY_CACHE["at"] <= _MEMORY_SUMMARY_CACHE_TTL
+    ):
+        return jsonify(_MEMORY_SUMMARY_CACHE["data"])
 
-    local_l0 = _read_l0_page("", 1)
-    l0 = local_l0["total"] if local_l0 is not None else count(
-        "/search/conversations", {"query": "*", "limit": 500, "session_key": "kimi-default"}, _parse_conversations
-    )
-    l1 = count("/search/memories", {"query": "*", "type": "episodic", "limit": 500}, _parse_memories)
-    l2 = count("/search/memories", {"query": "*", "type": "instruction", "limit": 500}, _parse_memories)
-    l3 = count("/search/memories", {"query": "*", "type": "persona", "limit": 500}, _parse_memories)
+    with _MEMORY_SUMMARY_CACHE_LOCK:
+        now = time.time()
+        if (
+            _MEMORY_SUMMARY_CACHE["data"] is not None
+            and now - _MEMORY_SUMMARY_CACHE["at"] <= _MEMORY_SUMMARY_CACHE_TTL
+        ):
+            return jsonify(_MEMORY_SUMMARY_CACHE["data"])
 
-    return jsonify({
-        "l0": l0,
-        "l1": l1,
-        "l2": l2,
-        "l3": l3,
-        "gatewayReachable": http_get(f"{GATEWAY_BASE}/health") is not None,
-    })
+        def count(path: str, payload: dict, parser) -> int:
+            resp = http_post(f"{GATEWAY_BASE}{path}", payload, timeout=15)
+            if resp is None:
+                return -1
+            return len(parser(resp.get("results", "")))
+
+        local_l0 = _read_l0_page("", 1)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {
+                "l1": executor.submit(count, "/search/memories", {"query": "*", "type": "episodic", "limit": 500}, _parse_memories),
+                "l2": executor.submit(count, "/search/memories", {"query": "*", "type": "instruction", "limit": 500}, _parse_memories),
+                "l3": executor.submit(count, "/search/memories", {"query": "*", "type": "persona", "limit": 500}, _parse_memories),
+                "gatewayReachable": executor.submit(http_get, f"{GATEWAY_BASE}/health"),
+            }
+            if local_l0 is None:
+                futures["l0"] = executor.submit(
+                    count,
+                    "/search/conversations",
+                    {"query": "*", "limit": 500, "session_key": "kimi-default"},
+                    _parse_conversations,
+                )
+            l1 = futures["l1"].result()
+            l2 = futures["l2"].result()
+            l3 = futures["l3"].result()
+            gateway_reachable = futures["gatewayReachable"].result() is not None
+            l0 = local_l0["total"] if local_l0 is not None else futures["l0"].result()
+
+        data = {
+            "l0": l0,
+            "l1": l1,
+            "l2": l2,
+            "l3": l3,
+            "gatewayReachable": gateway_reachable,
+        }
+        _MEMORY_SUMMARY_CACHE["data"] = data
+        _MEMORY_SUMMARY_CACHE["at"] = time.time()
+        return jsonify(data)
 
 
 # --- results 文本解析 ---

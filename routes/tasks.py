@@ -8,6 +8,8 @@ import json
 import re
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request
@@ -26,6 +28,9 @@ bp = Blueprint("tasks", __name__)
 
 _DAY_NAMES = ["日", "一", "二", "三", "四", "五", "六"]
 _DAY_NAME_TO_INT = {name: i for i, name in enumerate(_DAY_NAMES)}
+_TASK_STATUS_CACHE = {"names": None, "data": None, "at": 0.0}
+_TASK_STATUS_CACHE_TTL = 30
+_TASK_STATUS_CACHE_LOCK = threading.Lock()
 
 
 def _load_tasks_config() -> dict:
@@ -78,36 +83,78 @@ def _task_result_status(code: int | None) -> dict:
     return {"label": f"失败 ({code})", "ok": False}
 
 
-def _query_task_status(task_name: str) -> dict:
-    """Query Windows Task Scheduler for a task's status."""
-    if not task_name:
+def _parse_task_status_item(item: dict) -> dict:
+    if not item.get("Registered"):
         return {"registered": False, "state": "未注册"}
-
-    safe_name = ps_escape_single_quote(task_name)
+    raw_result = item.get("LastResult")
     try:
-        cmd = (
-            f"$t = Get-ScheduledTask -TaskName '{safe_name}' -ErrorAction SilentlyContinue; "
-            f"if ($t) {{ $i = $t | Get-ScheduledTaskInfo; "
-            f"Write-Output ([string]$t.State + '|' + "
-            f"$i.LastRunTime.ToString('yyyy-MM-ddTHH:mm:ss') + '|' + "
-            f"$i.NextRunTime.ToString('yyyy-MM-ddTHH:mm:ss') + '|' + "
-            f"$i.LastTaskResult) }}"
-        )
-        result = _run_ps(cmd)
-        if result.returncode == 0 and result.stdout.strip():
-            parts = result.stdout.strip().split("|")
-            last_result = int(parts[3]) if len(parts) > 3 and parts[3].lstrip("-").isdigit() else None
-            return {
-                "registered": True,
-                "state": parts[0] if len(parts) > 0 else "Unknown",
-                "lastRun": parts[1] if len(parts) > 1 else None,
-                "nextRun": parts[2] if len(parts) > 2 else None,
-                "lastResult": last_result,
-                "resultStatus": _task_result_status(last_result),
-            }
-    except Exception as e:
-        log.warning("Task status query failed for '%s': %s", task_name, e)
-    return {"registered": False, "state": "未注册"}
+        last_result = int(raw_result) if raw_result is not None and str(raw_result).strip() else None
+    except (TypeError, ValueError):
+        last_result = None
+    return {
+        "registered": True,
+        "state": item.get("State") or "Unknown",
+        "lastRun": item.get("LastRun"),
+        "nextRun": item.get("NextRun"),
+        "lastResult": last_result,
+        "resultStatus": _task_result_status(last_result),
+    }
+
+
+def _query_task_statuses(task_names: list[str]) -> dict[str, dict]:
+    """Query all configured Task Scheduler entries in one PowerShell process."""
+    names = tuple(str(name or "") for name in task_names)
+    now = time.time()
+    if (
+        _TASK_STATUS_CACHE["data"] is not None
+        and _TASK_STATUS_CACHE["names"] == names
+        and now - _TASK_STATUS_CACHE["at"] <= _TASK_STATUS_CACHE_TTL
+    ):
+        return _TASK_STATUS_CACHE["data"]
+
+    with _TASK_STATUS_CACHE_LOCK:
+        now = time.time()
+        if (
+            _TASK_STATUS_CACHE["data"] is not None
+            and _TASK_STATUS_CACHE["names"] == names
+            and now - _TASK_STATUS_CACHE["at"] <= _TASK_STATUS_CACHE_TTL
+        ):
+            return _TASK_STATUS_CACHE["data"]
+
+        statuses = {name: {"registered": False, "state": "未注册"} for name in names if name}
+        query_names = [name for name in names if name]
+        if query_names:
+            names_literal = ", ".join("'" + ps_escape_single_quote(name) + "'" for name in query_names)
+            command = (
+                "$names = @(" + names_literal + "); "
+                "$result = foreach ($name in $names) { "
+                "$t = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue; "
+                "if ($t) { $i = $t | Get-ScheduledTaskInfo; "
+                "[pscustomobject]@{TaskName=$name; Registered=$true; State=[string]$t.State; "
+                "LastRun=if ($i.LastRunTime) {$i.LastRunTime.ToString('yyyy-MM-ddTHH:mm:ss')} else {$null}; "
+                "NextRun=if ($i.NextRunTime) {$i.NextRunTime.ToString('yyyy-MM-ddTHH:mm:ss')} else {$null}; "
+                "LastResult=$i.LastTaskResult} } "
+                "else { [pscustomobject]@{TaskName=$name; Registered=$false} } }; "
+                "$result | ConvertTo-Json -Compress"
+            )
+            try:
+                result = _run_ps(command)
+                if result.returncode == 0 and result.stdout.strip():
+                    payload = json.loads(result.stdout)
+                    items = payload if isinstance(payload, list) else [payload]
+                    for item in items:
+                        name = str(item.get("TaskName") or "")
+                        if name:
+                            statuses[name] = _parse_task_status_item(item)
+                else:
+                    log.warning("Batch Task Scheduler query failed: %s", result.stderr.strip())
+            except Exception as exc:
+                log.warning("Batch Task Scheduler query failed: %s", exc)
+
+        _TASK_STATUS_CACHE["names"] = names
+        _TASK_STATUS_CACHE["data"] = statuses
+        _TASK_STATUS_CACHE["at"] = time.time()
+        return statuses
 
 
 def _read_task_log(scripts_dir: str, log_file: str, lines: int = 50) -> str:
@@ -278,14 +325,17 @@ def _find_task(cfg: dict, task_id: str) -> dict | None:
 
 @bp.route("/api/tasks")
 def api_tasks():
+    summary_only = request.args.get("summary") == "1"
     cfg = _load_tasks_config()
     scripts_dir = cfg.get("scriptsDir", "")
+    task_configs = cfg.get("tasks", [])
+    statuses = _query_task_statuses([t.get("taskName", "") for t in task_configs])
     tasks = []
-    for t in cfg.get("tasks", []):
-        status = _query_task_status(t.get("taskName", ""))
-        log_preview = _read_task_log(scripts_dir, t.get("logFile", ""), 50)
+    for t in task_configs:
+        task_name = t.get("taskName", "")
+        status = statuses.get(task_name, {"registered": False, "state": "未注册"})
         trigger = t.get("trigger") or _parse_schedule(t.get("schedule", ""))
-        tasks.append({
+        task = {
             "id": t.get("id", ""),
             "name": t.get("name", ""),
             "description": t.get("description", ""),
@@ -296,9 +346,11 @@ def api_tasks():
             "sources": t.get("sources", []),
             "taskName": t.get("taskName", ""),
             "status": status,
-            "logPreview": log_preview,
-        })
-    return jsonify({"tasks": tasks, "total": len(tasks)})
+        }
+        if not summary_only:
+            task["logPreview"] = _read_task_log(scripts_dir, t.get("logFile", ""), 50)
+        tasks.append(task)
+    return jsonify({"tasks": tasks, "total": len(tasks), "summary": summary_only})
 
 
 @bp.route("/api/tasks/<task_id>/run", methods=["POST"])

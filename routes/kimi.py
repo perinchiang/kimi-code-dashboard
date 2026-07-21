@@ -8,6 +8,7 @@ import platform
 import re
 import subprocess
 import threading
+import time
 import urllib.request, urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +40,9 @@ except ImportError:
     tomllib = None
 
 bp = Blueprint("kimi", __name__)
+_KIMI_INFO_CACHE = {"data": None, "at": 0.0}
+_KIMI_INFO_CACHE_TTL = 60
+_KIMI_INFO_CACHE_LOCK = threading.Lock()
 
 
 def _get_device_label() -> str:
@@ -146,9 +150,8 @@ def _map_mac_model(hw_model: str) -> str:
 # ---------------------------------------------------------------------------
 # Kimi basic info
 # ---------------------------------------------------------------------------
-@bp.route("/api/kimi")
-def api_kimi():
-    # Prefer live `kimi --version` so the UI reflects upgrades immediately.
+def _build_kimi_info() -> dict:
+    # Refreshes on the short route cache interval while keeping CLI upgrades visible.
     version = _get_kimi_version_cli() or "unknown"
     starts = []
 
@@ -189,7 +192,7 @@ def api_kimi():
         except Exception as e:
             log.warning("Failed to count sessions: %s", e)
 
-    return jsonify({
+    return {
         "version": version,
         "startCount": len(starts),
         "lastStartAt": starts[-1][0] if starts else None,
@@ -197,7 +200,29 @@ def api_kimi():
         "loggedIn": logged_in,
         "consoleUrl": "https://www.kimi.com/code/console?from=kfc_overview_topbar",
         "deviceLabel": _get_device_label(),
-    })
+    }
+
+
+@bp.route("/api/kimi")
+def api_kimi():
+    now = time.time()
+    if (
+        _KIMI_INFO_CACHE["data"] is not None
+        and now - _KIMI_INFO_CACHE["at"] <= _KIMI_INFO_CACHE_TTL
+    ):
+        return jsonify(_KIMI_INFO_CACHE["data"])
+
+    with _KIMI_INFO_CACHE_LOCK:
+        now = time.time()
+        if (
+            _KIMI_INFO_CACHE["data"] is not None
+            and now - _KIMI_INFO_CACHE["at"] <= _KIMI_INFO_CACHE_TTL
+        ):
+            return jsonify(_KIMI_INFO_CACHE["data"])
+        data = _build_kimi_info()
+        _KIMI_INFO_CACHE["data"] = data
+        _KIMI_INFO_CACHE["at"] = time.time()
+        return jsonify(data)
 
 
 # ---------------------------------------------------------------------------

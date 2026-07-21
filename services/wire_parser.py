@@ -257,10 +257,34 @@ def parse_all_full() -> ParseResult:
 # Cached high-level API
 # ---------------------------------------------------------------------------
 
+_parse_cache: dict = {"data": None, "at": 0.0, "date": None}
 _trend_cache: dict = {"data": None, "at": 0.0, "date": None}
 _tool_usage_cache: dict = {"data": None, "at": 0.0, "date": None}
 _model_usage_cache: dict = {"data": None, "at": 0.0, "date": None}
 _cache_lock = __import__("threading").Lock()
+
+
+def _parse_cache_is_fresh(now_ts: float, today) -> bool:
+    return (
+        _parse_cache["data"] is not None
+        and now_ts - _parse_cache["at"] <= min(TREND_CACHE_TTL, TOOL_USAGE_CACHE_TTL)
+        and _parse_cache.get("date") == today
+    )
+
+
+def _get_parse_result_locked() -> ParseResult:
+    """Return the shared full-parse snapshot; caller must hold _cache_lock."""
+    now_ts = time.time()
+    today = datetime.now().astimezone().date()
+    if _parse_cache_is_fresh(now_ts, today):
+        return _parse_cache["data"]
+
+    log.debug("Wire parse cache miss, parsing wire.jsonl files")
+    result = parse_all_full()
+    _parse_cache["data"] = result
+    _parse_cache["at"] = now_ts
+    _parse_cache["date"] = today
+    return result
 
 
 def _trend_key(dt: datetime, unit: str) -> tuple[str, str]:
@@ -439,7 +463,7 @@ def _compute_active_streak(records: list[UsageRecord]) -> tuple[int, int]:
 
 
 def get_trends() -> dict:
-    """Get cached trend data, re-parsing if stale."""
+    """Get cached trend data from the shared wire parse snapshot."""
     now_ts = time.time()
     today = datetime.now().astimezone().date()
     if _trend_cache["data"] is None or now_ts - _trend_cache["at"] > TREND_CACHE_TTL or _trend_cache.get("date") != today:
@@ -449,8 +473,7 @@ def get_trends() -> dict:
             today = datetime.now().astimezone().date()
             if _trend_cache["data"] is not None and now_ts - _trend_cache["at"] <= TREND_CACHE_TTL and _trend_cache.get("date") == today:
                 return _trend_cache["data"]
-            log.debug("Trend cache miss, parsing wire.jsonl files")
-            result = parse_all_full()
+            result = _get_parse_result_locked()
             grand_input = sum(r.input_total for r in result.usage_records)
             grand_output = sum(r.output for r in result.usage_records)
             grand_total = grand_input + grand_output
@@ -488,7 +511,7 @@ def get_trends() -> dict:
             _trend_cache["at"] = now_ts
             _trend_cache["date"] = today
 
-            # Also update tool-usage and model-usage caches since we just parsed everything
+            # Keep all derived caches synchronized with the same full-parse snapshot.
             _update_tool_usage_cache(result)
             _update_model_usage_cache(result)
 
@@ -531,7 +554,7 @@ def _update_tool_usage_cache(result: ParseResult):
 
 
 def get_tool_usage() -> dict:
-    """Get cached tool/skill usage data, re-parsing if stale."""
+    """Get cached tool/skill usage data from the shared wire snapshot."""
     now_ts = time.time()
     today = datetime.now().astimezone().date()
     if _tool_usage_cache["data"] is None or now_ts - _tool_usage_cache["at"] > TOOL_USAGE_CACHE_TTL or _tool_usage_cache.get("date") != today:
@@ -540,12 +563,8 @@ def get_tool_usage() -> dict:
             today = datetime.now().astimezone().date()
             if _tool_usage_cache["data"] is not None and now_ts - _tool_usage_cache["at"] <= TOOL_USAGE_CACHE_TTL and _tool_usage_cache.get("date") == today:
                 return _tool_usage_cache["data"]
-            log.debug("Tool-usage cache miss, parsing wire.jsonl files")
-            result = parse_all_full()
+            result = _get_parse_result_locked()
             _update_tool_usage_cache(result)
-            _tool_usage_cache["date"] = today
-            # Also update trend + model caches
-            _trend_cache["at"] = 0  # force trend refresh next call
             _update_model_usage_cache(result)
     return _tool_usage_cache["data"]
 
@@ -611,7 +630,7 @@ def _update_model_usage_cache(result: ParseResult):
 
 
 def get_model_usage() -> dict:
-    """Get cached model usage distribution, re-parsing if stale."""
+    """Get cached model usage distribution from the shared wire snapshot."""
     now_ts = time.time()
     today = datetime.now().astimezone().date()
     if _model_usage_cache["data"] is None or now_ts - _model_usage_cache["at"] > TOOL_USAGE_CACHE_TTL or _model_usage_cache.get("date") != today:
@@ -620,11 +639,7 @@ def get_model_usage() -> dict:
             today = datetime.now().astimezone().date()
             if _model_usage_cache["data"] is not None and now_ts - _model_usage_cache["at"] <= TOOL_USAGE_CACHE_TTL and _model_usage_cache.get("date") == today:
                 return _model_usage_cache["data"]
-            log.debug("Model-usage cache miss, parsing wire.jsonl files")
-            result = parse_all_full()
+            result = _get_parse_result_locked()
             _update_model_usage_cache(result)
-            _model_usage_cache["date"] = today
-            # Also update other caches
-            _trend_cache["at"] = 0
             _update_tool_usage_cache(result)
     return _model_usage_cache["data"]

@@ -712,7 +712,10 @@ function handleRoute() {
     else if (hash === '#/models') renderModelConfigDetail();
     else if (hash === '#/tasks') renderTasksDetail();
     else if (hash === '#/hooks') renderHooksDetail();
-    else if (hash === '#/artifacts') renderArtifactsDetail();
+    else if (hash === '#/artifacts') {
+        if (artifactsData) renderArtifactsDetail();
+        else loadArtifacts();
+    }
     else if (hash === '#/memory') renderMemoryDetail();
     else if (hash === '#/sessions') {
         if (!sessionsState.items.length) loadSessionsDetail();
@@ -4135,19 +4138,9 @@ function filterTasksDetail(q) {
     grid.innerHTML = filtered.map(renderTaskCard).join('');
 }
 
-function renderTasksDetail() {
-    var data = statusData.tasks;
-    var grid = document.getElementById('tasksDetailGrid');
-    var stats = document.getElementById('tasksDetailStats');
-    if (!data) {
-        if (grid) grid.innerHTML = '<div class="empty">数据加载中...</div>';
-        if (stats) stats.innerHTML = '';
-        loadTasks();
-        return;
-    }
-    var total = data.total || 0;
+function _taskCounts(tasks) {
     var counts = { ready: 0, running: 0, disabled: 0, failed: 0, unregistered: 0 };
-    data.tasks.forEach(function(t) {
+    (tasks || []).forEach(function(t) {
         var s = t.status || {};
         if (!s.registered) { counts.unregistered++; return; }
         if (s.state === 'Ready') counts.ready++;
@@ -4157,6 +4150,34 @@ function renderTasksDetail() {
         var rs = s.resultStatus || {};
         if (rs.ok === false && s.state !== 'Running') counts.failed++;
     });
+    return counts;
+}
+
+function renderTasksMini(data) {
+    var total = data.total || 0;
+    var counts = _taskCounts(data.tasks);
+    document.getElementById('tasksMiniMetric').textContent = total;
+    var pills = [];
+    if (counts.running) pills.push('<span class="task-mini-pill running"><span class="dot"></span>运行中 ' + counts.running + '</span>');
+    if (counts.ready) pills.push('<span class="task-mini-pill ready"><span class="dot"></span>就绪 ' + counts.ready + '</span>');
+    if (counts.failed) pills.push('<span class="task-mini-pill failed"><span class="dot"></span>失败 ' + counts.failed + '</span>');
+    if (counts.disabled) pills.push('<span class="task-mini-pill disabled"><span class="dot"></span>已禁用 ' + counts.disabled + '</span>');
+    if (counts.unregistered) pills.push('<span class="task-mini-pill unregistered"><span class="dot"></span>未注册 ' + counts.unregistered + '</span>');
+    document.getElementById('tasksMiniStatus').innerHTML = pills.join('') || '<span class="task-mini-pill">暂无任务</span>';
+}
+
+function renderTasksDetail() {
+    var data = statusData.tasks;
+    var grid = document.getElementById('tasksDetailGrid');
+    var stats = document.getElementById('tasksDetailStats');
+    if (!data || data.summary) {
+        if (grid) grid.innerHTML = '<div class="empty">数据加载中...</div>';
+        if (stats) stats.innerHTML = '';
+        loadTasks();
+        return;
+    }
+    var total = data.total || 0;
+    var counts = _taskCounts(data.tasks);
     if (stats) {
         var statItems = ['<span>共 <strong>' + total + '</strong> 个</span>'];
         if (counts.running) statItems.push('<span>运行中 <strong>' + counts.running + '</strong></span>');
@@ -4171,34 +4192,23 @@ function renderTasksDetail() {
     grid.innerHTML = filtered.map(renderTaskCard).join('');
 }
 
+async function loadTaskSummary() {
+    try {
+        var data = await fetchJSON('/api/tasks?summary=1');
+        if (!statusData.tasks || statusData.tasks.summary) statusData.tasks = data;
+        renderTasksMini(data);
+        if (location.hash === '#/tasks' && statusData.tasks.summary) renderTasksDetail();
+    } catch (e) {
+        document.getElementById('tasksMiniMetric').textContent = '-';
+        document.getElementById('tasksMiniStatus').innerHTML = '<span class="task-mini-pill">加载失败</span>';
+    }
+}
+
 async function loadTasks() {
     try {
         var data = await fetchJSON('/api/tasks');
         statusData.tasks = data;
-        var total = data.total || 0;
-
-        // Render mini dashboard
-        var counts = { ready: 0, running: 0, disabled: 0, failed: 0, unregistered: 0 };
-        data.tasks.forEach(function(t) {
-            var s = t.status || {};
-            if (!s.registered) { counts.unregistered++; return; }
-            if (s.state === 'Ready') counts.ready++;
-            else if (s.state === 'Running') counts.running++;
-            else if (s.state === 'Disabled') counts.disabled++;
-            else counts.ready++;
-            var rs = s.resultStatus || {};
-            if (rs.ok === false && s.state !== 'Running') counts.failed++;
-        });
-        document.getElementById('tasksMiniMetric').textContent = total;
-        var pills = [];
-        if (counts.running) pills.push('<span class="task-mini-pill running"><span class="dot"></span>运行中 ' + counts.running + '</span>');
-        if (counts.ready) pills.push('<span class="task-mini-pill ready"><span class="dot"></span>就绪 ' + counts.ready + '</span>');
-        if (counts.failed) pills.push('<span class="task-mini-pill failed"><span class="dot"></span>失败 ' + counts.failed + '</span>');
-        if (counts.disabled) pills.push('<span class="task-mini-pill disabled"><span class="dot"></span>已禁用 ' + counts.disabled + '</span>');
-        if (counts.unregistered) pills.push('<span class="task-mini-pill unregistered"><span class="dot"></span>未注册 ' + counts.unregistered + '</span>');
-        document.getElementById('tasksMiniStatus').innerHTML = pills.join('') || '<span class="task-mini-pill">暂无任务</span>';
-
-        // If currently on detail page, render it
+        renderTasksMini(data);
         if (location.hash === '#/tasks') renderTasksDetail();
     } catch (e) {
         document.getElementById('tasksMiniMetric').textContent = '-';
@@ -4922,6 +4932,12 @@ async function toggleStartupService(service, enable) {
 }
 
 // === Artifacts Browser ===
+function deferArtifactsLoad() {
+    document.getElementById('artifactsMiniMetric').textContent = '-';
+    document.getElementById('artifactsMiniLabel').textContent = '点击查看';
+    document.getElementById('artifactsMiniStatus').innerHTML = '<span class="task-mini-pill">按需加载</span>';
+}
+
 async function loadArtifacts() {
     try {
         var data = await fetchJSON('/api/artifacts/all?limit=500');
@@ -5124,7 +5140,8 @@ async function setDashboardStartupMode(mode) {
 
 // === Load all ===
 async function loadAll() {
-    await Promise.all([loadTrends(), loadSkills(), loadMCP(), loadHooks(), loadMemory(), loadKimi(), loadToolUsage(), loadModelUsage(), loadTasks(), loadModelConfig(), loadArtifacts()]);
+    deferArtifactsLoad();
+    await Promise.all([loadTrends(), loadSkills(), loadMCP(), loadHooks(), loadMemory(), loadKimi(), loadToolUsage(), loadModelUsage(), loadTaskSummary(), loadModelConfig()]);
     renderStatusBar();
     applySettings();
     document.getElementById('lastUpdated').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN');
