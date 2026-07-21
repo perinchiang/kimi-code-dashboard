@@ -381,7 +381,21 @@ def show_menu() -> str:
     return input("请输入数字选项: ").strip()
 
 
+def _configure_console_encoding() -> None:
+    """Keep Chinese menu output writable on Windows hosts with non-UTF-8 locales."""
+    if sys.platform != "win32":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
+
+
 def main() -> None:
+    _configure_console_encoding()
     choice = sys.argv[1].strip() if len(sys.argv) > 1 else show_menu()
 
     if choice == "1":
