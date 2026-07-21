@@ -474,8 +474,9 @@ def _macos_service_loaded(service: str) -> bool:
 
 def _macos_create_dashboard_plist() -> None:
     plist_path = _macos_plist_path("dashboard")
-    python_path = str((APP_DIR / ".venv" / "bin" / "python").resolve())
-    log_path = str((KIMI_CODE_DIR / "dashboard.log").resolve())
+    python_path = _escape_xml(str((APP_DIR / ".venv" / "bin" / "python").resolve()))
+    working_directory = _escape_xml(str(APP_DIR.resolve()))
+    log_path = _escape_xml(str((KIMI_CODE_DIR / "dashboard.log").resolve()))
     plist = f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -488,7 +489,7 @@ def _macos_create_dashboard_plist() -> None:
         <string>app.py</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>{APP_DIR}</string>
+    <string>{working_directory}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -508,7 +509,8 @@ def _macos_create_dashboard_plist() -> None:
 
 def _macos_create_kimi_plist(cfg: dict) -> None:
     plist_path = _macos_plist_path("kimi")
-    log_path = str((KIMI_CODE_DIR / "kimi-server.log").resolve())
+    working_directory = _escape_xml(str(KIMI_CODE_DIR.resolve()))
+    log_path = _escape_xml(str((KIMI_CODE_DIR / "kimi-server.log").resolve()))
     # Reuse command builder for launchd
     cmd = _build_cmd(cfg)
     args_xml = "\n".join(f"        <string>{_escape_xml(str(arg))}</string>" for arg in cmd)
@@ -523,7 +525,7 @@ def _macos_create_kimi_plist(cfg: dict) -> None:
 {args_xml}
     </array>
     <key>WorkingDirectory</key>
-    <string>{KIMI_CODE_DIR}</string>
+    <string>{working_directory}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

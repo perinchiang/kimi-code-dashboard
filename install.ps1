@@ -1,4 +1,4 @@
-# kimi-code-dashboard installer for Windows.
+﻿# kimi-code-dashboard installer for Windows.
 #
 # Usage:
 #   irm https://raw.githubusercontent.com/perinchiang/kimi-code-dashboard/master/install.ps1 | iex

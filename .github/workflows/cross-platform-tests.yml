@@ -1,0 +1,70 @@
+name: Cross-platform tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python 3.11
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Compile Python sources
+        run: python -m compileall -q app.py config.py launch_menu.py routes services tests
+
+      - name: Check frontend JavaScript
+        run: node --check static/js/app.js
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -q
+
+      - name: Load Flask routes
+        run: python -c "from app import create_app; app=create_app(); assert len(list(app.url_map.iter_rules())) >= 75"
+
+      - name: Check launch menu import
+        run: python launch_menu.py 0
+
+      - name: Check Bash installer syntax
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash -n install.sh
+
+      - name: Check Windows PowerShell installer syntax
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "install.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count) {
+            $errors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
