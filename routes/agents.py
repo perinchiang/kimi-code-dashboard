@@ -20,8 +20,8 @@ _SCOPE_META = {
         "description": "对所有 Kimi Code 会话生效",
     },
     "user": {
-        "label": "通用用户级",
-        "description": "供多个 Agent 工具共享的用户指令",
+        "label": "全局 Agent",
+        "description": "对所有 Agent 工具共享的用户指令",
     },
     "project": {
         "label": "当前项目",

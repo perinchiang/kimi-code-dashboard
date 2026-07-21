@@ -44,6 +44,15 @@ var agentsState = {
     saving: false,
     conflict: null,
     loaded: false,
+    projectKimi: {
+        content: '',
+        revision: '',
+        exists: false,
+        dirty: false,
+        loading: false,
+        saving: false,
+        conflict: null,
+    },
 };
 
 // === Settings ===
@@ -3388,6 +3397,17 @@ function agentScopeById(scopeId) {
     return agentsState.scopes.find(function(scope) { return scope.id === scopeId; }) || null;
 }
 
+function agentVisibleScopes() {
+    return agentsState.scopes.filter(function(scope) {
+        return scope.id === 'global' || scope.id === 'user' || scope.id === 'project';
+    });
+}
+
+function agentDisplayLabel(scope) {
+    if (!scope) return '';
+    return scope.id === 'user' ? '全局 Agent' : (scope.label || '');
+}
+
 function agentStatusText(scope) {
     if (!scope) return '未知状态';
     if (scope.exists) return '已存在';
@@ -3398,6 +3418,42 @@ function agentStatusClass(scope) {
     return scope && scope.exists ? 'ok' : 'empty';
 }
 
+function agentEditorStatusLabel(scope, state) {
+    var meta = agentScopeById(scope);
+    if (state.saving) return '保存中...';
+    if (state.loading) return '读取中...';
+    if (state.dirty) return '未保存更改';
+    return meta && meta.exists ? '已读取' : '尚未创建';
+}
+
+function agentEditorStatusClass(state) {
+    if (state.saving || state.loading) return 'saving';
+    return state.dirty ? 'dirty' : 'clean';
+}
+
+function renderAgentEditorPanel(scope, state) {
+    var current = agentScopeById(scope);
+    var isProjectKimi = scope === 'project-kimi';
+    var editorId = isProjectKimi ? 'projectKimiAgentsEditor' : 'agentsEditor';
+    var reloadAction = isProjectKimi ? 'reloadProjectKimiContent(false)' : 'reloadAgentContent(false)';
+    var saveAction = isProjectKimi ? 'saveProjectKimiAgent()' : 'saveAgent()';
+    var forceSaveAction = isProjectKimi ? 'forceSaveProjectKimiAgent()' : 'forceSaveAgent()';
+    var inputAction = isProjectKimi ? 'onProjectKimiEditorInput(this.value)' : 'onAgentEditorInput(this.value)';
+    var conflictReloadAction = isProjectKimi ? 'reloadProjectKimiContent(true)' : 'reloadAgentContent(true)';
+    var panelClass = isProjectKimi ? ' agents-project-kimi-panel' : '';
+    var statusClass = agentEditorStatusClass(state);
+    var statusLabel = agentEditorStatusLabel(scope, state);
+    var conflictHtml = state.conflict ? '<div class="agents-conflict"><strong>文件已被外部修改</strong><span>重新载入会放弃当前编辑内容；覆盖保存会使用当前编辑内容覆盖磁盘文件。</span><div class="agents-conflict-actions"><button class="btn-task" onclick="' + conflictReloadAction + '">重新载入</button><button class="btn-task btn-danger" onclick="' + forceSaveAction + '">覆盖保存</button></div></div>' : '';
+    var displayLabel = agentDisplayLabel(current);
+    return '<section class="agents-editor-panel' + panelClass + '" aria-label="' + escapeHtml(displayLabel || 'Agent 指令编辑器') + '">' +
+        '<div class="agents-editor-header"><div><div class="agents-editor-title">' + escapeHtml(displayLabel) + '</div><code>' + escapeHtml(current ? current.path : '') + '</code></div><span class="agents-editor-status ' + statusClass + '" data-agent-status-scope="' + escapeHtml(scope) + '">' + statusLabel + '</span></div>' +
+        '<div class="agents-editor-toolbar"><button class="btn-task" onclick="' + reloadAction + '"' + (state.saving || state.loading ? ' disabled' : '') + '>重新读取</button><button class="btn-task agents-save-btn" data-agent-save-scope="' + escapeHtml(scope) + '" onclick="' + saveAction + '"' + (state.saving || state.loading || !state.dirty ? ' disabled' : '') + '>' + (state.saving ? '保存中...' : (current && current.exists ? '保存' : '创建并保存')) + '</button></div>' +
+        conflictHtml +
+        '<textarea id="' + editorId + '" class="agents-editor" data-agent-editor-scope="' + escapeHtml(scope) + '" spellcheck="false" placeholder="在这里输入 Agent 指令，例如：\n\n- 修改代码前先阅读相关文件。\n- 完成修改后运行对应测试。" oninput="' + inputAction + '">' + escapeHtml(state.content) + '</textarea>' +
+        '<div class="agents-help"><strong>生效说明</strong><span>首次点击保存时才会创建这个文件。之后再次打开此页面，会自动读取并展示文件内容。未保存的编辑不会改变磁盘文件。</span></div>' +
+        '</section>';
+}
+
 function renderAgentsPage() {
     var root = document.getElementById('agentsPageContent');
     if (!root) return;
@@ -3405,33 +3461,26 @@ function renderAgentsPage() {
         root.innerHTML = '<div class="agents-loading">正在读取 Agent 指令...</div>';
         return;
     }
-    if (!agentsState.scopes.length) {
+    var visibleScopes = agentVisibleScopes();
+    if (!visibleScopes.length) {
         root.innerHTML = '<div class="error">暂时无法读取 Agent 指令作用域</div>';
         return;
     }
-    var scopeItems = agentsState.scopes.map(function(scope) {
+    var scopeItems = visibleScopes.map(function(scope) {
         var active = scope.id === agentsState.currentScope ? ' active' : '';
         var status = scope.error ? '读取失败' : agentStatusText(scope);
         var statusClass = scope.error ? 'error' : agentStatusClass(scope);
         return '<button type="button" class="agents-scope-item' + active + '" onclick="selectAgentScope(\'' + escapeJsString(scope.id) + '\')">' +
-            '<span class="agents-scope-item-top"><strong>' + escapeHtml(scope.label) + '</strong><span class="agents-scope-status ' + statusClass + '">' + escapeHtml(status) + '</span></span>' +
+            '<span class="agents-scope-item-top"><strong>' + escapeHtml(agentDisplayLabel(scope)) + '</strong><span class="agents-scope-status ' + statusClass + '">' + escapeHtml(status) + '</span></span>' +
             '<span class="agents-scope-desc">' + escapeHtml(scope.description || '') + '</span>' +
             '<code>' + escapeHtml(scope.path || '路径不可用') + '</code>' +
             '</button>';
     }).join('');
-    var current = agentScopeById(agentsState.currentScope);
-    var dirtyLabel = agentsState.saving ? '保存中...' : (agentsState.dirty ? '未保存更改' : (current && current.exists ? '已读取' : '尚未创建'));
-    var dirtyClass = agentsState.saving ? 'saving' : (agentsState.dirty ? 'dirty' : 'clean');
-    var conflictHtml = agentsState.conflict ? '<div class="agents-conflict"><strong>文件已被外部修改</strong><span>重新载入会放弃当前编辑内容；覆盖保存会使用当前编辑内容覆盖磁盘文件。</span><div class="agents-conflict-actions"><button class="btn-task" onclick="reloadAgentContent(true)">重新载入</button><button class="btn-task btn-danger" onclick="forceSaveAgent()">覆盖保存</button></div></div>' : '';
+    var editorHtml = renderAgentEditorPanel(agentsState.currentScope, agentsState);
+    if (agentsState.currentScope === 'project') editorHtml += renderAgentEditorPanel('project-kimi', agentsState.projectKimi);
     root.innerHTML = '<div class="agents-layout">' +
         '<aside class="agents-scope-list" aria-label="Agent 指令作用域">' + scopeItems + '</aside>' +
-        '<section class="agents-editor-panel" aria-label="Agent 指令编辑器">' +
-            '<div class="agents-editor-header"><div><div class="agents-editor-title">' + escapeHtml(current ? current.label : '') + '</div><code>' + escapeHtml(current ? current.path : '') + '</code></div><span class="agents-editor-status ' + dirtyClass + '">' + dirtyLabel + '</span></div>' +
-            '<div class="agents-editor-toolbar"><button class="btn-task" onclick="reloadAgentContent(false)"' + (agentsState.saving ? ' disabled' : '') + '>重新读取</button><button class="btn-task agents-save-btn" onclick="saveAgent()"' + (agentsState.saving || !agentsState.dirty ? ' disabled' : '') + '>' + (agentsState.saving ? '保存中...' : (current && current.exists ? '保存' : '创建并保存')) + '</button></div>' +
-            conflictHtml +
-            '<textarea id="agentsEditor" class="agents-editor" spellcheck="false" placeholder="在这里输入 Agent 指令，例如：\n\n- 每个对话都要叫我 Pat。" oninput="onAgentEditorInput(this.value)">' + escapeHtml(agentsState.content) + '</textarea>' +
-            '<div class="agents-help"><strong>生效说明</strong><span>首次点击保存时才会创建这个文件。之后再次打开此页面，会自动读取并展示文件内容。未保存的编辑不会改变磁盘文件。</span></div>' +
-        '</section>' +
+        '<div class="agents-project-editors" aria-label="Agent 指令编辑器">' + editorHtml + '</div>' +
     '</div>';
 }
 
@@ -3443,8 +3492,12 @@ async function loadAgents() {
         var data = await fetchJSON('/api/agents');
         agentsState.scopes = data.scopes || [];
         agentsState.loaded = true;
-        if (!agentScopeById(agentsState.currentScope) && agentsState.scopes.length) agentsState.currentScope = agentsState.scopes[0].id;
+        var visibleScopes = agentVisibleScopes();
+        if (agentsState.currentScope === 'project-kimi' || !visibleScopes.some(function(scope) { return scope.id === agentsState.currentScope; })) {
+            agentsState.currentScope = visibleScopes.length ? visibleScopes[0].id : 'global';
+        }
         await loadAgentContent(false);
+        if (agentsState.currentScope === 'project') await loadProjectKimiContent(false);
     } catch (e) {
         agentsState.scopes = [];
         agentsState.loading = false;
@@ -3476,70 +3529,124 @@ async function loadAgentContent(force) {
     }
 }
 
-function onAgentEditorInput(content) {
-    agentsState.content = content;
-    agentsState.dirty = true;
-    agentsState.conflict = null;
-    var status = document.querySelector('.agents-editor-status');
-    var saveBtn = document.querySelector('.agents-save-btn');
-    if (status) {
-        status.className = 'agents-editor-status dirty';
-        status.textContent = '未保存更改';
+async function loadProjectKimiContent(force) {
+    var state = agentsState.projectKimi;
+    if (state.loading || (state.dirty && !force)) return;
+    state.loading = true;
+    renderAgentsPage();
+    try {
+        var data = await fetchJSON('/api/agents/project-kimi');
+        state.content = data.content || '';
+        state.revision = data.revision || '';
+        state.exists = data.exists === true;
+        state.dirty = false;
+        state.conflict = null;
+        var listed = agentScopeById('project-kimi');
+        if (listed) Object.assign(listed, data);
+    } catch (e) {
+        showToast('读取项目 Kimi Code 指令失败: ' + e.message, 5000);
+    } finally {
+        state.loading = false;
+        renderAgentsPage();
     }
-    if (saveBtn) saveBtn.disabled = false;
+}
+
+function updateAgentEditorControls(scope, state) {
+    var status = document.querySelector('[data-agent-status-scope="' + scope + '"]');
+    var saveBtn = document.querySelector('[data-agent-save-scope="' + scope + '"]');
+    if (status) {
+        status.className = 'agents-editor-status ' + agentEditorStatusClass(state);
+        status.textContent = agentEditorStatusLabel(scope, state);
+    }
+    if (saveBtn) saveBtn.disabled = state.saving || state.loading || !state.dirty;
+}
+
+function updateAgentEditorInput(scope, state, content) {
+    state.content = content;
+    state.dirty = true;
+    state.conflict = null;
+    updateAgentEditorControls(scope, state);
+}
+
+function onAgentEditorInput(content) {
+    updateAgentEditorInput(agentsState.currentScope, agentsState, content);
+}
+
+function onProjectKimiEditorInput(content) {
+    updateAgentEditorInput('project-kimi', agentsState.projectKimi, content);
+}
+
+function hasDirtyAgentEditor() {
+    return agentsState.dirty || (agentsState.currentScope === 'project' && agentsState.projectKimi.dirty);
+}
+
+function switchAgentScope(scope) {
+    agentsState.currentScope = scope;
+    agentsState.dirty = false;
+    agentsState.conflict = null;
+    agentsState.projectKimi.dirty = false;
+    agentsState.projectKimi.conflict = null;
+    loadAgentContent(true);
+    if (scope === 'project') loadProjectKimiContent(true);
 }
 
 function selectAgentScope(scope) {
-    if (scope === agentsState.currentScope) return;
-    if (agentsState.dirty) {
+    if (!agentVisibleScopes().some(function(item) { return item.id === scope; }) || scope === agentsState.currentScope) return;
+    if (hasDirtyAgentEditor()) {
         confirmDialog('当前作用域有未保存更改，切换后将放弃这些内容。继续吗？', function() {
-            agentsState.currentScope = scope;
-            agentsState.dirty = false;
-            agentsState.conflict = null;
-            loadAgentContent(true);
+            switchAgentScope(scope);
         }, { danger: false });
         return;
     }
-    agentsState.currentScope = scope;
-    agentsState.conflict = null;
-    loadAgentContent(true);
+    switchAgentScope(scope);
 }
 
-async function saveAgent(force) {
-    if (agentsState.saving || (!agentsState.dirty && !force)) return;
-    agentsState.saving = true;
+async function saveAgentScope(scope, state, force) {
+    if (state.saving || (!state.dirty && !force)) return;
+    state.saving = true;
     renderAgentsPage();
     try {
-        var data = await fetchJSON('/api/agents/' + encodeURIComponent(agentsState.currentScope), {
+        var data = await fetchJSON('/api/agents/' + encodeURIComponent(scope), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: agentsState.content, revision: agentsState.revision, force: force === true }),
+            body: JSON.stringify({ content: state.content, revision: state.revision, force: force === true }),
         });
-        agentsState.revision = data.revision || '';
-        agentsState.exists = true;
-        agentsState.dirty = false;
-        agentsState.conflict = null;
-        var listed = agentScopeById(agentsState.currentScope);
+        state.revision = data.revision || '';
+        state.exists = true;
+        state.dirty = false;
+        state.conflict = null;
+        var listed = agentScopeById(scope);
         if (listed) Object.assign(listed, data, { exists: true });
         showToast('Agent 指令已保存，后续新会话会读取最新内容', 4000);
     } catch (e) {
         if (e.message === 'HTTP 409') {
             try {
-                var conflict = await fetchJSON('/api/agents/' + encodeURIComponent(agentsState.currentScope));
-                agentsState.conflict = conflict;
+                state.conflict = await fetchJSON('/api/agents/' + encodeURIComponent(scope));
             } catch (ignored) {}
             showToast('文件已被外部修改，请选择重新载入或覆盖保存', 5000);
         } else {
             showToast('保存 Agent 指令失败: ' + e.message, 5000);
         }
     } finally {
-        agentsState.saving = false;
+        state.saving = false;
         renderAgentsPage();
     }
 }
 
+function saveAgent(force) {
+    return saveAgentScope(agentsState.currentScope, agentsState, force);
+}
+
+function saveProjectKimiAgent(force) {
+    return saveAgentScope('project-kimi', agentsState.projectKimi, force);
+}
+
 function forceSaveAgent() {
     saveAgent(true);
+}
+
+function forceSaveProjectKimiAgent() {
+    saveProjectKimiAgent(true);
 }
 
 function reloadAgentContent(force) {
@@ -3548,6 +3655,14 @@ function reloadAgentContent(force) {
         return;
     }
     loadAgentContent(true);
+}
+
+function reloadProjectKimiContent(force) {
+    if (agentsState.projectKimi.dirty && !force) {
+        confirmDialog('重新读取会放弃项目 Kimi Code 的未保存更改，继续吗？', function() { loadProjectKimiContent(true); }, { danger: false });
+        return;
+    }
+    loadProjectKimiContent(true);
 }
 
 // === Settings ===
