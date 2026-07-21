@@ -12,14 +12,15 @@
 }
 """
 
+import glob
 import json
+import mimetypes
+import os
 import shutil
 import threading
 import tomllib
 from datetime import datetime
 from pathlib import Path
-import glob
-import os
 
 try:
     import boto3
@@ -208,6 +209,94 @@ def test_connection(cfg: dict) -> dict:
         return {"ok": False, "msg": f"连接失败: {e}"}
 
 
+def _load_index_entries() -> dict[str, dict]:
+    """Load indexed user artifacts without requiring the index to exist."""
+    index_path = FILES_DIR / "index.json"
+    if not index_path.exists():
+        return {}
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+
+    if isinstance(index, list):
+        files_list = index
+    elif isinstance(index, dict):
+        files_list = index.get("files", [])
+        if not files_list:
+            files_list = [
+                {"id": file_id, **entry}
+                for file_id, entry in index.items()
+                if isinstance(entry, dict) and file_id != "version"
+            ]
+    else:
+        files_list = []
+    return {
+        entry.get("id"): dict(entry)
+        for entry in files_list
+        if isinstance(entry, dict) and entry.get("id")
+    }
+
+
+def _is_file_artifact_candidate(path: Path) -> bool:
+    """Return whether a direct file in ~/.kimi-code/files can be an artifact."""
+    return (
+        path.is_file()
+        and path.name != "index.json"
+        and not path.name.startswith(".")
+        and not path.name.endswith((".lock", ".tmp", ".bak"))
+    )
+
+
+def _entry_from_file(path: Path) -> dict:
+    """Build artifact metadata for a file that is missing from index.json."""
+    stat = path.stat()
+    with path.open("rb") as handle:
+        media_type = _detect_mime(handle.read(16))
+    if media_type == "application/octet-stream":
+        media_type = mimetypes.guess_type(path.name)[0] or media_type
+    return {
+        "id": path.name,
+        "name": path.name,
+        "media_type": media_type,
+        "size": stat.st_size,
+        "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+    }
+
+
+def _discover_file_entries() -> dict[str, dict]:
+    """Merge index.json entries with direct files not yet registered in it."""
+    entries = _load_index_entries()
+    if not FILES_DIR.exists():
+        return entries
+    try:
+        paths = FILES_DIR.iterdir()
+        for path in paths:
+            if path.name in entries or not _is_file_artifact_candidate(path):
+                continue
+            try:
+                entries[path.name] = _entry_from_file(path)
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return entries
+
+
+def resolve_file_artifact(file_id: str) -> tuple[Path, dict] | None:
+    """Resolve an indexed or unindexed user artifact to its path and metadata."""
+    if not file_id or "/" in file_id or "\\" in file_id or ".." in file_id:
+        return None
+    path = FILES_DIR / file_id
+    if not _is_file_artifact_candidate(path):
+        return None
+    entries = _discover_file_entries()
+    entry = entries.get(file_id)
+    if entry is None:
+        return None
+    return path, entry
+
+
 def upload_file(file_id: str, cfg: dict | None = None) -> dict:
     """上传 ~/.kimi-code/files/<file_id> 到 R2。
 
@@ -227,33 +316,10 @@ def upload_file(file_id: str, cfg: dict | None = None) -> dict:
     if err:
         return {"success": False, "error": err}
 
-    # 读取 index.json 拿到文件名和 media_type
-    index_path = FILES_DIR / "index.json"
-    if not index_path.exists():
-        return {"success": False, "error": "找不到 files/index.json"}
-    try:
-        index = json.loads(index_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        return {"success": False, "error": f"读取 index.json 失败: {e}"}
-
-    # index.json 实际结构：{"version":1, "files":[{id, name, media_type, size, created_at}]}
-    # 兼容旧式纯 list 和顶层 dict
-    if isinstance(index, list):
-        files_list = index
-    elif isinstance(index, dict):
-        files_list = index.get("files", [])
-        # 兼容旧式 {file_id: entry}
-        if not files_list and file_id in index:
-            files_list = [{file_id: index[file_id]}]
-    else:
-        files_list = []
-    entry = next((x for x in files_list if x.get("id") == file_id), None)
-    if not entry:
-        return {"success": False, "error": f"index.json 中找不到 {file_id}"}
-
-    file_path = FILES_DIR / file_id
-    if not file_path.exists():
-        return {"success": False, "error": f"文件不存在: {file_path}"}
+    resolved = resolve_file_artifact(file_id)
+    if resolved is None:
+        return {"success": False, "error": f"找不到产物: {file_id}"}
+    file_path, entry = resolved
 
     media_type = entry.get("media_type", "application/octet-stream")
     name = entry.get("name", file_id)
@@ -358,20 +424,7 @@ def list_artifacts(file_type: str = "all", keyword: str = "", limit: int = 100, 
         "image_bed_enabled": bool
       }
     """
-    index_path = FILES_DIR / "index.json"
-    if not index_path.exists():
-        return {"files": [], "total": 0, "image_bed_enabled": load_image_bed_config().get("enabled", False)}
-    try:
-        index = json.loads(index_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        return {"files": [], "total": 0, "image_bed_enabled": False, "error": str(e)}
-
-    if isinstance(index, list):
-        files_list = index
-    elif isinstance(index, dict):
-        files_list = index.get("files", [])
-    else:
-        files_list = []
+    files_list = list(_discover_file_entries().values())
 
     # 过滤
     kw = (keyword or "").strip().lower()
@@ -500,38 +553,31 @@ def list_all_artifacts(file_type: str = "all", keyword: str = "", limit: int = 2
     upload_map = get_uploaded_map()
     items = []
 
-    # 1. 用户上传（files/）
-    index_path = FILES_DIR / "index.json"
-    if index_path.exists():
-        try:
-            index = json.loads(index_path.read_text(encoding="utf-8"))
-            files_list = index.get("files", []) if isinstance(index, dict) else (index if isinstance(index, list) else [])
-            for f in files_list:
-                media = f.get("media_type", "")
-                is_image = media.startswith("image/")
-                if file_type == "image" and not is_image:
-                    continue
-                if file_type == "other" and is_image:
-                    continue
-                name = f.get("name", "")
-                fid = f.get("id", "")
-                kw = (keyword or "").strip().lower()
-                if kw and kw not in name.lower() and kw not in fid.lower():
-                    continue
-                cache_entry = upload_map.get(fid, {})
-                items.append({
-                    "id": fid,
-                    "source": "user",
-                    "name": name,
-                    "media_type": media,
-                    "size": f.get("size", 0),
-                    "created_at": f.get("created_at", ""),
-                    "sort_time": f.get("created_at", ""),
-                    "uploaded_url": cache_entry.get("url", ""),
-                    "uploaded_at": cache_entry.get("uploaded_at", ""),
-                })
-        except Exception as e:
-            log.warning("list_all_artifacts: failed to read index: %s", e)
+    # 1. 用户上传（files/），包括尚未写入 index.json 的文件
+    kw = (keyword or "").strip().lower()
+    for f in _discover_file_entries().values():
+        media = f.get("media_type", "")
+        is_image = media.startswith("image/")
+        if file_type == "image" and not is_image:
+            continue
+        if file_type == "other" and is_image:
+            continue
+        name = f.get("name", "")
+        fid = f.get("id", "")
+        if kw and kw not in name.lower() and kw not in fid.lower():
+            continue
+        cache_entry = upload_map.get(fid, {})
+        items.append({
+            "id": fid,
+            "source": "user",
+            "name": name,
+            "media_type": media,
+            "size": f.get("size", 0),
+            "created_at": f.get("created_at", ""),
+            "sort_time": f.get("created_at", ""),
+            "uploaded_url": cache_entry.get("url", ""),
+            "uploaded_at": cache_entry.get("uploaded_at", ""),
+        })
 
     # 2. AI 生成（blobs/）— 通过 wire.jsonl 判断归属，跳过用户上传的副本
     if SESSIONS_DIR.exists():

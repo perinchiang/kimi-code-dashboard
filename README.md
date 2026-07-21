@@ -6,7 +6,7 @@ Kimi Code CLI 的本地可视化控制面板，集中管理 Skill、MCP、会话
 
 > 当前版本：**v1.0.18** · 如需长期向量记忆，建议同时安装 [kimi-code-memory-mcp](https://github.com/perinchiang/kimi-code-memory-mcp)。
 
-![Dashboard 主面板](https://image.pathos.dpdns.org/dashboard-docs-dashboard-overview-1e00d507.png)
+![Dashboard 主面板](https://image.pathos.dpdns.org/f_11c5f3de-d920-4dd8-8466-eea110b8acee)
 
 ## v1.0.18 更新
 

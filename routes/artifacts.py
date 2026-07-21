@@ -5,16 +5,11 @@
   - <file_id>: 实际文件内容
 """
 
-from pathlib import Path
+from flask import Blueprint, abort, jsonify, request, send_file
 
-from flask import Blueprint, jsonify, request, send_file, abort
-
-from config import log
 from services import r2_uploader
 
 bp = Blueprint("artifacts", __name__)
-
-FILES_DIR = r2_uploader.FILES_DIR
 
 
 def _is_safe_file_id(file_id: str) -> bool:
@@ -87,22 +82,16 @@ def api_artifact_content(file_id: str):
     """
     if not _is_safe_file_id(file_id):
         abort(400, description="无效的 file_id")
-    # 1. 先查 files/
-    index_path = FILES_DIR / "index.json"
-    if index_path.exists():
-        import json
-        try:
-            index = json.loads(index_path.read_text(encoding="utf-8"))
-        except Exception:
-            index = {}
-        files_list = index.get("files", []) if isinstance(index, dict) else (index if isinstance(index, list) else [])
-        entry = next((x for x in files_list if x.get("id") == file_id), None)
-        if entry:
-            file_path = FILES_DIR / file_id
-            if file_path.exists():
-                media_type = entry.get("media_type", "application/octet-stream")
-                return send_file(str(file_path), mimetype=media_type, as_attachment=False,
-                                 download_name=entry.get("name", file_id))
+    # 1. 先查 files/，包括尚未写入 index.json 的文件
+    resolved = r2_uploader.resolve_file_artifact(file_id)
+    if resolved:
+        file_path, entry = resolved
+        return send_file(
+            str(file_path),
+            mimetype=entry.get("media_type", "application/octet-stream"),
+            as_attachment=False,
+            download_name=entry.get("name", file_id),
+        )
 
     # 2. 再查 blobs/（file_id 视为 sha256）
     if all(c in "0123456789abcdefABCDEF" for c in file_id) and len(file_id) >= 32:
@@ -124,17 +113,9 @@ def api_upload_artifact(file_id: str):
     """上传产物到图床。自动判断来源：file_id 或 sha256。"""
     if not _is_safe_file_id(file_id):
         return jsonify({"success": False, "error": "无效的 file_id"}), 400
-    # 先查 files/
-    index_path = FILES_DIR / "index.json"
-    if index_path.exists():
-        import json
-        try:
-            index = json.loads(index_path.read_text(encoding="utf-8"))
-        except Exception:
-            index = {}
-        files_list = index.get("files", []) if isinstance(index, dict) else (index if isinstance(index, list) else [])
-        if any(x.get("id") == file_id for x in files_list):
-            return jsonify(r2_uploader.upload_file(file_id))
+    # 先查 files，包括尚未写入 index.json 的文件
+    if r2_uploader.resolve_file_artifact(file_id):
+        return jsonify(r2_uploader.upload_file(file_id))
 
     # 再查 blobs/
     if all(c in "0123456789abcdefABCDEF" for c in file_id) and len(file_id) >= 32:
@@ -157,29 +138,18 @@ def api_upload_batch():
     if not isinstance(file_ids, list) or not file_ids:
         return jsonify({"success": False, "error": "file_ids 不能为空"})
 
-    # 读取 index 拿 media_type
-    import json
-    index_path = FILES_DIR / "index.json"
-    if not index_path.exists():
-        return jsonify({"success": False, "error": "index.json 不存在"})
-    try:
-        index = json.loads(index_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        return jsonify({"success": False, "error": f"index.json 解析失败: {e}"})
-    files_list = index.get("files", []) if isinstance(index, dict) else (index if isinstance(index, list) else [])
-    entry_map = {f.get("id"): f for f in files_list}
-
     results = []
     success_count = 0
     for fid in file_ids:
-        entry = entry_map.get(fid)
-        if not entry:
-            results.append({"id": fid, "success": False, "error": "index.json 中找不到"})
+        resolved = r2_uploader.resolve_file_artifact(str(fid))
+        if not resolved:
+            results.append({"id": fid, "success": False, "error": "找不到产物"})
             continue
+        _, entry = resolved
         if only_images and not entry.get("media_type", "").startswith("image/"):
             results.append({"id": fid, "success": False, "error": "非图片，已跳过", "skipped": True})
             continue
-        r = r2_uploader.upload_file(fid)
+        r = r2_uploader.upload_file(str(fid))
         results.append({"id": fid, **r})
         if r.get("success"):
             success_count += 1
