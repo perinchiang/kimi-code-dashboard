@@ -309,7 +309,7 @@ API 端点：
 1. 启动 Dashboard
 2. 启动本地 Kimi Code Web
 3. 启动外网访问 Kimi Code Web
-4. 停止 Kimi Code Web（kimi web kill）
+4. 停止 Kimi Code Web（按 PID 结束）
 5. 更新 Kimi Code
 6. 更新 Dashboard
 7. 完全卸载 Dashboard

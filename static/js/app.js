@@ -33,6 +33,7 @@ var sessionsState = {
     offset: 0,
     hasMore: false,
 };
+var sessionsRefreshTimer = null;
 var agentsState = {
     scopes: [],
     currentScope: 'global',
@@ -61,6 +62,7 @@ var SETTINGS_DEFAULTS = {
     show_trends: true,
     show_minicards: true,
     show_kimi_usage: true,
+    show_kimi_sessions: true,
     show_memory: true,
     show_tool_model_usage: true,
     show_tasks: true,
@@ -78,7 +80,7 @@ var SETTINGS_DEFAULTS = {
     session_title_auto_generate: false, // 是否默认给新会话自动生成和刷新标题
     session_title_every_exchanges: 10, // 同一会话内的自动标题刷新轮数，0 表示只生成首轮
     session_title_model: '',     // Dashboard AI 会话标题模型别名
-    __startup_dashboard_mode: 'off', // Dashboard 开机启动模式 (normal/elevated/off)
+    __startup_dashboard_mode: 'normal', // Dashboard 开机启动默认使用普通权限
 };
 // 分组定义：icon 用 SVG path data (24x24 viewBox)
 var SETTINGS_GROUPS = [
@@ -111,11 +113,7 @@ var SETTINGS_GROUPS = [
         icon: '<path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6v6l4 2"/>',
         items: [
             { key: 'dashboard_port', label: 'Dashboard 服务端口', desc: '默认 18080；修改后需重启 Dashboard', type: 'dashboard_port', row: true },
-            { key: '__startup_dashboard_mode', label: 'Dashboard 开机启动', desc: '选择 Dashboard 的启动方式', type: 'segment', row: true, options: [
-                { v: 'normal', t: '开机自启' },
-                { v: 'elevated', t: '管理员启动' },
-                { v: 'off', t: '关闭' }
-            ]},
+            { key: '__startup_dashboard_mode', label: 'Dashboard 开机自启', desc: '开启后使用普通权限随 Windows 登录启动；关闭后不自动启动', type: 'dashboard_startup_toggle', row: true },
             { key: '__startup_kimi', label: 'Kimi Code 开机自启', desc: '登录后自动启动 Kimi Web 服务', type: 'startup_toggle', row: true },
         ]
     },
@@ -155,7 +153,8 @@ var SETTINGS_GROUPS = [
         items: [
             { key: 'show_trends', label: 'Token 用量趋势', desc: '首页顶部的用量趋势图表', row: true },
             { key: 'show_minicards', label: '快捷入口卡片', desc: 'Skills / MCP / 定时任务 / 第三方模型 / 产物浏览器 / 工具调用 / 模型用量', row: true },
-            { key: 'show_kimi_usage', label: 'Kimi Usage / Sessions', desc: '登录状态、版本检查、额度信息和本地会话卡片', row: true },
+            { key: 'show_kimi_usage', label: 'Kimi 用量', desc: '登录状态、版本检查和额度信息卡片', row: true },
+            { key: 'show_kimi_sessions', label: '本地会话', desc: '本地会话数量和会话列表入口卡片', row: true },
             { key: 'show_memory', label: 'Memory Status', desc: 'TencentDB 记忆统计与 Gateway 健康', row: true },
             { key: 'show_tool_model_usage', label: '工具调用 / 模型用量', desc: '工具调用与模型用量详情页及首页快捷入口卡片', row: true },
             { key: 'show_tasks', label: '定时任务看板', desc: '快捷入口中的定时任务卡片', row: true },
@@ -170,6 +169,11 @@ function loadSettings() {
         var raw = localStorage.getItem(SETTINGS_KEY);
         var saved = raw ? JSON.parse(raw) : {};
         var settings = Object.assign({}, SETTINGS_DEFAULTS, saved);
+        // Migrate the former shared Kimi Usage / Sessions toggle
+        if (!Object.prototype.hasOwnProperty.call(saved, 'show_kimi_sessions') && Object.prototype.hasOwnProperty.call(saved, 'show_kimi_usage')) {
+            settings.show_kimi_sessions = saved.show_kimi_usage;
+            saveSettings(settings);
+        }
         // Migrate legacy single public_url to list
         if (!Array.isArray(settings.kw_public_urls)) {
             settings.kw_public_urls = [];
@@ -280,8 +284,16 @@ function applySettings() {
     setDisplay('section-trends', s.show_trends);
     setDisplay('section-minicards', s.show_minicards);
     setDisplay('section-kimi', s.show_kimi_usage);
-    setDisplay('section-kimi-sessions', s.show_kimi_usage);
+    setDisplay('section-kimi-sessions', s.show_kimi_sessions);
     setDisplay('section-memory', s.show_memory);
+    var kimiOverviewRow = document.getElementById('kimi-overview-row');
+    var overviewCount = [s.show_memory, s.show_kimi_usage, s.show_kimi_sessions].filter(Boolean).length;
+    setDisplay('kimi-overview-row', overviewCount > 0);
+    if (kimiOverviewRow) {
+        kimiOverviewRow.classList.toggle('module-count-3', overviewCount === 3);
+        kimiOverviewRow.classList.toggle('module-count-2', overviewCount === 2);
+        kimiOverviewRow.classList.toggle('module-count-1', overviewCount === 1);
+    }
     setDisplay('toolModelMiniCard', s.show_tool_model_usage);
     setDisplay('modelUsageMiniCard', s.show_tool_model_usage);
 
@@ -715,6 +727,7 @@ function handleRoute() {
     document.getElementById('view-agents').style.display = (hash === '#/agents') ? '' : 'none';
     document.getElementById('view-tool-model').style.display = (hash === '#/tool-model') ? '' : 'none';
     document.getElementById('view-model-usage').style.display = (hash === '#/model-usage') ? '' : 'none';
+    syncSessionsRefresh(hash);
     window.scrollTo(0, 0);
     if (hash === '#/skills') renderSkillsDetail();
     else if (hash === '#/mcp') renderMcpDetail();
@@ -1127,18 +1140,20 @@ var MEMORY_MCP_REPO = 'https://github.com/perinchiang/kimi-code-memory-mcp';
 function renderMemoryEmptyMessage(offline) {
     var link = '<a href="' + MEMORY_MCP_REPO + '" target="_blank" style="color:var(--accent);text-decoration:underline;font-weight:600;">kimi-code-memory-mcp</a>';
     if (offline) {
-        return 'Memory Gateway 未连接（127.0.0.1:8420）。<br>如需长期向量记忆，可搭配 ' + link + ' 使用；不需要可在<a href="#/settings" style="color:var(--accent);text-decoration:underline;">设置</a>中关闭 Memory Status 卡片。';
+        return 'Memory Gateway 未连接（127.0.0.1:8420）。<br>如需长期向量记忆，可搭配 ' + link + ' 使用；不需要可在<a href="#/settings" style="color:var(--accent);text-decoration:underline;">设置</a>中关闭记忆状态卡片。';
     }
     return 'Gateway 在线，但目前没有任何记忆数据。<br>系统会在多轮对话后自动提取 L0–L3 记忆；如果长时间未生成，请检查向量模型和 LLM API 配置是否正常。不需要可在<a href="#/settings" style="color:var(--accent);text-decoration:underline;">设置</a>中关闭。';
 }
 
 async function loadMemory() {
+    var summary = document.getElementById('memorySummary');
+    var chart = document.getElementById('memoryChart');
     try {
         var data = await fetchJSON('/api/memory');
         statusData.memory = data;
         if (!data.gatewayReachable) {
-            document.getElementById('memorySummary').innerHTML = '<div class="memory-empty">' + renderMemoryEmptyMessage(true) + '</div>';
-            document.getElementById('memoryChart').innerHTML = '';
+            summary.innerHTML = '<span class="memory-status-pill warn"><span class="memory-status-dot"></span>Gateway 离线</span>';
+            chart.innerHTML = '<div class="memory-empty">' + renderMemoryEmptyMessage(true) + '</div>';
             return;
         }
         var values = [
@@ -1149,16 +1164,20 @@ async function loadMemory() {
         ];
         var total = data.l0 + data.l1 + data.l2 + data.l3;
         if (total === 0) {
-            document.getElementById('memorySummary').innerHTML = '<div class="memory-empty">' + renderMemoryEmptyMessage(false) + '</div>';
-            document.getElementById('memoryChart').innerHTML = '';
+            summary.innerHTML = '<span class="memory-status-pill ok"><span class="memory-status-dot"></span>Gateway 在线 · 暂无记忆</span>';
+            chart.innerHTML = '<div class="memory-empty">' + renderMemoryEmptyMessage(false) + '</div>';
             return;
         }
-        var gwStatus = data.gatewayReachable ? 'Gateway 在线' : 'Gateway 离线';
-        var layerStatus = (data.l0 >= 0 && data.l1 >= 0 && data.l2 >= 0 && data.l3 >= 0) ? '四级记忆正常' : '部分记忆层异常';
-        document.getElementById('memorySummary').innerHTML = '<div class="memory-subtitle">共 ' + total + ' 条记忆</div><div class="memory-breakdown">' + gwStatus + ' · ' + layerStatus + '</div>';
-        document.getElementById('memoryChart').innerHTML = renderDonut(values, total, null, '总记忆');
+        var layersOk = (data.l0 >= 0 && data.l1 >= 0 && data.l2 >= 0 && data.l3 >= 0);
+        var pillClass = layersOk ? 'ok' : 'warn';
+        var pillText = 'Gateway 在线 · ' + (layersOk ? '四级记忆正常' : '部分记忆层异常');
+        summary.innerHTML = '<span class="memory-status-pill ' + pillClass + '"><span class="memory-status-dot"></span>' + pillText + '</span>';
+        chart.innerHTML = renderDonut(values, total, null, '总记忆');
         attachDonutHover();
-    } catch (e) { setError('memorySummary', '加载失败: ' + e.message); }
+    } catch (e) {
+        if (summary) summary.innerHTML = '<span class="memory-status-pill warn"><span class="memory-status-dot"></span>加载失败</span>';
+        if (chart) setError('memoryChart', '加载失败: ' + e.message);
+    }
 }
 
 // === Memory Detail ===
@@ -1326,7 +1345,21 @@ function closeMemoryModal() {
 }
 
 // === Local Sessions ===
-async function loadSessionsDetail(reset) {
+function syncSessionsRefresh(hash) {
+    if (hash === '#/sessions') {
+        if (!sessionsRefreshTimer) {
+            sessionsRefreshTimer = setInterval(function() {
+                if (document.hidden || location.hash !== '#/sessions' || sessionsState.loading) return;
+                loadSessionsDetail(true, true);
+            }, 5000);
+        }
+    } else if (sessionsRefreshTimer) {
+        clearInterval(sessionsRefreshTimer);
+        sessionsRefreshTimer = null;
+    }
+}
+
+async function loadSessionsDetail(reset, silent) {
     var list = document.getElementById('sessionsDetailList');
     var shouldReset = reset !== false;
     if (sessionsState.loading) return;
@@ -1335,7 +1368,7 @@ async function loadSessionsDetail(reset) {
         sessionsState.total = 0;
         sessionsState.offset = 0;
         sessionsState.hasMore = false;
-        if (list) list.innerHTML = '<div class="skeleton sk-line"></div><div class="skeleton sk-line"></div>';
+        if (list && !silent) list.innerHTML = '<div class="skeleton sk-line"></div><div class="skeleton sk-line"></div>';
     }
     sessionsState.loading = true;
     sessionsState.loadingMore = !shouldReset;
@@ -1353,8 +1386,8 @@ async function loadSessionsDetail(reset) {
         sessionsState.hasMore = sessionsState.offset < sessionsState.total;
         renderSessionsDetail();
     } catch (e) {
-        if (list && shouldReset) list.innerHTML = '<div class="error">会话列表加载失败: ' + escapeHtml(e.message) + '</div>';
-        else showToast('加载更多会话失败: ' + e.message, 4000);
+        if (list && shouldReset && !silent) list.innerHTML = '<div class="error">会话列表加载失败: ' + escapeHtml(e.message) + '</div>';
+        else if (!silent) showToast('加载更多会话失败: ' + e.message, 4000);
     } finally {
         sessionsState.loading = false;
         sessionsState.loadingMore = false;
@@ -1510,7 +1543,13 @@ async function loadKimi() {
         if (sessionSummary) {
             sessionSummary.innerHTML =
                 '<div class="metric">' + data.sessionCount + '</div>' +
-                '<div class="metric-label">本地会话数量 &middot; ' + escapeHtml(deviceLabel) + '</div>';
+                '<div class="metric-label">本地会话数量</div>';
+        }
+        var sessionDevice = document.getElementById('kimiSessionDevice');
+        if (sessionDevice) {
+            sessionDevice.innerHTML =
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' +
+                '<span title="' + escapeHtml(deviceLabel) + '">' + escapeHtml(deviceLabel) + '</span>';
         }
 
         var quotaHtml = '';
@@ -1523,16 +1562,17 @@ async function loadKimi() {
             var renderTierConsole = function(tier, title, tip) {
                 if (!tier) return '';
                 var pct = tier.limit > 0 ? Math.round((tier.used / tier.limit) * 100) : 0;
+                var level = pct >= 95 ? 'critical' : (pct >= 85 ? 'warning' : 'normal');
                 var resetText = formatRemaining(tier.resetTime) || '-';
                 var usedText = tier.used !== null ? formatTokens(tier.used) : '-';
                 var limitText = tier.limit !== null ? formatTokens(tier.limit) : '-';
-                return '<div class="quota-console-card" title="' + escapeHtml(tip) + '">' +
+                return '<div class="quota-console-card ' + level + '" title="' + escapeHtml(tip) + '">' +
                     '<div class="quota-console-header">' + escapeHtml(title) + infoIconSvg + '</div>' +
                     '<div class="quota-console-body">' +
                         '<span class="quota-console-pct">' + pct + '%</span>' +
-                        '<span class="quota-console-reset">' + escapeHtml(resetText) + ' 后重置</span>' +
+                        '<span class="quota-console-reset ' + level + '">' + escapeHtml(resetText) + ' 后重置</span>' +
                     '</div>' +
-                    '<div class="quota-console-bar"><div class="quota-console-fill" style="width:' + pct + '%"></div></div>' +
+                    '<div class="quota-console-bar"><div class="quota-console-fill ' + level + '" style="width:' + pct + '%"></div></div>' +
                     '<div class="quota-console-meta"><span>已用 ' + usedText + '</span><span>上限 ' + limitText + '</span></div>' +
                 '</div>';
             };
@@ -3868,6 +3908,22 @@ function renderSettings() {
             var dashboardPort = settings.dashboard_port || SETTINGS_DEFAULTS.dashboard_port;
             return '<div class="setting-number-control"><input type="number" min="1" max="65535" inputmode="numeric" aria-label="Dashboard 服务端口" class="setting-number-input" value="' + escapeHtml(String(dashboardPort)) + '" onchange="saveDashboardPort(this.value)"><span class="setting-number-unit">端口</span></div>';
         }
+        if (item.type === 'dashboard_startup_toggle') {
+            if (!startupServiceState.loaded) {
+                return '<span style="color:var(--text-tertiary);font-size:0.8rem">检测中...</span>';
+            }
+            if (!startupServiceState.supported) {
+                return '<span style="color:var(--text-tertiary);font-size:0.8rem">仅 macOS / Windows 可用</span>';
+            }
+            var dashboardStartup = startupServiceState.dashboard || { enabled: false, mode: 'off' };
+            var dashboardChecked = dashboardStartup.enabled ? ' checked' : '';
+            var dashboardStateText = dashboardStartup.mode === 'elevated' ? '管理员启动' : (dashboardStartup.enabled ? '普通启动' : '已关闭');
+            var dashboardStateClass = dashboardStartup.enabled ? 'on' : 'off';
+            return '<div class="setting-toggle-control"><span class="setting-toggle-state ' + dashboardStateClass + '">' + dashboardStateText + '</span><label class="toggle-switch">' +
+                '<input type="checkbox" aria-label="Dashboard 开机自启" onchange="toggleDashboardStartup(this.checked)"' + dashboardChecked + '>' +
+                '<span class="toggle-slider"></span>' +
+            '</label></div>';
+        }
         if (item.type === 'startup_toggle') {
             if (!startupServiceState.loaded) {
                 return '<span style="color:var(--text-tertiary);font-size:0.8rem">检测中...</span>';
@@ -5231,6 +5287,10 @@ function copyArtifactUrl() {
     }
 }
 
+function toggleDashboardStartup(enable) {
+    setDashboardStartupMode(enable ? 'normal' : 'off');
+}
+
 async function setDashboardStartupMode(mode) {
     try {
         var data = await postJSON('/api/startup-toggle', { service: 'dashboard', mode: mode });
@@ -5239,7 +5299,7 @@ async function setDashboardStartupMode(mode) {
             startupServiceState.dashboard.enabled = (data.mode || mode) !== 'off';
             settings.__startup_dashboard_mode = data.mode || mode;
             saveSettings(settings);
-            var labelMap = { normal: '开机自启', elevated: '管理员启动', off: '关闭' };
+            var labelMap = { normal: '普通权限开机自启', elevated: '管理员启动', off: '关闭' };
             var msg = 'Dashboard 已设为 ' + (labelMap[data.mode || mode] || data.mode || mode);
             if (data.note) msg += '，' + data.note;
             showToast(msg, data.note ? 6000 : 3000);

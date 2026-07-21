@@ -1,3 +1,5 @@
+import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -58,6 +60,29 @@ class KimiWebCommandTests(unittest.TestCase):
             data["external"]["summary"]["hosts"],
             ["proxy.example.com", "ai.r3ppx952a.nyat.app"],
         )
+
+    def test_instance_pids_are_filtered_by_port(self):
+        with tempfile.TemporaryDirectory() as directory:
+            instances_dir = Path(directory) / "server" / "instances"
+            instances_dir.mkdir(parents=True)
+            (instances_dir / "web.json").write_text(
+                json.dumps({"port": 17168, "pid": 1234}), encoding="utf-8"
+            )
+            (instances_dir / "other.json").write_text(
+                json.dumps({"port": 17169, "pid": 5678}), encoding="utf-8"
+            )
+            with patch.object(system_route, "KIMI_CODE_DIR", Path(directory)):
+                self.assertEqual(system_route._kimi_instance_pids(17168), [1234])
+                self.assertEqual(system_route._kimi_instance_pids(17169), [5678])
+
+    def test_kill_uses_instance_pid_instead_of_removed_cli_command(self):
+        with patch.object(system_route, "_kimi_instance_pids", return_value=[1234]), \
+                patch.object(system_route, "_terminate_kimi_pid", return_value=True) as terminate, \
+                patch.object(system_route, "_clean_stale_instances"), \
+                patch.object(system_route.time, "sleep"):
+            system_route._kill_kimi_server(17168)
+
+        terminate.assert_called_once_with(1234)
 
     def test_invalid_port_is_rejected_without_persisting(self):
         with patch.object(system_route, "load_dashboard_config", return_value=self.saved_config), \

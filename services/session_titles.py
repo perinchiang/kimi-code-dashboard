@@ -727,6 +727,12 @@ def _run_title_job(session_id: str, source_fingerprint: str, max_title_length: i
         _save_sidecar(session_id, sidecar)
         _invalidate_scan(session_id)
         _set_job(session_id, "ready", source=source, finished_at=time.time(), title=title)
+        log.info(
+            "Session title generation completed: session=%s source=%s title=%s",
+            session_id,
+            source,
+            title,
+        )
         if source == "auto":
             _cancel_auto_retry(session_id)
             with _jobs_lock:

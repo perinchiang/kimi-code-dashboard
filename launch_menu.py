@@ -6,7 +6,7 @@
 1. 启动 Dashboard
 2. 启动本地 Kimi Code Web
 3. 启动外网访问 Kimi Code Web
-4. 停止 Kimi Code Web（kimi web kill）
+4. 停止 Kimi Code Web（按 PID 结束）
 5. 更新 Kimi Code
 6. 更新 Dashboard
 7. 完全卸载 Dashboard
@@ -23,6 +23,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.parse
 import webbrowser
 from pathlib import Path
 
@@ -53,6 +54,36 @@ def _tcp_open(host: str, port: int) -> bool:
         return False
 
 
+def _public_urls(cfg: dict) -> list[str]:
+    """返回配置中的公网访问 URL。"""
+    urls = cfg.get("public_urls") or []
+    if isinstance(urls, str):
+        urls = [urls]
+    return [str(url).strip().rstrip("/") for url in urls if str(url).strip()]
+
+
+def _public_url_hosts(cfg: dict) -> list[str]:
+    """从公网访问 URL 提取 Host header 白名单。"""
+    hosts = []
+    for url in _public_urls(cfg):
+        candidate = url if "://" in url else "https://" + url
+        host = urllib.parse.urlparse(candidate).hostname
+        if host and host not in hosts:
+            hosts.append(host)
+    return hosts
+
+
+def _print_external_urls(cfg: dict, port: int) -> None:
+    """打印配置的公网访问地址及其监听提示。"""
+    urls = _public_urls(cfg)
+    if urls:
+        print("外网访问地址：")
+        for url in urls:
+            print(f"  {url}")
+    else:
+        print(f"未配置公网访问 URL；服务监听在 0.0.0.0:{port}。")
+
+
 def _kimi_server_bind_mode() -> str:
     """根据 server instances 判断当前 Kimi server 的绑定模式。
 
@@ -75,6 +106,42 @@ def _kimi_server_bind_mode() -> str:
         if host == "127.0.0.1":
             return "local"
     return ""
+
+
+def _kimi_instance_pids() -> list[int]:
+    """返回 Kimi Web 实例文件登记的进程 PID。"""
+    instances_dir = Path.home() / ".kimi-code" / "server" / "instances"
+    if not instances_dir.exists():
+        return []
+    pids = []
+    for f in instances_dir.glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            pid = int(data.get("pid", 0))
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if pid > 0 and pid not in pids:
+            pids.append(pid)
+    return pids
+
+
+def _terminate_kimi_pid(pid: int) -> tuple[bool, str]:
+    """结束一个 Kimi Web 进程及其子进程，并返回失败原因。"""
+    try:
+        if sys.platform == "win32":
+            result = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                errors="replace",
+            )
+            detail = ((result.stdout or "") + (result.stderr or "")).strip()
+            return result.returncode == 0, detail
+        import signal
+        os.kill(pid, signal.SIGTERM)
+        return True, ""
+    except (OSError, ValueError) as exc:
+        return False, str(exc)
 
 
 def _start_detached(args: list[str], cwd: str | None = None) -> subprocess.Popen:
@@ -132,7 +199,7 @@ def start_kimi_web_local() -> None:
             return
         if mode == "external":
             print(f"Kimi Code Web 当前在外网模式运行：http://127.0.0.1:{KIMI_WEB_PORT}")
-            print("如需切换到本地模式，请先执行 `kimi web kill` 停止现有服务。")
+            print("如需切换到本地模式，请先执行启动菜单选项 4 停止现有服务。")
             return
         print(f"Kimi Code Web 已经在 http://127.0.0.1:{KIMI_WEB_PORT} 运行。")
         return
@@ -155,11 +222,12 @@ def start_kimi_web_external() -> None:
     if _tcp_open("127.0.0.1", port):
         mode = _kimi_server_bind_mode()
         if mode == "external":
-            print(f"Kimi Code Web 已经在外网模式运行：http://127.0.0.1:{port}")
+            print(f"Kimi Code Web 已经在 0.0.0.0:{port} 监听。")
+            _print_external_urls(cfg, port)
             return
         if mode == "local":
             print(f"Kimi Code Web 当前在本地模式运行：http://127.0.0.1:{port}")
-            print("如需切换到外网模式，请先执行 `kimi web kill` 停止现有服务。")
+            print("如需切换到外网模式，请先执行启动菜单选项 4 停止现有服务。")
             return
         print(f"Kimi Code Web 已经在 http://127.0.0.1:{port} 运行。")
         return
@@ -174,37 +242,54 @@ def start_kimi_web_external() -> None:
     if cfg["bypass_auth"]:
         cmd.append("--dangerous-bypass-auth")
     cmd.append("--allow-remote-terminals")
-    for host in [item.strip() for item in cfg["allowed_hosts"].split(",") if item.strip()]:
+    allowed_hosts = [item.strip() for item in cfg["allowed_hosts"].split(",") if item.strip()]
+    for host in _public_url_hosts(cfg):
+        if host not in allowed_hosts:
+            allowed_hosts.append(host)
+    for host in allowed_hosts:
         cmd.extend(["--allowed-host", host])
     cmd.append("--no-open")
 
     print("启动外网访问 Kimi Code Web...")
     print(" ".join(cmd))
     _start_detached(cmd)
+    _print_external_urls(cfg, port)
 
 
 def stop_kimi_web() -> None:
-    """执行 kimi web kill 停止所有 Kimi Code Web 进程。"""
-    kimi_bin = _kimi_bin()
-    if not kimi_bin.exists():
-        print(f"未找到 Kimi CLI: {kimi_bin}")
+    """结束实例文件或配置端口记录的 Kimi Web 前台进程。"""
+    print("正在停止 Kimi Code Web...")
+    pids = _kimi_instance_pids()
+    if not pids:
+        pid = _pid_listening_on(KIMI_WEB_PORT)
+        if pid:
+            pids = [pid]
+    if not pids:
+        print("未发现运行中的 Kimi Code Web。")
         return
 
-    print("正在停止 Kimi Code Web...")
-    result = subprocess.run(
-        [str(kimi_bin), "web", "kill"],
-        capture_output=True,
-        text=True,
-        errors="replace",
-    )
-    if result.stdout:
-        print(result.stdout.strip())
-    if result.stderr:
-        print(result.stderr.strip())
-    if result.returncode == 0:
-        print("Kimi Code Web 已停止。")
-    else:
-        print(f"停止命令返回非零退出码: {result.returncode}")
+    failed = []
+    for pid in pids:
+        stopped, detail = _terminate_kimi_pid(pid)
+        if stopped:
+            print(f"已停止 Kimi Code Web 进程 (pid {pid})。")
+        else:
+            failed.append((pid, detail))
+    if failed:
+        print("无法停止 Kimi Code Web 进程：")
+        for pid, detail in failed:
+            print(f"  pid {pid}: {detail or '系统未返回具体错误'}")
+        if sys.platform == "win32":
+            print("请以管理员身份运行 PowerShell 后重试选项 4。")
+        else:
+            print("请确认当前终端用户有权限结束该进程后重试选项 4。")
+        print("如果启用了 Kimi Code Web 开机启动，请先在 Dashboard 设置中关闭。")
+        return
+    for _ in range(10):
+        if not _tcp_open("127.0.0.1", KIMI_WEB_PORT):
+            break
+        time.sleep(0.5)
+    print("Kimi Code Web 已停止。")
 
 
 def update_kimi_code() -> None:
@@ -371,7 +456,7 @@ def show_menu() -> str:
     print("1. 启动 Dashboard")
     print("2. 启动本地 Kimi Code Web")
     print("3. 启动外网访问 Kimi Code Web")
-    print("4. 停止 Kimi Code Web（kimi web kill）")
+    print("4. 停止 Kimi Code Web（按 PID 结束）")
     print("5. 更新 Kimi Code")
     print("6. 更新 Dashboard")
     print("7. 完全卸载 Dashboard")

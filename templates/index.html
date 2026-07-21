@@ -19,7 +19,7 @@
         } catch (e) {}
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=102">
+    <link rel="stylesheet" href="/static/css/style.css?v=107">
 </head>
 <body>
     <header>
@@ -190,12 +190,22 @@
                 </a>
             </div>
 
-            <!-- Kimi Usage + Sessions -->
+            <!-- Memory + Kimi overview -->
             <div id="kimi-overview-row" class="kimi-overview-row" style="grid-column: 1 / -1; animation-delay: 0.16s;">
+                <section id="section-memory" class="card" style="animation-delay: 0.24s;">
+                    <h2 class="memory-card-heading">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+                        <span class="card-heading-title">记忆状态</span>
+                        <span id="memorySummary"><span class="skeleton sk-line" style="display:inline-block;width:140px"></span></span>
+                    </h2>
+                    <div id="memoryChart"></div>
+                    <div id="memoryTooltip" class="chart-tooltip"></div>
+                </section>
+
                 <section id="section-kimi" class="card" style="animation-delay: 0.16s;">
                     <h2>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
-                        Kimi Usage
+                        Kimi 用量
                     </h2>
                     <div id="kimiUsageInfo"></div>
                 </section>
@@ -203,23 +213,13 @@
                 <section id="section-kimi-sessions" class="card" style="animation-delay: 0.20s;">
                     <h2>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h7M7 16h5"/></svg>
-                        Kimi Sessions
+                        本地会话
+                        <svg class="card-header-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                     </h2>
                     <div id="kimiSessionSummary"><div class="skeleton sk-metric"></div><div class="skeleton sk-line" style="width:40%"></div></div>
-                    <a id="kimiSessionLink" class="session-entry-link" href="#/sessions">打开本地会话列表 →</a>
+                    <div class="session-card-device" id="kimiSessionDevice"></div>
                 </section>
             </div>
-
-            <!-- Memory Status -->
-            <section id="section-memory" class="card" style="grid-column: 1 / -1; animation-delay: 0.24s;">
-                <h2>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
-                    Memory Status
-                </h2>
-                <div id="memorySummary"><div class="skeleton sk-metric"></div><div class="skeleton sk-line" style="width:40%"></div></div>
-                <div id="memoryChart"></div>
-                <div id="memoryTooltip" class="chart-tooltip"></div>
-            </section>
 
         </div>
     </main>
@@ -925,6 +925,6 @@
     </div>
 
     <script src="/static/js/charts.js?v=22"></script>
-    <script src="/static/js/app.js?v=163"></script>
+    <script src="/static/js/app.js?v=168"></script>
 </body>
 </html>

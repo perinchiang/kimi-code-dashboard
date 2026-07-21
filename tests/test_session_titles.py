@@ -50,6 +50,8 @@ class SessionTitlesTests(unittest.TestCase):
         )
         self.old_sessions_dir = session_titles.SESSIONS_DIR
         self.old_sidecar_dir = session_titles.SESSION_TITLE_DIR
+        self.old_log_disabled = session_titles.log.disabled
+        session_titles.log.disabled = True
         session_titles.SESSIONS_DIR = self.sessions_dir
         session_titles.SESSION_TITLE_DIR = self.sidecar_dir
         session_titles._scan_cache.clear()
@@ -61,6 +63,7 @@ class SessionTitlesTests(unittest.TestCase):
     def tearDown(self):
         session_titles.SESSIONS_DIR = self.old_sessions_dir
         session_titles.SESSION_TITLE_DIR = self.old_sidecar_dir
+        session_titles.log.disabled = self.old_log_disabled
         session_titles._scan_cache.clear()
         session_titles._jobs.clear()
         session_titles._auto_attempts.clear()

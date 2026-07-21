@@ -252,7 +252,12 @@ function renderDonut(values, total, colorMap, centerLabel, showLegend) {
     }).join('');
     var legend = showLegend ? segments.map(function(s) {
         var pct = _formatPct(s.fraction);
-        return '<div class="legend-item"><span class="legend-swatch" style="background:' + s.color + '"></span><div class="legend-text"><div class="legend-name">' + escapeHtml(s.label) + '</div><div class="legend-meta">' + formatTokens(s.value) + ' · ' + pct + '%</div></div></div>';
+        var barPct = s.fraction > 0 ? Math.max(s.fraction * 100, 0.6) : 0;
+        return '<div class="legend-item">' +
+            '<div class="legend-row"><span class="legend-name"><span class="legend-swatch" style="background:' + s.color + '"></span>' + escapeHtml(s.label) + '</span>' +
+            '<span class="legend-meta">' + formatTokens(s.value) + ' · ' + pct + '%</span></div>' +
+            '<div class="legend-bar"><div class="legend-bar-fill" style="width:' + barPct.toFixed(1) + '%;background:' + s.color + '"></div></div>' +
+        '</div>';
     }).join('') : '';
     var legendHtml = showLegend ? '<div class="memory-legend">' + legend + '</div>' : '';
     return '<div class="donut-wrap"><div class="donut-container"><svg viewBox="0 0 ' + size + ' ' + size + '" style="width:100%;height:100%">' + circles + '</svg><div class="donut-center"><div class="donut-total">' + formatTokens(total) + '</div><div class="donut-label">' + escapeHtml(centerLabel) + '</div></div></div>' + legendHtml + '</div>';

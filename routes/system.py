@@ -175,18 +175,91 @@ def _get_running_bind(port: int) -> str:
     return ""
 
 
-def _kill_kimi_server():
-    """Kill 当前运行的 kimi server 进程并清理已死实例。"""
+def _kimi_instance_pids(port: int | None = None) -> list[int]:
+    """读取 Kimi Web 实例文件中的 PID，可按端口筛选。"""
+    instances_dir = KIMI_CODE_DIR / "server" / "instances"
+    if not instances_dir.exists():
+        return []
+    pids = []
+    for f in instances_dir.glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            if port is not None and data.get("port") != port:
+                continue
+            pid = int(data.get("pid", 0))
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if pid > 0 and pid not in pids:
+            pids.append(pid)
+    return pids
+
+
+def _pid_listening_on(port: int) -> int | None:
+    """返回监听指定端口的进程 PID。"""
     try:
-        subprocess.run(
-            [str(KIMI_BIN), "web", "kill"],
-            capture_output=True, text=True, errors="replace", timeout=10,
-            **no_window_kwargs(),
-        )
+        if os.name == "nt":
+            result = subprocess.run(
+                ["netstat", "-ano"],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                **no_window_kwargs(),
+            )
+            for line in result.stdout.splitlines():
+                parts = line.split()
+                if (
+                    len(parts) >= 5
+                    and "LISTENING" in line
+                    and parts[1].endswith(f":{port}")
+                    and parts[-1].isdigit()
+                ):
+                    return int(parts[-1])
+        else:
+            result = subprocess.run(
+                ["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
+                capture_output=True,
+                text=True,
+                errors="replace",
+            )
+            for value in result.stdout.strip().splitlines():
+                if value.strip().isdigit():
+                    return int(value.strip())
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _terminate_kimi_pid(pid: int) -> bool:
+    """结束 Kimi Web 前台进程及其子进程。"""
+    try:
+        if os.name == "nt":
+            result = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                **no_window_kwargs(),
+            )
+            return result.returncode == 0
+        import signal
+        os.kill(pid, signal.SIGTERM)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _kill_kimi_server(port: int | None = None):
+    """结束指定端口的 Kimi Web 前台进程并清理已死实例。"""
+    pids = _kimi_instance_pids(port)
+    if not pids and port is not None:
+        pid = _pid_listening_on(port)
+        if pid:
+            pids = [pid]
+    for pid in pids:
+        if not _terminate_kimi_pid(pid):
+            log.warning("failed to terminate kimi web pid=%s", pid)
+    if pids:
         time.sleep(1)
-    except Exception as e:
-        log.warning("kimi web kill failed: %s", e)
-    # 清理 PID 已死的 instance 文件
     _clean_stale_instances()
 
 
@@ -383,7 +456,7 @@ def api_launch_kimi_web():
             return jsonify({"status": "already_running", "port": port, "url": url})
         # bind 模式变化，或用户确认重启，需要先停止旧进程
         log.info("restarting kimi web (bind=%s, running_bind=%s)", bind, running_bind)
-        _kill_kimi_server()
+        _kill_kimi_server(port)
 
     # 清理僵尸 instance 文件
     _clean_stale_instances()
