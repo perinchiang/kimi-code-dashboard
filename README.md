@@ -6,7 +6,7 @@ Kimi Code CLI 的本地可视化控制面板，集中管理 Skill、MCP、会话
 
 > 当前版本：**v1.0.18** · 如需长期向量记忆，建议同时安装 [kimi-code-memory-mcp](https://github.com/perinchiang/kimi-code-memory-mcp)。
 
-![Dashboard 主面板](docs/images/dashboard-overview.png)
+![Dashboard 主面板](https://image.pathos.dpdns.org/dashboard-docs-dashboard-overview-1e00d507.png)
 
 ## v1.0.18 更新
 
@@ -47,7 +47,7 @@ Kimi Code CLI 的本地可视化控制面板，集中管理 Skill、MCP、会话
 - **安全导入**：API Key 仅用于连接测试与最终写入，不在接口响应中回显；只导入用户明确勾选的 Model
 - **图床配置**（设置页）：配置 R2 / S3 / MinIO / OSS / COS 凭证，写入 `[image_bed]` 段，支持测试连接（需安装可选依赖 `boto3`）
 
-![Provider 预设导入向导](docs/provider-import-overview.png)
+![Provider 预设导入向导](https://image.pathos.dpdns.org/b5b9536ba45811e1)
 
 ### Kimi Web 服务配置
 
