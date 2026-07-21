@@ -55,6 +55,8 @@ class SessionTitlesTests(unittest.TestCase):
         session_titles._scan_cache.clear()
         session_titles._jobs.clear()
         session_titles._auto_attempts.clear()
+        session_titles._auto_retry_counts.clear()
+        session_titles._auto_retry_timers.clear()
 
     def tearDown(self):
         session_titles.SESSIONS_DIR = self.old_sessions_dir
@@ -62,6 +64,8 @@ class SessionTitlesTests(unittest.TestCase):
         session_titles._scan_cache.clear()
         session_titles._jobs.clear()
         session_titles._auto_attempts.clear()
+        session_titles._auto_retry_counts.clear()
+        session_titles._auto_retry_timers.clear()
         self.temp_dir.cleanup()
 
     def test_compaction_summary_has_priority(self):
@@ -150,6 +154,41 @@ class SessionTitlesTests(unittest.TestCase):
             record["user_message_count"] = 10
             session_titles.maybe_auto_queue(record)
         queue.assert_called_once_with("session_test-1", 80, source="auto")
+
+    def test_auto_queue_failure_does_not_stick_source_fingerprint(self):
+        record = {
+            "session_id": "session_test-1",
+            "last_message_role": "assistant",
+            "user_message_count": 1,
+            "source_context": "user: 首轮问题\\nassistant: 已完成",
+            "source_fingerprint": "queue-failure",
+            "original_title": "Untitled",
+        }
+        with patch.object(session_titles, "get_title_settings", return_value={
+            "auto_generate": True, "every_exchanges": 10, "max_title_length": 80,
+        }), patch.object(session_titles, "queue_title_generation", return_value={"status": "error"}) as queue, \
+                patch.object(session_titles, "_schedule_auto_retry") as retry:
+            session_titles.maybe_auto_queue(record)
+            session_titles.maybe_auto_queue(record)
+        retry.assert_any_call("session_test-1", "queue-failure")
+        self.assertEqual(queue.call_count, 2)
+        self.assertNotIn("session_test-1", session_titles._auto_attempts)
+
+    def test_auto_job_failure_clears_attempt_and_schedules_retry(self):
+        record = {
+            "session_id": "session_test-1",
+            "source_context": "user: 首轮问题\\nassistant: 已完成",
+            "source_fingerprint": "job-failure",
+            "original_title": "Untitled",
+        }
+        session_titles._auto_attempts["session_test-1"] = "job-failure"
+        with patch.object(session_titles, "get_session", return_value=record), \
+                patch.object(session_titles, "_load_sidecar", return_value={}), \
+                patch.object(session_titles, "_generate_title_with_retry", side_effect=RuntimeError("测试失败")), \
+                patch.object(session_titles, "_schedule_auto_retry") as retry:
+            session_titles._run_title_job("session_test-1", "job-failure", 80, "auto")
+        self.assertNotIn("session_test-1", session_titles._auto_attempts)
+        retry.assert_called_once_with("session_test-1", "job-failure")
 
     def test_manual_sidecar_title_blocks_auto_generation(self):
         sidecar = {"session_id": "session_test-1", "title": "手动标题", "manual": True}

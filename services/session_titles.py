@@ -51,10 +51,14 @@ _futures: dict[str, Future] = {}
 _scan_cache_lock = threading.RLock()
 _scan_cache: dict[str, tuple[tuple[int, int], tuple[int, int], dict[str, Any]]] = {}
 _auto_attempts: dict[str, str] = {}
+_auto_retry_counts: dict[tuple[str, str], int] = {}
+_auto_retry_timers: dict[str, threading.Timer] = {}
 _watcher_lock = threading.Lock()
 _watcher_thread: threading.Thread | None = None
 _watcher_process_lock_handle = None
 _TITLE_WATCH_INTERVAL = 5
+_AUTO_RETRY_DELAY = 30
+_AUTO_MAX_RETRIES = 1
 
 
 def is_safe_session_id(session_id: str) -> bool:
@@ -615,6 +619,75 @@ def _generate_title_with_retry(
     raise RuntimeError("标题生成重试失败")
 
 
+def _clear_auto_attempt(session_id: str, source_fingerprint: str = "") -> None:
+    with _jobs_lock:
+        if not source_fingerprint or _auto_attempts.get(session_id) == source_fingerprint:
+            _auto_attempts.pop(session_id, None)
+
+
+def _cancel_auto_retry(session_id: str) -> None:
+    with _jobs_lock:
+        timer = _auto_retry_timers.pop(session_id, None)
+    if timer is not None:
+        timer.cancel()
+
+
+def _retry_auto_title(session_id: str, source_fingerprint: str) -> None:
+    with _jobs_lock:
+        _auto_retry_timers.pop(session_id, None)
+    record = get_session(session_id, detail=True)
+    if not record:
+        return
+    if record.get("source_fingerprint") != source_fingerprint:
+        log.debug(
+            "Automatic session title retry skipped: session=%s reason=source_changed",
+            session_id,
+        )
+        return
+    settings = get_title_settings()
+    with _jobs_lock:
+        _auto_attempts[session_id] = source_fingerprint
+    result = queue_title_generation(
+        session_id,
+        int(settings.get("max_title_length", 80)),
+        source="auto",
+    )
+    if result and result.get("status") in {"queued", "running"}:
+        log.info("Automatic session title retry queued: session=%s", session_id)
+    else:
+        _clear_auto_attempt(session_id, source_fingerprint)
+        log.debug(
+            "Automatic session title retry rejected: session=%s status=%s",
+            session_id,
+            (result or {}).get("status") if result else "missing",
+        )
+
+
+def _schedule_auto_retry(session_id: str, source_fingerprint: str) -> None:
+    key = (session_id, source_fingerprint)
+    with _jobs_lock:
+        retry_count = _auto_retry_counts.get(key, 0)
+        timer = _auto_retry_timers.get(session_id)
+        if retry_count >= _AUTO_MAX_RETRIES or (timer and timer.is_alive()):
+            return
+        _auto_retry_counts[key] = retry_count + 1
+        timer = threading.Timer(
+            _AUTO_RETRY_DELAY,
+            _retry_auto_title,
+            args=(session_id, source_fingerprint),
+        )
+        timer.daemon = True
+        _auto_retry_timers[session_id] = timer
+    timer.start()
+    log.warning(
+        "Automatic session title retry scheduled: session=%s delay=%ss attempt=%d/%d",
+        session_id,
+        _AUTO_RETRY_DELAY,
+        retry_count + 1,
+        _AUTO_MAX_RETRIES,
+    )
+
+
 def _run_title_job(session_id: str, source_fingerprint: str, max_title_length: int, source: str) -> None:
     try:
         record = get_session(session_id, detail=True)
@@ -654,11 +727,18 @@ def _run_title_job(session_id: str, source_fingerprint: str, max_title_length: i
         _save_sidecar(session_id, sidecar)
         _invalidate_scan(session_id)
         _set_job(session_id, "ready", source=source, finished_at=time.time(), title=title)
+        if source == "auto":
+            _cancel_auto_retry(session_id)
+            with _jobs_lock:
+                _auto_retry_counts.pop((session_id, source_fingerprint), None)
     except Exception as exc:
         error = _SECRET_RE.sub("[redacted]", str(exc)).strip()
         error = error[:300] or type(exc).__name__
         log.warning("Session title generation failed for %s source=%s: %s", session_id, source, error)
         _set_job(session_id, "error", source=source, finished_at=time.time(), error=error)
+        if source == "auto":
+            _clear_auto_attempt(session_id, source_fingerprint)
+            _schedule_auto_retry(session_id, source_fingerprint)
 
 
 def queue_title_generation(
@@ -669,6 +749,8 @@ def queue_title_generation(
     record = get_session(session_id, detail=True)
     if record is None:
         return None
+    if source == "manual":
+        _cancel_auto_retry(session_id)
     with _jobs_lock:
         current = _jobs.get(session_id) or {}
         if current.get("status") in {"queued", "running"}:
@@ -696,27 +778,45 @@ def get_title_settings() -> dict[str, Any]:
     return load_dashboard_config().get("session_titles", {})
 
 
+def _log_auto_skip(record: dict[str, Any], reason: str) -> None:
+    fingerprint = str(record.get("source_fingerprint") or "")[:12]
+    log.debug(
+        "Automatic session title skipped: session=%s reason=%s count=%s last_role=%s fingerprint=%s",
+        record.get("session_id", ""),
+        reason,
+        record.get("user_message_count", 0),
+        record.get("last_message_role", ""),
+        fingerprint,
+    )
+
+
 def maybe_auto_queue(record: dict[str, Any]) -> None:
     settings = get_title_settings()
     if not settings.get("auto_generate"):
+        _log_auto_skip(record, "disabled")
         return
     if record.get("last_message_role") != "assistant":
+        _log_auto_skip(record, "awaiting_assistant")
         return
     count = int(record.get("user_message_count") or 0)
     if count < 1:
+        _log_auto_skip(record, "no_user_messages")
         return
     try:
         interval = max(0, min(100, int(settings.get("every_exchanges", 10))))
     except (TypeError, ValueError):
         interval = 10
     if count != 1 and (interval == 0 or count % interval):
+        _log_auto_skip(record, "outside_interval")
         return
 
     session_id = record["session_id"]
     sidecar = _load_sidecar(session_id)
     if sidecar.get("manual") or _is_manual_kimi_title(record, sidecar):
+        _log_auto_skip(record, "manual_title_protected")
         return
     if sidecar.get("source_fingerprint") == record.get("source_fingerprint"):
+        _log_auto_skip(record, "same_source_fingerprint")
         return
     if (
         sidecar.get("source") == "llm"
@@ -724,14 +824,21 @@ def maybe_auto_queue(record: dict[str, Any]) -> None:
         and record.get("original_title")
         and record.get("original_title") != sidecar.get("title")
     ):
+        _log_auto_skip(record, "native_title_changed")
         return
 
     fingerprint = record.get("source_fingerprint") or ""
     with _jobs_lock:
         if _auto_attempts.get(session_id) == fingerprint:
+            _log_auto_skip(record, "duplicate_attempt")
             return
         _auto_attempts[session_id] = fingerprint
-    queue_title_generation(session_id, int(settings.get("max_title_length", 80)), source="auto")
+    result = queue_title_generation(session_id, int(settings.get("max_title_length", 80)), source="auto")
+    if not result or result.get("status") not in {"queued", "running"}:
+        _clear_auto_attempt(session_id, fingerprint)
+        _log_auto_skip(record, "queue_rejected")
+        if result and result.get("status") == "error":
+            _schedule_auto_retry(session_id, fingerprint)
 
 
 def _watch_signature(session_dir: Path) -> tuple[tuple[int, int], tuple[int, int]]:
