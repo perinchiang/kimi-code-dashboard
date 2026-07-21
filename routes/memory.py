@@ -1,6 +1,8 @@
 """Memory status API blueprint (L0-L3 via TencentDB Gateway)."""
 
 import re
+import sqlite3
+from pathlib import Path
 
 from flask import Blueprint, jsonify, request
 
@@ -8,6 +10,96 @@ from config import GATEWAY_BASE, log
 from services.helpers import http_get, http_post
 
 bp = Blueprint("memory", __name__)
+
+L0_DB_PATH = Path.home() / ".memory-tencentdb" / "memory-tdai" / "vectors.db"
+L0_PAGE_LIMIT = 500
+
+
+def _read_l0_page(query: str, limit: int, before_timestamp: str = "", before_record_id: str = ""):
+    """Read a stable, cursor-paginated L0 page from the local SQLite store."""
+    if not L0_DB_PATH.is_file():
+        return None
+
+    try:
+        db_uri = f"file:{L0_DB_PATH.as_posix()}?mode=ro"
+        connection = sqlite3.connect(db_uri, uri=True)
+        connection.row_factory = sqlite3.Row
+    except (OSError, sqlite3.Error) as exc:
+        log.warning("Unable to open L0 SQLite store: %s", exc)
+        return None
+
+    try:
+        base_clauses = ["session_key = ?"]
+        base_params = ["kimi-default"]
+        if query:
+            like = f"%{query}%"
+            base_clauses.append(
+                "(message_text LIKE ? OR session_key LIKE ? OR session_id LIKE ? OR role LIKE ?)"
+            )
+            base_params.extend([like, like, like, like])
+
+        total_where = f"WHERE {' AND '.join(base_clauses)}" if base_clauses else ""
+        total = connection.execute(
+            f"SELECT COUNT(*) FROM l0_conversations {total_where}", base_params
+        ).fetchone()[0]
+
+        page_clauses = list(base_clauses)
+        page_params = list(base_params)
+        if before_timestamp and before_record_id:
+            try:
+                cursor_timestamp = int(before_timestamp)
+            except ValueError:
+                return None
+            page_clauses.append("(timestamp < ? OR (timestamp = ? AND record_id < ?))")
+            page_params.extend([cursor_timestamp, cursor_timestamp, before_record_id])
+
+        page_where = f"WHERE {' AND '.join(page_clauses)}" if page_clauses else ""
+        remaining = connection.execute(
+            f"SELECT COUNT(*) FROM l0_conversations {page_where}", page_params
+        ).fetchone()[0]
+        rows = connection.execute(
+            f"""
+            SELECT record_id, session_key, session_id, role, message_text, recorded_at, timestamp
+            FROM l0_conversations
+            {page_where}
+            ORDER BY timestamp DESC, record_id DESC
+            LIMIT ?
+            """,
+            [*page_params, limit],
+        ).fetchall()
+    except sqlite3.Error as exc:
+        log.warning("Unable to read L0 SQLite store: %s", exc)
+        return None
+    finally:
+        connection.close()
+
+    items = [
+        {
+            "record_id": row["record_id"],
+            "role": row["role"],
+            "session": row["session_key"] or row["session_id"] or "",
+            "timestamp": row["recorded_at"] or str(row["timestamp"]),
+            "timestamp_value": row["timestamp"],
+            "score": 0,
+            "content": row["message_text"],
+        }
+        for row in rows
+    ]
+    last = rows[-1] if rows else None
+    return {
+        "items": items,
+        "total": total,
+        "returned": len(items),
+        "has_more": remaining > len(items),
+        "next_cursor": (
+            {
+                "timestamp": last["timestamp"],
+                "record_id": last["record_id"],
+            }
+            if last and remaining > len(items)
+            else None
+        ),
+    }
 
 
 @bp.route("/api/memory")
@@ -18,7 +110,10 @@ def api_memory():
             return -1
         return len(parser(resp.get("results", "")))
 
-    l0 = count("/search/conversations", {"query": "*", "limit": 500, "session_key": "kimi-default"}, _parse_conversations)
+    local_l0 = _read_l0_page("", 1)
+    l0 = local_l0["total"] if local_l0 is not None else count(
+        "/search/conversations", {"query": "*", "limit": 500, "session_key": "kimi-default"}, _parse_conversations
+    )
     l1 = count("/search/memories", {"query": "*", "type": "episodic", "limit": 500}, _parse_memories)
     l2 = count("/search/memories", {"query": "*", "type": "instruction", "limit": 500}, _parse_memories)
     l3 = count("/search/memories", {"query": "*", "type": "persona", "limit": 500}, _parse_memories)
@@ -98,21 +193,31 @@ _LEVEL_MAP = {
 
 @bp.route("/api/memory/items")
 def api_memory_items():
-    """返回某层级(L0-L3)的记忆条目列表，解析 gateway 文本为结构化条目。
-
-    gateway 的 search 接口对 query 做语义相似度排序但不剔除低分项，
-    传任意词都返回全部条目。因此这里始终用 '*' 拉全量，再在本地按
-    keyword 做大小写不敏感子串过滤，让前端搜索真正生效。
-    """
+    """Return a page of memory items, using local pagination for L0."""
     level = (request.args.get("level") or "l0").lower()
     q = (request.args.get("q") or "").strip()
     try:
-        limit = min(max(int(request.args.get("limit", "500")), 1), 500)
+        limit = min(max(int(request.args.get("limit", str(L0_PAGE_LIMIT))), 1), L0_PAGE_LIMIT)
     except ValueError:
-        limit = 500
+        limit = L0_PAGE_LIMIT
 
     if level not in _LEVEL_MAP:
         return jsonify({"error": "invalid level"}), 400
+
+    if level == "l0":
+        local_page = _read_l0_page(
+            q,
+            limit,
+            request.args.get("before_timestamp", ""),
+            request.args.get("before_record_id", ""),
+        )
+        if local_page is not None:
+            return jsonify({
+                "level": level,
+                "gatewayReachable": True,
+                "source": "local-sqlite",
+                **local_page,
+            })
 
     endpoint, extra = _LEVEL_MAP[level]
     payload = {**extra, "query": "*", "limit": limit}
@@ -122,6 +227,9 @@ def api_memory_items():
         return jsonify({
             "level": level,
             "total": 0,
+            "returned": 0,
+            "has_more": False,
+            "next_cursor": None,
             "items": [],
             "gatewayReachable": False,
         })
@@ -129,7 +237,7 @@ def api_memory_items():
     results = resp.get("results", "")
     items = _parse_conversations(results) if endpoint == "conversations" else _parse_memories(results)
 
-    # L0 原始对话按时间倒序，最新记录在前；L1-L3 按 priority 倒序 + score 倒序
+    # L0 原始对话按时间倒序，L1-L3 按 priority 倒序 + score 倒序
     if endpoint == "conversations":
         items.sort(key=lambda m: m.get("timestamp") or "", reverse=True)
     else:
@@ -149,6 +257,9 @@ def api_memory_items():
     return jsonify({
         "level": level,
         "total": len(items),
+        "returned": len(items),
+        "has_more": False,
+        "next_cursor": None,
         "items": items,
         "gatewayReachable": True,
     })

@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import subprocess
 import sys
 import threading
@@ -258,6 +259,38 @@ def _normalize_kimi_web_config(cfg: dict | None, persist: bool = False) -> dict:
     return {**persisted, "allowed_hosts_list": allowed_hosts_list}
 
 
+def _format_command(cmd: list[str]) -> str:
+    """Format argv as a command users can paste into the current shell."""
+    if os.name == "nt":
+        return subprocess.list2cmdline(cmd)
+    return shlex.join(cmd)
+
+
+def _build_preview_cmd(cfg: dict, bind: str) -> list[str]:
+    """Build a local or external preview without changing persisted settings."""
+    preview_cfg = dict(cfg)
+    preview_cfg["bind"] = bind
+    if bind == "127.0.0.1":
+        # Local mode has no reason to trust or expose reverse-proxy hosts.
+        preview_cfg["allowed_hosts_list"] = []
+        preview_cfg["public_urls"] = []
+    return _build_cmd(preview_cfg)
+
+
+def _build_preview_summary(cfg: dict, bind: str) -> dict:
+    """Return the compact address summary shown in the settings pill."""
+    hosts = []
+    if bind != "127.0.0.1":
+        for host in cfg.get("allowed_hosts_list", []):
+            if host and host not in hosts:
+                hosts.append(host)
+        for public_url in cfg.get("public_urls", []):
+            host = _extract_host(public_url)
+            if host and host not in hosts:
+                hosts.append(host)
+    return {"bind": bind, "port": cfg["port"], "hosts": hosts}
+
+
 def _capture_token(proc, timeout=4):
     """尝试从进程 stdout 捕获 bearer token。"""
     if not proc.stdout:
@@ -282,6 +315,32 @@ def _capture_token(proc, timeout=4):
         if m:
             return m.group(1)
     return None
+
+
+@bp.route("/api/kimi-web-commands", methods=["POST"])
+def api_kimi_web_commands():
+    """Return copyable local and external Kimi Web commands without launching."""
+    try:
+        cfg = _normalize_kimi_web_config(request.get_json(silent=True))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    local_bind = "127.0.0.1"
+    external_bind = "0.0.0.0"
+    local_cmd = _build_preview_cmd(cfg, local_bind)
+    external_cmd = _build_preview_cmd(cfg, external_bind)
+    return jsonify({
+        "local": {
+            "argv": local_cmd,
+            "command": _format_command(local_cmd),
+            "summary": _build_preview_summary(cfg, local_bind),
+        },
+        "external": {
+            "argv": external_cmd,
+            "command": _format_command(external_cmd),
+            "summary": _build_preview_summary(cfg, external_bind),
+        },
+    })
 
 
 @bp.route("/api/kimi-web-status", methods=["POST"])

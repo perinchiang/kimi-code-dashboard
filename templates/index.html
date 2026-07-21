@@ -19,7 +19,7 @@
         } catch (e) {}
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=86">
+    <link rel="stylesheet" href="/static/css/style.css?v=100">
 </head>
 <body>
     <header>
@@ -190,18 +190,28 @@
                 </a>
             </div>
 
-            <!-- Kimi Usage -->
-            <section id="section-kimi" class="card" style="animation-delay: 0.16s;">
-                <h2>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
-                    Kimi Usage
-                </h2>
-                <div id="kimiSummary"><div class="skeleton sk-metric"></div><div class="skeleton sk-line" style="width:40%"></div></div>
-                <div id="kimiUsageInfo"></div>
-            </section>
+            <!-- Kimi Usage + Sessions -->
+            <div id="kimi-overview-row" class="kimi-overview-row" style="grid-column: 1 / -1; animation-delay: 0.16s;">
+                <section id="section-kimi" class="card" style="animation-delay: 0.16s;">
+                    <h2>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
+                        Kimi Usage
+                    </h2>
+                    <div id="kimiUsageInfo"></div>
+                </section>
+
+                <section id="section-kimi-sessions" class="card" style="animation-delay: 0.20s;">
+                    <h2>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h7M7 16h5"/></svg>
+                        Kimi Sessions
+                    </h2>
+                    <div id="kimiSessionSummary"><div class="skeleton sk-metric"></div><div class="skeleton sk-line" style="width:40%"></div></div>
+                    <a id="kimiSessionLink" class="session-entry-link" href="#/sessions">打开本地会话列表 →</a>
+                </section>
+            </div>
 
             <!-- Memory Status -->
-            <section id="section-memory" class="card" style="animation-delay: 0.24s;">
+            <section id="section-memory" class="card" style="grid-column: 1 / -1; animation-delay: 0.24s;">
                 <h2>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
                     Memory Status
@@ -273,8 +283,14 @@
         <div class="config-layout">
             <section class="config-section card">
                 <div class="config-section-header">
-                    <h3>Providers</h3>
-                    <button class="btn-task" onclick="editProvider()">+ 添加 Provider</button>
+                    <div>
+                        <h3>Providers</h3>
+                        <div class="config-section-caption">已写入 config.toml 的 Provider</div>
+                    </div>
+                    <div class="config-section-header-actions">
+                        <button class="btn-task" onclick="openProviderImport()">+ 从预设导入</button>
+                        <button class="btn-task btn-secondary" onclick="editProvider()">手动添加</button>
+                    </div>
                 </div>
                 <div id="providersList" class="config-list" ondragover="dragOverConfigList(event, 'provider')" ondrop="finishConfigCardDrop(event, 'provider')"></div>
             </section>
@@ -379,6 +395,15 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
                 面板设置
             </h2>
+            <div id="kimiWebCommandPills" class="kimi-web-command-pills"></div>
+        </div>
+        <div class="settings-page-intro">
+            <div>
+                <span class="settings-eyebrow">CONTROL PANEL</span>
+                <h3>把 Kimi Web 调成适合你的工作方式</h3>
+                <p>常用选项集中在这里。修改后会立即保存，需要重启的项目会在说明里标出。</p>
+            </div>
+            <div class="settings-intro-note"><span class="settings-intro-dot"></span><span>本地配置 · 自动保存</span></div>
         </div>
         <div id="settingsList" class="config-list settings-list"></div>
     </div>
@@ -485,6 +510,28 @@
                     <button class="modal-close" onclick="closeMemoryModal()" aria-label="关闭">×</button>
                 </div>
                 <div id="memoryModalBody" class="modal-body"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="view-sessions" class="detail-page" style="display:none">
+        <div class="detail-header">
+            <a href="#/" class="back-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>返回</a>
+            <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h7M7 16h5"/></svg>本地会话</h2>
+            <button class="btn-task" onclick="loadSessionsDetail()">刷新</button>
+            <input type="text" class="search-box detail-search" id="sessionSearchDetail" placeholder="搜索标题、工作目录或摘要..." oninput="renderSessionsDetail()">
+        </div>
+        <div class="seg-filter" id="sessionStatusFilter">
+            <button class="seg-item active" data-session-filter="active" onclick="setSessionFilter('active')">活跃</button>
+            <button class="seg-item" data-session-filter="archived" onclick="setSessionFilter('archived')">已归档</button>
+            <button class="seg-item" data-session-filter="all" onclick="setSessionFilter('all')">全部</button>
+            <span class="seg-stats" id="sessionsDetailStats"></span>
+        </div>
+        <div id="sessionsDetailList" class="detail-list"><div class="skeleton sk-line"></div></div>
+        <div id="sessionModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeSessionModal()">
+            <div class="modal modal-lg" onclick="event.stopPropagation()">
+                <div class="modal-header"><h3 id="sessionModalTitle">会话详情</h3><button class="modal-close" onclick="closeSessionModal()" aria-label="关闭">×</button></div>
+                <div id="sessionModalBody" class="modal-body"></div>
             </div>
         </div>
     </div>
@@ -797,6 +844,69 @@
         </div>
     </div>
 
+    <!-- Provider Preset Import Wizard -->
+    <div id="providerImportModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeProviderImport()">
+        <div class="modal modal-provider-import" onclick="event.stopPropagation()">
+            <div class="modal-header provider-import-header">
+                <div>
+                    <div class="provider-import-kicker">THIRD-PARTY PROVIDER IMPORT</div>
+                    <h3>从预设导入 Provider</h3>
+                    <p>预设参数仅供参考；实际连接需要用你的 API Key 测试。</p>
+                </div>
+                <button class="modal-close" id="providerImportClose" onclick="closeProviderImport()" aria-label="关闭">×</button>
+            </div>
+            <div class="provider-import-steps" id="providerImportSteps">
+                <div class="provider-import-step active" data-import-step="1"><span>1</span><strong>选择 Provider</strong><em>搜索预设</em></div>
+                <div class="provider-import-step" data-import-step="2"><span>2</span><strong>连接测试</strong><em>填写 API Key</em></div>
+                <div class="provider-import-step" data-import-step="3"><span>3</span><strong>选择 Model</strong><em>确定默认模型</em></div>
+            </div>
+            <div class="provider-import-body">
+                <section class="provider-import-panel active" data-import-panel="1">
+                    <div class="provider-preset-picker">
+                        <aside class="provider-preset-list-pane">
+                            <div class="provider-preset-toolbar">
+                                <div class="provider-preset-search"><span>⌕</span><input id="providerPresetSearch" type="search" placeholder="搜索 Provider 名称、ID 或协议" autocomplete="off"></div>
+                                <div class="provider-preset-toolbar-meta">仅显示可直接导入的 Provider 预设</div>
+                            </div>
+                            <div id="providerPresetList" class="provider-preset-list"><div class="empty">加载预设中...</div></div>
+                            <div class="provider-preset-list-footer" id="providerPresetListFooter">—</div>
+                        </aside>
+                        <article id="providerPresetDetail" class="provider-preset-detail"><div class="empty">请选择一个 Provider</div></article>
+                    </div>
+                </section>
+                <section class="provider-import-panel" data-import-panel="2">
+                    <div class="provider-connection-layout">
+                        <div class="provider-connection-form">
+                            <div class="provider-selected-strip"><span id="providerConnectionMark" class="provider-preset-mark">P</span><div><strong id="providerConnectionName">Provider</strong><small id="providerConnectionType">协议</small></div></div>
+                            <h4>配置连接</h4>
+                            <p class="provider-import-note">API Key 会发送到你填写的 Base URL 进行连接测试，并在导入时写入本地 <code>config.toml</code>；不会发送到预设目录。</p>
+                            <label>API Key <small>必填</small><input id="providerImportApiKey" type="password" autocomplete="new-password" placeholder="输入 Provider API Key"></label>
+                            <label>Provider ID <small>可修改</small><input id="providerImportId" type="text" autocomplete="off" placeholder="例如 deepseek"></label>
+                            <label>Base URL <small>可替换为代理或企业网关</small><input id="providerImportBaseUrl" class="mono-input" type="text" autocomplete="off" placeholder="https://api.example.com/v1"></label>
+                            <label>协议<select id="providerImportType"></select></label>
+                            <details class="provider-import-advanced"><summary>高级设置 · 自定义 Headers / 环境变量</summary><textarea id="providerImportHeaders" rows="3" placeholder="每行一个 Header，例如&#10;HTTP-Referer=https://example.com"></textarea></details>
+                        </div>
+                        <aside class="provider-connection-status">
+                            <h4>连接状态</h4>
+                            <div id="providerImportStatus" class="provider-status-card"><strong><span class="provider-status-icon">!</span>尚未测试连接</strong><p>Dashboard 会请求 Provider 的模型列表，验证凭证和 Base URL 是否可用。</p></div>
+                            <div class="provider-import-tip">预设信息 ≠ 实际可用性。测试只在内存中使用 Key，不会触发批量导入。</div>
+                            <button type="button" class="btn-task provider-test-btn" id="providerImportTest">测试连接</button>
+                        </aside>
+                    </div>
+                </section>
+                <section class="provider-import-panel" data-import-panel="3">
+                    <div class="provider-model-picker">
+                        <div class="provider-model-picker-heading"><div><h4>选择要启用的 Model</h4><p>只会写入勾选的模型，预设中的其他模型不会进入 config.toml。</p></div><strong id="providerImportModelCount">已选 0 个</strong></div>
+                        <div class="provider-model-toolbar"><div class="provider-preset-search"><span>⌕</span><input id="providerImportModelSearch" type="search" placeholder="搜索模型名称" autocomplete="off"></div><div id="providerImportModelFilters" class="provider-preset-filters"><button type="button" class="active" data-model-capability="">全部</button><button type="button" data-model-capability="thinking">思考</button><button type="button" data-model-capability="tool_use">工具调用</button><button type="button" data-model-capability="image_in">识图</button></div></div>
+                        <div id="providerImportModelList" class="provider-import-model-list"><div class="empty">请先完成连接测试</div></div>
+                        <div class="provider-model-footer-note">默认模型会写入 <code>default_model</code>；后续仍可在已配置列表中调整。</div>
+                    </div>
+                </section>
+            </div>
+            <div class="provider-import-footer"><span id="providerImportFooterHint">预设来源：加载中...</span><div><button type="button" class="btn-task btn-secondary" id="providerImportBack">返回</button><button type="button" class="btn-task" id="providerImportNext">继续配置</button><button type="button" class="btn-task provider-import-submit" id="providerImportSubmit" style="display:none">导入 Provider</button></div></div>
+        </div>
+    </div>
+
     <!-- Confirm Dialog -->
     <div id="confirmDialog" class="modal-overlay" style="display:none">
         <div class="modal modal-sm" onclick="event.stopPropagation()">
@@ -815,6 +925,6 @@
     </div>
 
     <script src="/static/js/charts.js?v=22"></script>
-    <script src="/static/js/app.js?v=140"></script>
+    <script src="/static/js/app.js?v=158"></script>
 </body>
 </html>

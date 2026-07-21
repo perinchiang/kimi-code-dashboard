@@ -21,3 +21,6 @@ dashboard-config.json
 
 image_upload_cache.json
 image_upload_cache.json.lock
+
+# Dashboard-owned generated session titles
+session-titles/

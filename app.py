@@ -18,7 +18,8 @@ Open: the configured dashboard URL (default http://127.0.0.1:18080)
 from flask import Flask
 
 from config import DASHBOARD_HOST, DASHBOARD_PORT, DASHBOARD_URL, log
-from routes import agents, artifacts, hooks, image_bed, kimi, mcp, memory, model_config, skills, system, tasks
+from routes import agents, artifacts, hooks, image_bed, kimi, mcp, memory, model_config, sessions, skills, system, tasks
+from services.session_titles import start_title_watcher
 
 
 def create_app() -> Flask:
@@ -32,6 +33,7 @@ def create_app() -> Flask:
     app.register_blueprint(mcp.bp)
     app.register_blueprint(memory.bp)
     app.register_blueprint(kimi.bp)
+    app.register_blueprint(sessions.bp)
     app.register_blueprint(tasks.bp)
     app.register_blueprint(system.bp)
     app.register_blueprint(model_config.bp)
@@ -44,5 +46,6 @@ def create_app() -> Flask:
 app = create_app()
 
 if __name__ == "__main__":
+    start_title_watcher()
     log.info("Starting Kimi Code Dashboard on %s", DASHBOARD_URL)
     app.run(host=DASHBOARD_HOST, port=DASHBOARD_PORT, debug=False)

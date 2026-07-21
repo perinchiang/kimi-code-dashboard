@@ -37,6 +37,13 @@ _DEFAULT_DASHBOARD_CONFIG = {
         "allowed_hosts": "",
         "public_urls": [],
     },
+    "session_titles": {
+        "enabled": False,
+        "auto_generate": True,
+        "every_exchanges": 10,
+        "max_title_length": 80,
+        "model": "",
+    },
 }
 _dashboard_config_lock = threading.RLock()
 
@@ -73,6 +80,16 @@ def _normalize_dashboard_config(data: dict | None) -> dict:
         public_urls = [public_urls]
     if not isinstance(public_urls, list):
         public_urls = []
+    session_titles = data.get("session_titles") if isinstance(data.get("session_titles"), dict) else {}
+    try:
+        every_exchanges = max(0, min(100, int(session_titles.get("every_exchanges", 10))))
+    except (TypeError, ValueError):
+        every_exchanges = 10
+    try:
+        max_title_length = max(20, min(200, int(session_titles.get("max_title_length", 80))))
+    except (TypeError, ValueError):
+        max_title_length = 80
+    title_model = str(session_titles.get("model", "") or "").strip()
 
     return {
         "dashboard": {
@@ -89,6 +106,13 @@ def _normalize_dashboard_config(data: dict | None) -> dict:
             "bypass_auth": bool(kimi_web.get("bypass_auth", True)),
             "allowed_hosts": allowed_hosts,
             "public_urls": [str(url).strip() for url in public_urls if str(url).strip()],
+        },
+        "session_titles": {
+            "enabled": bool(session_titles.get("enabled", False)),
+            "auto_generate": bool(session_titles.get("auto_generate", False)),
+            "every_exchanges": every_exchanges,
+            "max_title_length": max_title_length,
+            "model": title_model,
         },
     }
 
@@ -133,7 +157,7 @@ def save_dashboard_config(data: dict) -> dict:
 
 
 # --- Dashboard metadata ---
-DASHBOARD_VERSION = "1.0.17"
+DASHBOARD_VERSION = "1.0.18"
 LAUNCHD_PLIST_PATH = HOME / "Library" / "LaunchAgents" / "com.perinchiang.kimi-code-dashboard.plist"
 
 _dashboard_runtime_config = load_dashboard_config()["dashboard"]

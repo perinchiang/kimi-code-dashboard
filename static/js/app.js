@@ -22,6 +22,17 @@ var currentHookStatusFilter = 'all';
 var _currentSkillDetailId = null;
 var _currentHookEditId = null;
 var _currentHookCreate = false;
+var sessionsState = {
+    items: [],
+    total: 0,
+    query: '',
+    selected: null,
+    loading: false,
+    loadingMore: false,
+    filter: 'active',
+    offset: 0,
+    hasMore: false,
+};
 var agentsState = {
     scopes: [],
     currentScope: 'global',
@@ -55,6 +66,9 @@ var SETTINGS_DEFAULTS = {
     default_permission_mode: 'manual', // Kimi Code 默认权限模式 (manual/auto/yolo)
     dashboard_port: 18080,       // Dashboard 服务端口
     enable_pwa_icons: false,     // 是否启用 PWA 图标（添加到手机主屏幕）
+    session_title_auto_generate: false, // 是否默认给新会话自动生成和刷新标题
+    session_title_every_exchanges: 10, // 同一会话内的自动标题刷新轮数，0 表示只生成首轮
+    session_title_model: '',     // Dashboard AI 会话标题模型别名
     __startup_dashboard_mode: 'off', // Dashboard 开机启动模式 (normal/elevated/off)
 };
 // 分组定义：icon 用 SVG path data (24x24 viewBox)
@@ -76,6 +90,9 @@ var SETTINGS_GROUPS = [
                 { v: 'auto', t: '自动模式' },
                 { v: 'yolo', t: 'YOLO 模式' },
             ]},
+            { key: 'session_title_auto_generate', label: '默认新会话自动生成标题', desc: '开启后，每个新会话会在第一轮回答完成后自动生成标题；关闭后仍可手动点击“AI 重命名”', type: 'session_title_auto_generate', row: true },
+            { key: 'session_title_every_exchanges', label: '自动刷新频率', desc: '在同一个会话里，每完成指定轮数的对话就刷新一次标题；填 0 表示只生成首轮标题', type: 'session_title_interval', row: true },
+            { key: 'session_title_model', label: '标题生成模型', desc: '默认跟随 Kimi 当前默认模型，也可以改选已配置的 Provider / Model', type: 'session_title_model', row: true, wide: true },
             { key: 'agents_editor', label: 'Agent 指令', desc: '编辑 Kimi Code 读取的 AGENTS.md；文件不存在时，首次保存才会创建', type: 'agents_link', row: true },
         ]
     },
@@ -129,7 +146,7 @@ var SETTINGS_GROUPS = [
         items: [
             { key: 'show_trends', label: 'Token 用量趋势', desc: '首页顶部的用量趋势图表', row: true },
             { key: 'show_minicards', label: '快捷入口卡片', desc: 'Skills / MCP / 定时任务 / 第三方模型 / 产物浏览器 / 工具调用 / 模型用量', row: true },
-            { key: 'show_kimi_usage', label: 'Kimi Usage', desc: '登录状态、版本检查、额度信息', row: true },
+            { key: 'show_kimi_usage', label: 'Kimi Usage / Sessions', desc: '登录状态、版本检查、额度信息和本地会话卡片', row: true },
             { key: 'show_memory', label: 'Memory Status', desc: 'TencentDB 记忆统计与 Gateway 健康', row: true },
             { key: 'show_tool_model_usage', label: '工具调用 / 模型用量', desc: '工具调用与模型用量详情页及首页快捷入口卡片', row: true },
             { key: 'show_tasks', label: '定时任务看板', desc: '快捷入口中的定时任务卡片', row: true },
@@ -254,6 +271,7 @@ function applySettings() {
     setDisplay('section-trends', s.show_trends);
     setDisplay('section-minicards', s.show_minicards);
     setDisplay('section-kimi', s.show_kimi_usage);
+    setDisplay('section-kimi-sessions', s.show_kimi_usage);
     setDisplay('section-memory', s.show_memory);
     setDisplay('toolModelMiniCard', s.show_tool_model_usage);
     setDisplay('modelUsageMiniCard', s.show_tool_model_usage);
@@ -265,6 +283,11 @@ function applySettings() {
             var url = (statusData.kimi && statusData.kimi.consoleUrl) || 'https://www.kimi.com/code/console';
             window.open(url, '_blank');
         };
+    }
+    // Kimi Sessions 卡片点击跳转到本地会话列表
+    var sessionCard = document.getElementById('section-kimi-sessions');
+    if (sessionCard) {
+        sessionCard.onclick = function() { location.hash = '#/sessions'; };
     }
     // Memory Status 卡片点击跳转到记忆详情页
     var memCard = document.getElementById('section-memory');
@@ -327,6 +350,7 @@ function setSetting(key, value) {
     saveSettings(settings);
     applySettings();
     if (key === 'kw_bind' || key === 'default_permission_mode' || key === 'theme_mode') renderSettings();
+    if (key === 'kw_port' || key === 'kw_bypass_auth' || key === 'kw_allowed_hosts') loadKimiWebCommands();
     if (key === '__startup_dashboard_mode') {
         setDashboardStartupMode(value);
         return;
@@ -467,7 +491,16 @@ function formatRemaining(resetTime) {
 }
 async function fetchJSON(url, options) {
     var res = await fetch(url, options);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!res.ok) {
+        var message = 'HTTP ' + res.status;
+        var errorData = null;
+        try { errorData = await res.json(); } catch (ignore) {}
+        if (errorData && errorData.error) message = errorData.error;
+        var error = new Error(message);
+        error.status = res.status;
+        error.data = errorData;
+        throw error;
+    }
     return res.json();
 }
 function postJSON(url, body) {
@@ -668,6 +701,7 @@ function handleRoute() {
     document.getElementById('view-hooks').style.display = (hash === '#/hooks') ? '' : 'none';
     document.getElementById('view-artifacts').style.display = (hash === '#/artifacts') ? '' : 'none';
     document.getElementById('view-memory').style.display = (hash === '#/memory') ? '' : 'none';
+    document.getElementById('view-sessions').style.display = (hash === '#/sessions') ? '' : 'none';
     document.getElementById('view-settings').style.display = (hash === '#/settings') ? '' : 'none';
     document.getElementById('view-agents').style.display = (hash === '#/agents') ? '' : 'none';
     document.getElementById('view-tool-model').style.display = (hash === '#/tool-model') ? '' : 'none';
@@ -680,6 +714,10 @@ function handleRoute() {
     else if (hash === '#/hooks') renderHooksDetail();
     else if (hash === '#/artifacts') renderArtifactsDetail();
     else if (hash === '#/memory') renderMemoryDetail();
+    else if (hash === '#/sessions') {
+        if (!sessionsState.items.length) loadSessionsDetail();
+        else renderSessionsDetail();
+    }
     else if (hash === '#/settings') renderSettings();
     else if (hash === '#/agents') {
         if (!agentsState.loaded) loadAgents();
@@ -1112,12 +1150,50 @@ async function loadMemory() {
 }
 
 // === Memory Detail ===
-var memoryDetailState = { level: 'l0', query: '', data: null };
+var memoryDetailState = {
+    level: 'l0',
+    query: '',
+    data: null,
+    items: [],
+    nextCursor: null,
+    loadingMore: false,
+};
+
+function renderMemoryDetailContent() {
+    var list = document.getElementById('memoryDetailList');
+    var stats = document.getElementById('memoryDetailStats');
+    if (!list) return;
+    var data = memoryDetailState.data || {};
+    var displayed = memoryDetailState.items.length;
+    var total = Number.isFinite(data.total) ? data.total : displayed;
+    if (stats) {
+        stats.innerHTML = memoryDetailState.level === 'l0' && total > displayed
+            ? '<span>已显示 <strong>' + displayed + '</strong> / ' + total + ' 条</span>'
+            : '<span>共 <strong>' + total + '</strong> 条</span>';
+    }
+    if (displayed === 0) {
+        list.innerHTML = '<div class="empty">暂无记忆数据</div>';
+        return;
+    }
+    var html = memoryDetailState.items.map(renderMemoryItem).join('');
+    if (memoryDetailState.level === 'l0' && memoryDetailState.nextCursor) {
+        var buttonText = memoryDetailState.loadingMore ? '加载中...' : '加载更早记录';
+        html += '<div class="memory-load-more"><button class="btn-task" onclick="loadEarlierMemory()"' +
+            (memoryDetailState.loadingMore ? ' disabled' : '') + '>' + buttonText + '</button></div>';
+    } else if (memoryDetailState.level === 'l0' && total > 0) {
+        html += '<div class="memory-load-more"><span>已加载全部记录</span></div>';
+    }
+    list.className = 'detail-list';
+    list.innerHTML = html;
+}
 
 async function renderMemoryDetail() {
     var list = document.getElementById('memoryDetailList');
     var stats = document.getElementById('memoryDetailStats');
     if (!list) return;
+    memoryDetailState.items = [];
+    memoryDetailState.nextCursor = null;
+    memoryDetailState.data = null;
     list.innerHTML = '<div class="empty">加载中...</div>';
     if (stats) stats.innerHTML = '';
     try {
@@ -1125,19 +1201,36 @@ async function renderMemoryDetail() {
         if (memoryDetailState.query) url += '&q=' + encodeURIComponent(memoryDetailState.query);
         var data = await fetchJSON(url);
         memoryDetailState.data = data;
+        memoryDetailState.items = data.items || [];
+        memoryDetailState.nextCursor = data.next_cursor || null;
         if (!data.gatewayReachable) {
             list.innerHTML = '<div class="error">Gateway 未连接（127.0.0.1:8420）</div>';
             return;
         }
-        if (stats) stats.innerHTML = '<span>共 <strong>' + data.total + '</strong> 条</span>';
-        if (!data.items || data.items.length === 0) {
-            list.innerHTML = '<div class="empty">暂无记忆数据</div>';
-            return;
-        }
-        list.className = 'detail-list';
-        list.innerHTML = data.items.map(renderMemoryItem).join('');
+        renderMemoryDetailContent();
     } catch (e) {
         list.innerHTML = '<div class="error">加载失败: ' + escapeHtml(e.message) + '</div>';
+    }
+}
+
+async function loadEarlierMemory() {
+    if (memoryDetailState.level !== 'l0' || !memoryDetailState.nextCursor || memoryDetailState.loadingMore) return;
+    memoryDetailState.loadingMore = true;
+    renderMemoryDetailContent();
+    try {
+        var cursor = memoryDetailState.nextCursor;
+        var url = '/api/memory/items?level=l0&limit=500&before_timestamp=' +
+            encodeURIComponent(cursor.timestamp) + '&before_record_id=' + encodeURIComponent(cursor.record_id);
+        if (memoryDetailState.query) url += '&q=' + encodeURIComponent(memoryDetailState.query);
+        var data = await fetchJSON(url);
+        memoryDetailState.data = data;
+        memoryDetailState.items = memoryDetailState.items.concat(data.items || []);
+        memoryDetailState.nextCursor = data.next_cursor || null;
+    } catch (e) {
+        setError('memoryDetailStats', '加载失败: ' + e.message);
+    } finally {
+        memoryDetailState.loadingMore = false;
+        renderMemoryDetailContent();
     }
 }
 
@@ -1181,9 +1274,8 @@ function setMemoryLevel(level) {
 }
 
 function openMemoryModal(idx) {
-    var data = memoryDetailState.data;
-    if (!data || !data.items || !data.items[idx]) return;
-    var m = data.items[idx];
+    var m = memoryDetailState.items[idx];
+    if (!m) return;
     var title, metaRows, content;
     if (memoryDetailState.level === 'l0') {
         var roleLabel = (m.role || 'user') === 'user' ? '用户' : (m.role === 'assistant' ? 'Kimi' : m.role);
@@ -1221,6 +1313,176 @@ function closeMemoryModal() {
     document.body.style.overflow = '';
 }
 
+// === Local Sessions ===
+async function loadSessionsDetail(reset) {
+    var list = document.getElementById('sessionsDetailList');
+    var shouldReset = reset !== false;
+    if (sessionsState.loading) return;
+    if (shouldReset) {
+        sessionsState.items = [];
+        sessionsState.total = 0;
+        sessionsState.offset = 0;
+        sessionsState.hasMore = false;
+        if (list) list.innerHTML = '<div class="skeleton sk-line"></div><div class="skeleton sk-line"></div>';
+    }
+    sessionsState.loading = true;
+    sessionsState.loadingMore = !shouldReset;
+    try {
+        var params = new URLSearchParams({
+            limit: '200',
+            offset: String(sessionsState.offset),
+            archived: sessionsState.filter,
+        });
+        var data = await fetchJSON('/api/sessions?' + params.toString());
+        var page = data.sessions || [];
+        sessionsState.items = shouldReset ? page : sessionsState.items.concat(page);
+        sessionsState.total = data.total || 0;
+        sessionsState.offset = (data.offset || 0) + page.length;
+        sessionsState.hasMore = sessionsState.offset < sessionsState.total;
+        renderSessionsDetail();
+    } catch (e) {
+        if (list && shouldReset) list.innerHTML = '<div class="error">会话列表加载失败: ' + escapeHtml(e.message) + '</div>';
+        else showToast('加载更多会话失败: ' + e.message, 4000);
+    } finally {
+        sessionsState.loading = false;
+        sessionsState.loadingMore = false;
+        renderSessionsDetail();
+    }
+}
+
+function loadMoreSessions() {
+    if (sessionsState.hasMore && !sessionsState.loading) loadSessionsDetail(false);
+}
+
+function setSessionFilter(filter) {
+    if (!['active', 'archived', 'all'].includes(filter) || sessionsState.filter === filter) return;
+    sessionsState.filter = filter;
+    document.querySelectorAll('#sessionStatusFilter .seg-item').forEach(function(button) {
+        button.classList.toggle('active', button.getAttribute('data-session-filter') === filter);
+    });
+    loadSessionsDetail(true);
+}
+
+function _sessionSearchText(session) {
+    return [session.title, session.original_title, session.workspace, session.workspace_name, session.source_kind].join(' ').toLowerCase();
+}
+
+function renderSessionsDetail() {
+    var list = document.getElementById('sessionsDetailList');
+    var stats = document.getElementById('sessionsDetailStats');
+    if (!list) return;
+    var search = (document.getElementById('sessionSearchDetail') || {}).value || '';
+    search = search.trim().toLowerCase();
+    var items = sessionsState.items.filter(function(session) {
+        return !search || _sessionSearchText(session).indexOf(search) !== -1;
+    });
+    if (stats) stats.textContent = '已加载 ' + sessionsState.items.length + ' / ' + sessionsState.total + ' 个会话' + (search ? ' · 当前匹配 ' + items.length : '');
+    if (!items.length) {
+        list.innerHTML = '<div class="empty">没有找到本地会话</div>';
+        return;
+    }
+    var html = items.map(function(session) {
+        var job = session.title_job && session.title_job !== 'idle' ? ' · AI标题 ' + session.title_job : '';
+        var manual = session.manual_title ? ' · 手动保护' : '';
+        var updated = session.updated_at ? new Date(Number(session.updated_at)).toLocaleString('zh-CN') : '-';
+        var archivedBadge = session.archived ? '<span class="session-archived-badge">已归档</span>' : '';
+        var restoreButton = session.archived
+            ? '<button class="btn-task session-restore-btn" data-session-id="' + escapeHtml(session.session_id) + '" onclick="restoreKimiSession(event, this.dataset.sessionId)">恢复</button>'
+            : '';
+        return '<div class="session-item' + (session.archived ? ' archived' : '') + '" onclick="openSessionModal(\'' + escapeJsString(session.session_id) + '\')">' +
+            '<div class="session-item-main">' +
+                '<div class="session-item-title">' + escapeHtml(session.title || '未命名会话') + archivedBadge + '</div>' +
+                '<div class="session-item-meta">' + escapeHtml(updated) + ' · ' + (session.user_message_count || 0) + ' 轮 · ' + escapeHtml(session.workspace_name || '-') + escapeHtml(job + manual) + '</div>' +
+                '<div class="session-item-preview">原始标题：' + escapeHtml(session.original_title || '无') + '</div>' +
+            '</div>' + restoreButton +
+            '</div>';
+    }).join('');
+    if (sessionsState.hasMore) {
+        html += '<div class="session-load-more"><button class="btn-task" onclick="loadMoreSessions()"' + (sessionsState.loadingMore ? ' disabled' : '') + '>' +
+            (sessionsState.loadingMore ? '加载中...' : '加载更多会话') + '</button></div>';
+    }
+    list.innerHTML = html;
+}
+
+function restoreKimiSession(event, sessionId) {
+    if (event) event.stopPropagation();
+    var session = sessionsState.items.find(function(item) { return item.session_id === sessionId; });
+    var title = session && session.title ? session.title : '这个归档会话';
+    confirmDialog(
+        '确定要恢复「' + title + '」吗？\n\n恢复后它会回到活跃会话列表。',
+        function() { executeRestoreKimiSession(sessionId); },
+        { title: '确认恢复会话', danger: false }
+    );
+}
+
+async function executeRestoreKimiSession(sessionId) {
+    try {
+        var result = await postJSON('/api/sessions/' + encodeURIComponent(sessionId) + '/restore', {});
+        showToast(result.restored ? '会话已恢复' : '会话已经是活跃状态', 2500);
+        await loadSessionsDetail(true);
+    } catch (e) {
+        showToast('恢复会话失败: ' + e.message, 4000);
+    }
+}
+
+async function openSessionModal(sessionId) {
+    var modal = document.getElementById('sessionModal');
+    var title = document.getElementById('sessionModalTitle');
+    var body = document.getElementById('sessionModalBody');
+    if (!modal || !body) return;
+    body.innerHTML = '<div class="skeleton sk-line"></div>';
+    modal.style.display = '';
+    try {
+        var session = await fetchJSON('/api/sessions/' + encodeURIComponent(sessionId));
+        sessionsState.selected = session;
+        if (title) title.textContent = session.title || '会话详情';
+        var updated = session.updated_at ? new Date(Number(session.updated_at)).toLocaleString('zh-CN') : '-';
+        var titleJobText = session.title_job === 'error'
+            ? '标题生成失败：' + (session.title_job_error || '未知错误')
+            : (session.title_job === 'ready' ? '标题已生成，并已同步到 Kimi 原始会话' : '标题模型可在「设置」中选择');
+        body.innerHTML = '<div class="session-detail-grid">' +
+            '<div class="session-detail-cell"><span class="session-detail-label">Dashboard 标题</span><span class="session-detail-value">' + escapeHtml(session.title || '-') + '</span></div>' +
+            '<div class="session-detail-cell"><span class="session-detail-label">Kimi 原始标题（已同步）</span><span class="session-detail-value">' + escapeHtml(session.original_title || '-') + '</span></div>' +
+            '<div class="session-detail-cell"><span class="session-detail-label">最近更新</span><span class="session-detail-value">' + escapeHtml(updated) + '</span></div>' +
+            '<div class="session-detail-cell"><span class="session-detail-label">摘要来源</span><span class="session-detail-value">' + escapeHtml(session.source_kind || 'none') + ' · ' + (session.user_message_count || 0) + ' 轮</span></div>' +
+            '</div>' +
+            '<div class="session-detail-label">用于标题生成的摘要</div>' +
+            '<div class="session-source-context">' + escapeHtml(session.source_context || '暂无可用摘要') + '</div>' +
+            '<div class="session-title-form"><button class="btn-task" onclick="generateSessionTitle(\'' + escapeJsString(session.session_id) + '\')">AI 重命名</button></div>' +
+            '<div id="sessionTitleJob" class="session-item-meta">' + escapeHtml(titleJobText) + '</div>';
+    } catch (e) {
+        body.innerHTML = '<div class="error">会话详情加载失败: ' + escapeHtml(e.message) + '</div>';
+    }
+}
+
+function closeSessionModal() {
+    var modal = document.getElementById('sessionModal');
+    if (modal) modal.style.display = 'none';
+    sessionsState.selected = null;
+}
+
+async function generateSessionTitle(sessionId) {
+    var job = document.getElementById('sessionTitleJob');
+    if (job) job.textContent = '正在后台生成标题…';
+    try {
+        await postJSON('/api/sessions/' + encodeURIComponent(sessionId) + '/title/generate', {});
+        showToast('标题生成任务已启动', 2500);
+        var poll = setInterval(async function() {
+            try {
+                var session = await fetchJSON('/api/sessions/' + encodeURIComponent(sessionId));
+                if (session.title_job === 'running' || session.title_job === 'queued') return;
+                clearInterval(poll);
+                await loadSessionsDetail();
+                await openSessionModal(sessionId);
+            } catch (e) { clearInterval(poll); }
+        }, 1500);
+        setTimeout(function() { clearInterval(poll); }, 30000);
+    } catch (e) {
+        if (job) job.textContent = '标题生成失败: ' + e.message;
+        showToast('标题生成失败: ' + e.message, 4000);
+    }
+}
+
 // === Kimi Usage + Quota ===
 async function loadKimi() {
     try {
@@ -1232,9 +1494,12 @@ async function loadKimi() {
         statusData.kimi = data;
 
         var deviceLabel = data.deviceLabel || '本地';
-        document.getElementById('kimiSummary').innerHTML =
-            '<div class="metric">' + data.sessionCount + '</div>' +
-            '<div class="metric-label">本地会话数量 &middot; ' + escapeHtml(deviceLabel) + '</div>';
+        var sessionSummary = document.getElementById('kimiSessionSummary');
+        if (sessionSummary) {
+            sessionSummary.innerHTML =
+                '<div class="metric">' + data.sessionCount + '</div>' +
+                '<div class="metric-label">本地会话数量 &middot; ' + escapeHtml(deviceLabel) + '</div>';
+        }
 
         var quotaHtml = '';
         if (!quota.configured) {
@@ -1265,7 +1530,7 @@ async function loadKimi() {
             '</div>';
         }
         document.getElementById('kimiUsageInfo').innerHTML = quotaHtml;
-    } catch (e) { setError('kimiSummary', '加载失败: ' + e.message); }
+    } catch (e) { setError('kimiUsageInfo', '加载失败: ' + e.message); }
     renderVersionCheck();
 }
 
@@ -1858,16 +2123,84 @@ function escapeJsString(s) {
 
 async function loadModelConfig() {
     try {
-        var data = await fetchJSON('/api/model-config');
+        var results = await Promise.all([
+            fetchJSON('/api/model-config'),
+            fetchJSON('/api/session-title-settings').catch(function() { return { enabled: false, auto_generate: false, every_exchanges: 10, model: '' }; }),
+        ]);
+        var data = results[0];
         statusData.modelConfig = data;
+        statusData.sessionTitleSettings = results[1] || { enabled: false, auto_generate: false, every_exchanges: 10, model: '' };
+        settings.session_title_auto_generate = !!statusData.sessionTitleSettings.auto_generate;
+        settings.session_title_every_exchanges = Number(statusData.sessionTitleSettings.every_exchanges || 0);
+        settings.session_title_model = statusData.sessionTitleSettings.model || '';
+        saveSettings(settings);
         var pCount = (data.providers || []).length;
         var mCount = (data.models || []).length;
         document.getElementById('modelConfigMetric').textContent = pCount + '/' + mCount;
         document.getElementById('modelConfigLabel').textContent = 'Providers / Models';
         if (location.hash === '#/models') renderModelConfigDetail();
+        if (location.hash === '#/settings') renderSettings();
     } catch (e) {
         document.getElementById('modelConfigMetric').textContent = '!';
         document.getElementById('modelConfigLabel').textContent = '加载失败';
+    }
+}
+
+async function saveSessionTitleAutoGenerate(enabled) {
+    var previous = settings.session_title_auto_generate === true;
+    settings.session_title_auto_generate = !!enabled;
+    saveSettings(settings);
+    if (location.hash === '#/settings') renderSettings();
+    try {
+        var data = await postJSON('/api/session-title-settings', { auto_generate: !!enabled });
+        statusData.sessionTitleSettings = data;
+        settings.session_title_auto_generate = !!data.auto_generate;
+        settings.session_title_every_exchanges = Number(data.every_exchanges || 0);
+        settings.session_title_model = data.model || '';
+        saveSettings(settings);
+        if (location.hash === '#/settings') renderSettings();
+        showToast(data.auto_generate ? '已开启新会话自动标题' : '已关闭新会话自动标题', 3000);
+    } catch (e) {
+        settings.session_title_auto_generate = previous;
+        saveSettings(settings);
+        if (location.hash === '#/settings') renderSettings();
+        showToast('自动标题设置失败: ' + e.message, 5000);
+    }
+}
+
+async function saveSessionTitleEveryExchanges(value) {
+    var interval = Math.max(0, Math.min(100, parseInt(value, 10) || 0));
+    try {
+        var data = await postJSON('/api/session-title-settings', { every_exchanges: interval });
+        statusData.sessionTitleSettings = data;
+        settings.session_title_auto_generate = !!data.auto_generate;
+        settings.session_title_every_exchanges = Number(data.every_exchanges || 0);
+        settings.session_title_model = data.model || '';
+        saveSettings(settings);
+        if (location.hash === '#/settings') renderSettings();
+        showToast('自动标题刷新频率已保存', 3000);
+    } catch (e) {
+        if (location.hash === '#/settings') renderSettings();
+        showToast('自动标题频率保存失败: ' + e.message, 5000);
+    }
+}
+
+async function saveSessionTitleModel(modelId) {
+    var previous = (statusData.sessionTitleSettings && statusData.sessionTitleSettings.model) || '';
+    try {
+        var data = await postJSON('/api/session-title-settings', { model: modelId || '' });
+        statusData.sessionTitleSettings = data;
+        settings.session_title_auto_generate = !!data.auto_generate;
+        settings.session_title_every_exchanges = Number(data.every_exchanges || 0);
+        settings.session_title_model = data.model || '';
+        saveSettings(settings);
+        if (location.hash === '#/settings') renderSettings();
+        showToast(data.model ? '已保存 AI 标题模型' : '已恢复使用当前默认模型', 3000);
+    } catch (e) {
+        settings.session_title_model = previous;
+        saveSettings(settings);
+        if (location.hash === '#/settings') renderSettings();
+        showToast('标题模型保存失败: ' + e.message, 5000);
     }
 }
 
@@ -2528,6 +2861,525 @@ async function setDefaultModel(id) {
     } catch (e) { showToast('设置默认模型失败: ' + e.message, 5000); }
 }
 
+// === Provider preset import wizard ===
+var providerImportState = {
+    step: 1,
+    providers: [],
+    total: 0,
+    offset: 0,
+    hasMore: false,
+    query: '',
+    compatibility: '',
+    selected: null,
+    models: [],
+    selectedModels: {},
+    defaultModel: '',
+    testedModels: [],
+    modelQuery: '',
+    modelCapability: '',
+    tested: false,
+    testing: false,
+    loading: false,
+    searchTimer: null,
+    connectionProviderId: '',
+    source: '',
+    stale: false,
+    catalogRequestId: 0,
+    detailRequestId: 0,
+    bound: false,
+};
+var PROVIDER_IMPORT_TYPES = [
+    { value: 'openai', label: 'OpenAI Chat Completions' },
+    { value: 'openai_responses', label: 'OpenAI Responses API' },
+    { value: 'anthropic', label: 'Anthropic Messages' },
+    { value: 'kimi', label: 'Kimi / Moonshot' },
+    { value: 'google-genai', label: 'Google GenAI' },
+    { value: 'vertexai', label: 'Google Vertex AI' },
+];
+var PROVIDER_IMPORT_CAP_LABEL = {
+    thinking: '思考',
+    always_thinking: '持续思考',
+    image_in: '识图',
+    video_in: '视频理解',
+    tool_use: '工具调用',
+};
+
+function providerImportTypeLabel(type) {
+    var found = PROVIDER_IMPORT_TYPES.find(function(item) { return item.value === type; });
+    return found ? found.label : (type || '需要手动配置');
+}
+
+function providerImportCompatibilityLabel(value) {
+    var labels = {
+        direct: '可直接配置',
+        'openai-compatible': 'OpenAI 兼容',
+        manual: '需手动配置',
+        unsupported: '暂不支持',
+    };
+    return labels[value] || value || '未知协议';
+}
+
+function providerImportInitials(provider) {
+    var name = String(provider && (provider.name || provider.id) || 'P').trim();
+    var words = name.split(/\s+/).filter(function(word) { return word; });
+    if (words.length > 1) return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+    return name.slice(0, 2).toUpperCase();
+}
+
+function providerImportOpenModal() {
+    var modal = document.getElementById('providerImportModal');
+    if (!modal) return;
+    modal.style.display = '';
+    document.body.style.overflow = 'hidden';
+}
+
+function openProviderImport() {
+    providerImportState.step = 1;
+    providerImportState.providers = [];
+    providerImportState.total = 0;
+    providerImportState.offset = 0;
+    providerImportState.hasMore = false;
+    providerImportState.query = '';
+    providerImportState.compatibility = '';
+    providerImportState.selected = null;
+    providerImportState.models = [];
+    providerImportState.selectedModels = {};
+    providerImportState.defaultModel = '';
+    providerImportState.testedModels = [];
+    providerImportState.modelQuery = '';
+    providerImportState.modelCapability = '';
+    providerImportState.tested = false;
+    providerImportState.testing = false;
+    providerImportState.loading = false;
+    providerImportState.connectionProviderId = '';
+    providerImportState.source = '';
+    providerImportState.stale = false;
+    providerImportState.catalogRequestId += 1;
+    providerImportState.detailRequestId += 1;
+    providerImportOpenModal();
+    providerImportBindEvents();
+    var search = document.getElementById('providerPresetSearch');
+    if (search) search.value = '';
+    var modelSearch = document.getElementById('providerImportModelSearch');
+    if (modelSearch) modelSearch.value = '';
+    var apiKeyInput = document.getElementById('providerImportApiKey');
+    var providerIdInput = document.getElementById('providerImportId');
+    var baseUrlInput = document.getElementById('providerImportBaseUrl');
+    var typeInput = document.getElementById('providerImportType');
+    var headersInput = document.getElementById('providerImportHeaders');
+    if (apiKeyInput) apiKeyInput.value = '';
+    if (providerIdInput) { providerIdInput.value = ''; providerIdInput.dataset.providerId = ''; }
+    if (baseUrlInput) baseUrlInput.value = '';
+    if (typeInput) typeInput.innerHTML = '';
+    if (headersInput) headersInput.value = '';
+    document.getElementById('providerPresetList').innerHTML = '<div class="empty">加载预设中...</div>';
+    document.getElementById('providerPresetDetail').innerHTML = '<div class="empty">请选择一个 Provider</div>';
+    providerImportSetStep(1);
+    loadProviderPresetPage(false);
+}
+
+function closeProviderImport() {
+    var modal = document.getElementById('providerImportModal');
+    if (modal) modal.style.display = 'none';
+    document.body.style.overflow = '';
+    providerImportState.testing = false;
+}
+
+function providerImportResetSelection() {
+    providerImportState.detailRequestId += 1;
+    providerImportState.selected = null;
+    providerImportState.models = [];
+    providerImportState.selectedModels = {};
+    providerImportState.defaultModel = '';
+    providerImportState.testedModels = [];
+    providerImportState.tested = false;
+    providerImportState.connectionProviderId = '';
+}
+
+function providerImportBindEvents() {
+    if (providerImportState.bound) return;
+    providerImportState.bound = true;
+    var search = document.getElementById('providerPresetSearch');
+    if (search) search.addEventListener('input', function() {
+        providerImportState.query = search.value.trim();
+        clearTimeout(providerImportState.searchTimer);
+        providerImportState.searchTimer = setTimeout(function() {
+            providerImportState.catalogRequestId += 1;
+            providerImportState.providers = [];
+            providerImportState.offset = 0;
+            providerImportResetSelection();
+            loadProviderPresetPage(false);
+        }, 180);
+    });
+    document.getElementById('providerPresetList').addEventListener('click', function(event) {
+        var row = event.target.closest('.provider-preset-row');
+        if (row) selectProviderPreset(row.getAttribute('data-provider-id'));
+        var more = event.target.closest('[data-provider-load-more]');
+        if (more) loadProviderPresetPage(true);
+    });
+    document.getElementById('providerPresetListFooter').addEventListener('click', function(event) {
+        if (event.target.closest('[data-provider-load-more]')) loadProviderPresetPage(true);
+    });
+    document.getElementById('providerImportBack').addEventListener('click', function() {
+        providerImportSetStep(providerImportState.step - 1);
+    });
+    document.getElementById('providerImportNext').addEventListener('click', function() {
+        if (providerImportState.step === 1) {
+            if (!providerImportState.selected) { showToast('请先选择一个 Provider 预设', 3500); return; }
+            providerImportSetStep(2);
+        } else if (providerImportState.step === 2) {
+            if (!providerImportState.tested) { testProviderPreset(); return; }
+            providerImportSetStep(3);
+        }
+    });
+    document.getElementById('providerImportTest').addEventListener('click', testProviderPreset);
+    document.getElementById('providerImportSubmit').addEventListener('click', function() { importProviderPreset(false); });
+    document.getElementById('providerImportModelSearch').addEventListener('input', function() {
+        providerImportState.modelQuery = this.value.trim();
+        renderProviderImportModels();
+    });
+    document.querySelectorAll('#providerImportModelFilters button').forEach(function(button) {
+        button.addEventListener('click', function() {
+            providerImportState.modelCapability = button.getAttribute('data-model-capability') || '';
+            document.querySelectorAll('#providerImportModelFilters button').forEach(function(item) { item.classList.toggle('active', item === button); });
+            renderProviderImportModels();
+        });
+    });
+    document.getElementById('providerImportModelList').addEventListener('change', function(event) {
+        var checkbox = event.target.closest('[data-import-model]');
+        var radio = event.target.closest('[data-import-default]');
+        if (checkbox) {
+            var modelId = checkbox.getAttribute('data-import-model');
+            if (checkbox.checked) providerImportState.selectedModels[modelId] = true;
+            else delete providerImportState.selectedModels[modelId];
+            if (!providerImportState.selectedModels[modelId] && providerImportState.defaultModel === modelId) {
+                providerImportState.defaultModel = Object.keys(providerImportState.selectedModels)[0] || '';
+            }
+            if (!providerImportState.defaultModel && checkbox.checked) providerImportState.defaultModel = modelId;
+            renderProviderImportModels();
+        }
+        if (radio) {
+            var defaultId = radio.getAttribute('data-import-default');
+            if (providerImportState.selectedModels[defaultId]) providerImportState.defaultModel = defaultId;
+            renderProviderImportModels();
+        }
+    });
+    ['providerImportApiKey', 'providerImportBaseUrl', 'providerImportType', 'providerImportHeaders'].forEach(function(id) {
+        var input = document.getElementById(id);
+        if (!input) return;
+        input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'input', function() {
+            if (!providerImportState.tested) return;
+            providerImportState.tested = false;
+            providerImportState.testedModels = [];
+            providerImportState.models = [];
+            providerImportState.selectedModels = {};
+            providerImportState.defaultModel = '';
+            renderProviderConnection();
+            document.getElementById('providerImportNext').textContent = '先测试连接';
+        });
+    });
+}
+
+async function loadProviderPresetPage(append) {
+    var requestId = ++providerImportState.catalogRequestId;
+    providerImportState.loading = true;
+    var list = document.getElementById('providerPresetList');
+    if (!append) list.innerHTML = '<div class="empty">正在读取 Provider 预设...</div>';
+    try {
+        var params = new URLSearchParams({ query: providerImportState.query, importable: '1', offset: String(providerImportState.offset), limit: '40' });
+        var data = await fetchJSON('/api/model-config/catalog/providers?' + params.toString());
+        if (requestId !== providerImportState.catalogRequestId) return;
+        providerImportState.providers = append ? providerImportState.providers.concat(data.providers || []) : (data.providers || []);
+        providerImportState.offset = providerImportState.providers.length;
+        providerImportState.total = data.total || providerImportState.providers.length;
+        providerImportState.hasMore = !!data.has_more;
+        providerImportState.source = data.source || '';
+        providerImportState.stale = !!data.stale;
+        document.getElementById('providerImportFooterHint').textContent = providerImportState.source ? '预设来源：' + providerImportState.source + (providerImportState.stale ? ' · 使用旧缓存' : '') : '预设来源：未知';
+        renderProviderPresetList();
+        if (!providerImportState.selected && providerImportState.providers.length) {
+            await selectProviderPreset(providerImportState.providers[0].id);
+        } else {
+            renderProviderPresetDetail();
+        }
+    } catch (e) {
+        if (requestId !== providerImportState.catalogRequestId) return;
+        list.innerHTML = '<div class="error">预设加载失败：' + escapeHtml(e.message) + '</div>';
+        document.getElementById('providerPresetListFooter').textContent = '请稍后重试或改用手动添加';
+    } finally {
+        if (requestId === providerImportState.catalogRequestId) providerImportState.loading = false;
+    }
+}
+
+function renderProviderPresetList() {
+    var list = document.getElementById('providerPresetList');
+    if (!list) return;
+    if (!providerImportState.providers.length) {
+        list.innerHTML = '<div class="empty">没有匹配的 Provider 预设</div>';
+    } else {
+        list.innerHTML = providerImportState.providers.map(function(provider) {
+            var selected = providerImportState.selected && provider.id === providerImportState.selected.id ? ' selected' : '';
+            var configured = provider.configured ? '<span class="provider-preset-configured">已配置</span>' : '';
+            return '<button type="button" class="provider-preset-row' + selected + '" data-provider-id="' + escapeHtml(provider.id) + '">' +
+                '<span class="provider-preset-mark">' + escapeHtml(providerImportInitials(provider)) + '</span>' +
+                '<span class="provider-preset-row-copy"><span class="provider-preset-row-title"><span>' + escapeHtml(provider.name || provider.id) + '</span>' + configured + '</span>' +
+                '<span class="provider-preset-row-meta">' + escapeHtml(providerImportTypeLabel(provider.type)) + ' · ' + escapeHtml(providerImportCompatibilityLabel(provider.compatibility)) + ' · ' + Number(provider.models_count || 0).toLocaleString() + ' 个模型</span></span></button>';
+        }).join('');
+    }
+    var footer = '显示 ' + providerImportState.providers.length + ' / ' + Number(providerImportState.total || 0).toLocaleString();
+    if (providerImportState.hasMore) footer += ' · <button type="button" class="btn-task btn-sm" data-provider-load-more>加载更多</button>';
+    else footer += ' · 已加载全部';
+    document.getElementById('providerPresetListFooter').innerHTML = footer;
+}
+
+async function selectProviderPreset(providerId) {
+    var summary = providerImportState.providers.find(function(provider) { return provider.id === providerId; });
+    if (!summary) return;
+    var requestId = ++providerImportState.detailRequestId;
+    providerImportState.selected = summary;
+    providerImportState.models = [];
+    providerImportState.selectedModels = {};
+    providerImportState.defaultModel = '';
+    providerImportState.testedModels = [];
+    providerImportState.tested = false;
+    providerImportState.connectionProviderId = providerId;
+    var apiKeyInput = document.getElementById('providerImportApiKey');
+    var providerIdInput = document.getElementById('providerImportId');
+    var baseUrlInput = document.getElementById('providerImportBaseUrl');
+    var typeInput = document.getElementById('providerImportType');
+    var headersInput = document.getElementById('providerImportHeaders');
+    if (apiKeyInput) apiKeyInput.value = '';
+    if (providerIdInput) { providerIdInput.value = ''; providerIdInput.dataset.providerId = ''; }
+    if (baseUrlInput) baseUrlInput.value = '';
+    if (typeInput) typeInput.innerHTML = '';
+    if (headersInput) headersInput.value = '';
+    renderProviderPresetList();
+    document.getElementById('providerPresetDetail').innerHTML = '<div class="empty">正在读取 ' + escapeHtml(summary.name || summary.id) + ' 的模型信息...</div>';
+    try {
+        var data = await fetchJSON('/api/model-config/catalog/providers/' + encodeURIComponent(providerId));
+        if (requestId !== providerImportState.detailRequestId || providerImportState.connectionProviderId !== providerId) return;
+        providerImportState.selected = data.provider || summary;
+        providerImportState.models = providerImportState.selected.models || [];
+        renderProviderPresetList();
+        renderProviderPresetDetail();
+    } catch (e) {
+        if (requestId === providerImportState.detailRequestId) {
+            document.getElementById('providerPresetDetail').innerHTML = '<div class="error">Provider 预设加载失败：' + escapeHtml(e.message) + '</div>';
+        }
+    }
+}
+
+function renderProviderPresetDetail() {
+    var provider = providerImportState.selected;
+    var detail = document.getElementById('providerPresetDetail');
+    if (!provider) { detail.innerHTML = '<div class="empty">请选择一个 Provider</div>'; return; }
+    var models = provider.models || [];
+    var capabilities = {};
+    models.forEach(function(model) { (model.capabilities || []).forEach(function(cap) { capabilities[cap] = true; }); });
+    var capHtml = Object.keys(capabilities).slice(0, 8).map(function(cap) { return '<span class="provider-preset-capability">' + escapeHtml(PROVIDER_IMPORT_CAP_LABEL[cap] || cap) + '</span>'; }).join('');
+    var statusWarning = provider.compatibility === 'manual' || provider.compatibility === 'unsupported';
+    var statusHtml = '<span class="provider-preset-status' + (statusWarning ? ' warning' : '') + '"><span>●</span>' + escapeHtml(providerImportCompatibilityLabel(provider.compatibility)) + '</span>';
+    var providerDocsLink = provider.docs ? '<a href="' + escapeHtml(provider.docs) + '" target="_blank" rel="noopener">打开 ' + escapeHtml(provider.name || provider.id) + ' 配置文档 ↗</a>' : '';
+    detail.innerHTML =
+        '<div class="provider-preset-detail-top"><div class="provider-preset-identity"><span class="provider-preset-mark">' + escapeHtml(providerImportInitials(provider)) + '</span><div><h4 class="provider-preset-name">' + escapeHtml(provider.name || provider.id) + '</h4><div class="provider-preset-id">' + escapeHtml(provider.id) + ' · preset provider</div></div></div>' + statusHtml + '</div>' +
+        '<p class="provider-preset-description">' + escapeHtml(provider.description || '该 Provider 提供预配置的协议、Endpoint 和模型元数据。导入前仍需要用你的 API Key 测试实际连接。') + '</p>' +
+        '<div class="provider-preset-facts"><div class="provider-preset-fact"><label>协议</label><strong>' + escapeHtml(providerImportTypeLabel(provider.type)) + '</strong></div><div class="provider-preset-fact"><label>模型数量</label><strong>' + Number(provider.models_count || models.length).toLocaleString() + ' models</strong></div><div class="provider-preset-fact"><label>认证变量</label><strong>' + escapeHtml((provider.env || [])[0] || 'API Key') + '</strong></div></div>' +
+        '<div class="provider-preset-detail-section"><div class="provider-preset-detail-title">默认 Endpoint <span>连接测试前可修改</span></div><div class="provider-preset-endpoint"><code>' + escapeHtml(provider.base_url || '需要手动填写') + '</code></div></div>' +
+        '<div class="provider-preset-detail-section"><div class="provider-preset-detail-title">预设能力 <span>来自模型元数据</span></div><div class="provider-preset-capabilities">' + (capHtml || '<span class="provider-preset-capability">等待模型选择</span>') + '</div></div>' +
+        '<div class="provider-preset-links">' + providerDocsLink + '</div>';
+
+}
+
+function providerImportSetStep(step) {
+    if (step < 1 || step > 3) return;
+    if (step > 1 && !providerImportState.selected) { showToast('请先选择一个 Provider 预设', 3500); return; }
+    if (step > 2 && !providerImportState.tested) { showToast('请先测试 Provider 连接', 3500); return; }
+    providerImportState.step = step;
+    document.querySelectorAll('[data-import-step]').forEach(function(button) {
+        var value = parseInt(button.getAttribute('data-import-step'), 10);
+        button.classList.toggle('active', value === step);
+        button.classList.toggle('done', value < step);
+    });
+    document.querySelectorAll('[data-import-panel]').forEach(function(panel) { panel.classList.toggle('active', parseInt(panel.getAttribute('data-import-panel'), 10) === step); });
+    var back = document.getElementById('providerImportBack');
+    var next = document.getElementById('providerImportNext');
+    var submit = document.getElementById('providerImportSubmit');
+    back.disabled = step === 1;
+    next.style.display = step === 3 ? 'none' : '';
+    submit.style.display = step === 3 ? '' : 'none';
+    next.textContent = step === 2 && !providerImportState.tested ? '先测试连接' : (step === 2 ? '选择 Model' : '配置连接');
+    document.getElementById('providerImportFooterHint').textContent = providerImportState.source ? '预设来源：' + providerImportState.source + (providerImportState.stale ? ' · 使用旧缓存' : '') : '预设来源：加载中...';
+    if (step === 2) renderProviderConnection();
+    if (step === 3) renderProviderImportModels();
+}
+
+function renderProviderConnection() {
+    var provider = providerImportState.selected;
+    if (!provider) return;
+    document.getElementById('providerConnectionMark').textContent = providerImportInitials(provider);
+    document.getElementById('providerConnectionName').textContent = provider.name || provider.id;
+    document.getElementById('providerConnectionType').textContent = providerImportTypeLabel(provider.type);
+    var idInput = document.getElementById('providerImportId');
+    var baseInput = document.getElementById('providerImportBaseUrl');
+    var typeSelect = document.getElementById('providerImportType');
+    if (!idInput.value || idInput.dataset.providerId !== provider.id) {
+        idInput.value = provider.id || '';
+        idInput.dataset.providerId = provider.id || '';
+        baseInput.value = provider.base_url || '';
+        typeSelect.innerHTML = PROVIDER_IMPORT_TYPES.map(function(item) { return '<option value="' + item.value + '"' + (item.value === provider.type ? ' selected' : '') + '>' + escapeHtml(item.label) + '</option>'; }).join('');
+        if (!provider.type) {
+            typeSelect.innerHTML = '<option value="">该预设需要手动配置</option>' + typeSelect.innerHTML;
+            typeSelect.value = '';
+        }
+    }
+    var status = document.getElementById('providerImportStatus');
+    if (!providerImportState.tested) {
+        status.className = 'provider-status-card';
+        status.innerHTML = '<strong><span class="provider-status-icon">!</span>尚未测试连接</strong><p>Dashboard 会请求 Provider 的模型列表，验证凭证和 Base URL 是否可用。</p>';
+    }
+}
+
+function providerImportReadHeaders() {
+    var text = document.getElementById('providerImportHeaders').value || '';
+    var result = {};
+    text.split(/\r?\n/).forEach(function(line) {
+        var index = line.indexOf('=');
+        if (index > 0) {
+            var key = line.slice(0, index).trim();
+            var value = line.slice(index + 1).trim();
+            if (key && value) result[key] = value;
+        }
+    });
+    return result;
+}
+
+async function testProviderPreset() {
+    var provider = providerImportState.selected;
+    if (!provider || providerImportState.testing) return;
+    var apiKey = document.getElementById('providerImportApiKey').value.trim();
+    var providerType = document.getElementById('providerImportType').value;
+    var baseUrl = document.getElementById('providerImportBaseUrl').value.trim();
+    if (!providerType) { showToast('该预设没有可直接使用的协议，请手动添加', 5000); return; }
+    if (!apiKey && providerType !== 'vertexai') { showToast('请先输入 API Key', 3500); return; }
+    if (!baseUrl && providerType !== 'vertexai') { showToast('请先填写 Base URL', 3500); return; }
+    providerImportState.testing = true;
+    var button = document.getElementById('providerImportTest');
+    button.disabled = true;
+    button.textContent = '测试中...';
+    var status = document.getElementById('providerImportStatus');
+    status.className = 'provider-status-card';
+    status.innerHTML = '<strong><span class="provider-status-icon">…</span>正在请求 /models</strong><p>API Key 只用于请求你填写的 Base URL，测试阶段不会写入配置。</p>';
+    try {
+        var data = await postJSON('/api/model-config/catalog/test', {
+            provider_id: provider.id,
+            type: providerType,
+            base_url: baseUrl,
+            api_key: apiKey,
+            custom_headers: providerImportReadHeaders(),
+        });
+        if (!data.models || !data.models.length) {
+            throw new Error('连接成功，但 Provider 没有返回可导入的 Model');
+        }
+        providerImportState.tested = true;
+        providerImportState.testedModels = data.models.slice();
+        providerImportState.models = providerImportState.testedModels.slice();
+        providerImportState.selectedModels = {};
+        providerImportState.defaultModel = '';
+        providerImportPrepareModelSelection();
+        status.className = 'provider-status-card success';
+        status.innerHTML = '<strong><span class="provider-status-icon">✓</span>连接测试成功</strong><p>凭证有效，可以继续选择要写入配置的模型。</p><div class="provider-status-results"><div><span>Endpoint</span><strong>/models</strong></div><div><span>发现模型</span><strong>' + Number(data.model_count || 0).toLocaleString() + ' 个</strong></div></div>';
+        button.textContent = '重新测试';
+        document.getElementById('providerImportNext').textContent = '选择 Model';
+    } catch (e) {
+        providerImportState.tested = false;
+        status.className = 'provider-status-card';
+        status.innerHTML = '<strong style="color:var(--danger)"><span class="provider-status-icon" style="background:rgba(248,81,73,0.14)">×</span>连接测试失败</strong><p>' + escapeHtml(e.message) + '</p>';
+        button.textContent = '重新测试';
+    } finally {
+        providerImportState.testing = false;
+        button.disabled = false;
+    }
+}
+
+function providerImportPrepareModelSelection() {
+    var models = providerImportState.models || [];
+    if (!models.length) return;
+    var selected = providerImportState.selectedModels;
+    if (!Object.keys(selected).length) {
+        var first = models.find(function(model) { return model.status !== 'deprecated'; }) || models[0];
+        if (first) { selected[first.id] = true; providerImportState.defaultModel = first.id; }
+    }
+}
+
+function renderProviderImportModels() {
+    var list = document.getElementById('providerImportModelList');
+    var models = providerImportState.models || [];
+    var query = (providerImportState.modelQuery || '').toLowerCase();
+    var capability = providerImportState.modelCapability || '';
+    var filtered = models.filter(function(model) {
+        var matchesQuery = !query || String(model.id || '').toLowerCase().indexOf(query) >= 0 || String(model.display_name || '').toLowerCase().indexOf(query) >= 0;
+        var matchesCapability = !capability || (model.capabilities || []).indexOf(capability) >= 0;
+        return matchesQuery && matchesCapability;
+    });
+    if (!filtered.length) {
+        list.innerHTML = '<div class="empty">没有匹配的 Model</div>';
+    } else {
+        list.innerHTML = filtered.map(function(model) {
+            var id = model.id || '';
+            var checked = !!providerImportState.selectedModels[id];
+            var isDefault = providerImportState.defaultModel === id;
+            var caps = (model.capabilities || []).slice(0, 6).map(function(cap) { return '<span class="provider-import-model-badge' + (cap === 'thinking' ? ' thinking' : '') + '">' + escapeHtml(PROVIDER_IMPORT_CAP_LABEL[cap] || cap) + '</span>'; }).join('');
+            if (model.status) caps += '<span class="provider-import-model-badge">' + escapeHtml(model.status) + '</span>';
+            var defaultHtml = checked ? '<label class="provider-import-model-badge default"><input type="radio" name="provider-import-default" data-import-default="' + escapeHtml(id) + '"' + (isDefault ? ' checked' : '') + '> 默认</label>' : '';
+            return '<div class="provider-import-model-row' + (checked ? ' selected' : '') + '"><input type="checkbox" data-import-model="' + escapeHtml(id) + '"' + (checked ? ' checked' : '') + '><div class="provider-import-model-copy"><div class="provider-import-model-name" title="' + escapeHtml(id) + '">' + escapeHtml(model.display_name || id) + '</div><div class="provider-import-model-meta"><span>model=<strong>' + escapeHtml(id) + '</strong></span><span>ctx=<strong>' + Number(model.max_context_size || 0).toLocaleString() + '</strong></span><span>max_output=<strong>' + Number(model.max_output_size || 0).toLocaleString() + '</strong></span></div></div><div class="provider-import-model-badges">' + caps + defaultHtml + '</div></div>';
+        }).join('');
+    }
+    document.getElementById('providerImportModelCount').textContent = '已选 ' + Object.keys(providerImportState.selectedModels).length + ' 个';
+}
+
+function providerImportPayload(overwrite) {
+    var provider = providerImportState.selected;
+    var selectedIds = Object.keys(providerImportState.selectedModels);
+    return {
+        catalog_provider_id: provider.id,
+        provider_id: document.getElementById('providerImportId').value.trim() || provider.id,
+        type: document.getElementById('providerImportType').value,
+        base_url: document.getElementById('providerImportBaseUrl').value.trim(),
+        api_key: document.getElementById('providerImportApiKey').value,
+        custom_headers: providerImportReadHeaders(),
+        model_ids: selectedIds,
+        tested_models: providerImportState.testedModels.slice(),
+        default_model: providerImportState.defaultModel || selectedIds[0],
+        overwrite: !!overwrite,
+    };
+}
+
+async function importProviderPreset(overwrite) {
+    if (!providerImportState.selected) return;
+    var selectedIds = Object.keys(providerImportState.selectedModels);
+    if (!selectedIds.length) { showToast('请至少选择一个 Model', 3500); return; }
+    if (!providerImportState.defaultModel) providerImportState.defaultModel = selectedIds[0];
+    var submit = document.getElementById('providerImportSubmit');
+    submit.disabled = true;
+    submit.textContent = '导入中...';
+    try {
+        var data = await postJSON('/api/model-config/catalog/import', providerImportPayload(overwrite));
+        closeProviderImport();
+        selectedProvider = data.provider;
+        await loadModelConfig();
+        showToast('已导入 ' + data.provider + '，添加 ' + ((data.models || []).length) + ' 个 Model', 5000);
+    } catch (e) {
+        if (e.status === 409 && !overwrite) {
+            confirmDialog(e.message + '\\n\\n覆盖时不会删除本 Provider 其他已配置 Model。是否继续？', function() { importProviderPreset(true); }, { danger: false, title: 'Provider 已存在' });
+        } else {
+            showToast('导入失败: ' + e.message, 5000);
+        }
+    } finally {
+        submit.disabled = false;
+        submit.textContent = '导入 Provider';
+    }
+}
+
 // === Agent instructions ===
 function agentScopeById(scopeId) {
     return agentsState.scopes.find(function(scope) { return scope.id === scopeId; }) || null;
@@ -2696,6 +3548,137 @@ function reloadAgentContent(force) {
 }
 
 // === Settings ===
+var kimiWebCommandsState = { loading: true, error: '', local: null, external: null };
+var kimiWebCommandsRequestId = 0;
+
+function buildKimiWebCommandsHtml() {
+    var state = kimiWebCommandsState;
+
+    function buildPillSummary(item) {
+        var summary = item && item.summary;
+        if (!summary) return '<span class="kimi-web-command-pill-loading">生成中...</span>';
+        var address = String(summary.bind || '') + ':' + String(summary.port || '');
+        var html = '<span class="kimi-web-command-pill-address">' + escapeHtml(address) + '</span>';
+        (summary.hosts || []).slice(0, 2).forEach(function(host) {
+            html += '<span class="kimi-web-command-pill-host" title="' + escapeHtml(host) + '">' + escapeHtml(host) + '</span>';
+        });
+        return html;
+    }
+
+    function buildPill(label, key) {
+        var item = state[key];
+        var command = item && item.command ? item.command : '';
+        var content = state.error
+            ? '<span class="kimi-web-command-pill-loading">加载失败</span>'
+            : buildPillSummary(item);
+        var disabled = command ? '' : ' disabled';
+        var action = command ? ' onclick="copyKimiWebCommand(\'' + key + '\')"' : '';
+        return '<button type="button" class="kimi-web-command-pill ' + key + '" title="' + escapeHtml(command || label) + '" aria-label="点击复制' + label + '启动命令"' + action + disabled + '>' +
+            '<span class="kimi-web-command-pill-label">' + label + '</span>' +
+            '<span class="kimi-web-command-pill-summary">' + content + '</span>' +
+            '<span class="kimi-web-command-pill-action">复制</span>' +
+        '</button>';
+    }
+
+    return '<div class="kimi-web-command-pills-inner">' +
+        buildPill('内网', 'local') +
+        buildPill('外网', 'external') +
+    '</div>';
+}
+
+function renderKimiWebCommandsPanel() {
+    var container = document.getElementById('kimiWebCommandPills');
+    if (container) container.innerHTML = buildKimiWebCommandsHtml();
+}
+
+function loadKimiWebCommands() {
+    var container = document.getElementById('kimiWebCommandPills');
+    if (!container) return;
+    var requestId = ++kimiWebCommandsRequestId;
+    kimiWebCommandsState = { loading: true, error: '', local: null, external: null };
+    renderKimiWebCommandsPanel();
+    var payload = {
+        bind: settings.kw_bind || '0.0.0.0',
+        port: parseInt(settings.kw_port, 10) || 5494,
+        bypass_auth: settings.kw_bypass_auth !== false,
+        allowed_hosts: settings.kw_allowed_hosts || '',
+        public_urls: (settings.kw_public_urls || []).map(normalizePublicUrl).filter(Boolean)
+    };
+    postJSON('/api/kimi-web-commands', payload)
+        .then(function(data) {
+            if (requestId !== kimiWebCommandsRequestId) return;
+            kimiWebCommandsState = { loading: false, error: '', local: data.local, external: data.external };
+            renderKimiWebCommandsPanel();
+        })
+        .catch(function(e) {
+            if (requestId !== kimiWebCommandsRequestId) return;
+            kimiWebCommandsState = { loading: false, error: e.message || '未知错误', local: null, external: null };
+            renderKimiWebCommandsPanel();
+        });
+}
+
+function copyKimiWebCommand(scope) {
+    var item = kimiWebCommandsState[scope];
+    if (!item || !item.command) return;
+    _copyToClipboard(item.command, (scope === 'local' ? '内网' : '外网') + '启动命令已复制');
+}
+
+var settingsScrollSpyHandler = null;
+var settingsScrollSpyResizeHandler = null;
+var settingsScrollSpyFrame = 0;
+
+function setActiveSettingsNav(sectionId) {
+    document.querySelectorAll('.settings-nav-item').forEach(function(item) {
+        var isActive = item.getAttribute('data-settings-target') === sectionId;
+        item.classList.toggle('active', isActive);
+        item.setAttribute('aria-current', isActive ? 'location' : 'false');
+    });
+}
+
+function updateSettingsNavOnScroll() {
+    var sections = document.querySelectorAll('.settings-section');
+    if (!sections.length) return;
+    var header = document.querySelector('header');
+    var marker = window.pageYOffset + (header ? header.offsetHeight + 28 : 110);
+    var activeId = sections[0].id;
+    sections.forEach(function(section) {
+        if (section.getBoundingClientRect().top + window.pageYOffset <= marker) {
+            activeId = section.id;
+        }
+    });
+    setActiveSettingsNav(activeId);
+}
+
+function scheduleSettingsNavUpdate() {
+    if (settingsScrollSpyFrame) return;
+    settingsScrollSpyFrame = window.requestAnimationFrame(function() {
+        settingsScrollSpyFrame = 0;
+        updateSettingsNavOnScroll();
+    });
+}
+
+function setupSettingsScrollSpy() {
+    if (settingsScrollSpyHandler) window.removeEventListener('scroll', settingsScrollSpyHandler);
+    if (settingsScrollSpyResizeHandler) window.removeEventListener('resize', settingsScrollSpyResizeHandler);
+    if (settingsScrollSpyFrame) {
+        window.cancelAnimationFrame(settingsScrollSpyFrame);
+        settingsScrollSpyFrame = 0;
+    }
+    if (!document.querySelector('.settings-section')) return;
+    settingsScrollSpyHandler = scheduleSettingsNavUpdate;
+    settingsScrollSpyResizeHandler = scheduleSettingsNavUpdate;
+    window.addEventListener('scroll', settingsScrollSpyHandler, { passive: true });
+    window.addEventListener('resize', settingsScrollSpyResizeHandler);
+    updateSettingsNavOnScroll();
+}
+
+function scrollToSettingsSection(sectionId) {
+    var section = document.getElementById(sectionId);
+    if (!section) return;
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setActiveSettingsNav(sectionId);
+}
+
 function renderSettings() {
     var isLocal = settings.kw_bind === '127.0.0.1';
 
@@ -2718,9 +3701,10 @@ function renderSettings() {
             var cur = settings[item.key];
             var btns = item.options.map(function(o) {
                 var active = (o.v === cur) ? ' active' : '';
-                return '<button type="button" class="segment-btn' + active + '" onclick="setSetting(\'' + item.key + '\', \'' + escapeHtml(o.v) + '\')">' + escapeHtml(o.t) + '</button>';
+                var pressed = (o.v === cur) ? 'true' : 'false';
+                return '<button type="button" class="segment-btn' + active + '" aria-pressed="' + pressed + '" onclick="setSetting(\'' + item.key + '\', \'' + escapeHtml(o.v) + '\')">' + escapeHtml(o.t) + '</button>';
             }).join('');
-            return '<div class="segment-control">' + btns + '</div>';
+            return '<div class="segment-control settings-segment-control" role="group" aria-label="' + escapeHtml(item.label) + '">' + btns + '</div>';
         }
         if (item.type === 'text') {
             var val = settings[item.key] || '';
@@ -2729,13 +3713,42 @@ function renderSettings() {
         if (item.type === 'public_urls') {
             return buildPublicUrlInput();
         }
+        if (item.type === 'session_title_auto_generate') {
+            var titleAutoOn = settings.session_title_auto_generate === true;
+            return '<div class="setting-toggle-control"><span class="setting-toggle-state ' + (titleAutoOn ? 'on' : 'off') + '">' + (titleAutoOn ? '已开启' : '已关闭') + '</span><label class="toggle-switch"><input type="checkbox" aria-label="默认新会话自动生成标题" onchange="saveSessionTitleAutoGenerate(this.checked)"' + (titleAutoOn ? ' checked' : '') + '><span class="toggle-slider"></span></label></div>';
+        }
+        if (item.type === 'session_title_interval') {
+            var interval = Number(settings.session_title_every_exchanges);
+            if (isNaN(interval)) interval = 10;
+            return '<div class="setting-number-control setting-number-control-interval"><span class="setting-number-prefix">每隔</span><input type="number" min="0" max="100" inputmode="numeric" aria-label="自动标题刷新频率" class="setting-number-input" value="' + escapeHtml(String(interval)) + '" onchange="saveSessionTitleEveryExchanges(this.value)"><span class="setting-number-unit">轮对话</span></div>';
+        }
+        if (item.type === 'session_title_model') {
+            var modelConfig = statusData.modelConfig || {};
+            var models = modelConfig.models || [];
+            var selectedModel = settings.session_title_model || '';
+            var defaultModelId = modelConfig.default_model || '';
+            var defaultModel = models.find(function(model) { return model.id === defaultModelId; });
+            var defaultLabel = defaultModel ? (defaultModel.display_name || defaultModel.model || defaultModel.id) : (defaultModelId || '未配置');
+            if (defaultModel && defaultModel.provider) defaultLabel += ' · ' + defaultModel.provider;
+            var modelHtml = '<option value=""' + (!selectedModel ? ' selected' : '') + '>当前默认模型：' + escapeHtml(defaultLabel) + '</option>' + models.map(function(model) {
+                var modelId = model.id || '';
+                var label = model.display_name || model.model || model.id || '未命名模型';
+                if (modelId === defaultModelId) label += ' · 当前默认';
+                if (model.provider) label += ' · ' + model.provider;
+                return '<option value="' + escapeHtml(modelId) + '"' + (modelId === selectedModel ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+            }).join('');
+            if (!models.length) {
+                modelHtml = '<option value="">请先在第三方模型中配置 Model</option>';
+            }
+            return '<select class="search-box" onchange="saveSessionTitleModel(this.value)">' + modelHtml + '</select>';
+        }
         if (item.type === 'number') {
             var val = settings[item.key] || 0;
-            return '<input type="number" class="search-box" style="width:100px" value="' + escapeHtml(String(val)) + '" onchange="setSetting(\'' + item.key + '\', parseInt(this.value,10) || 5494)">';
+            return '<div class="setting-number-control"><input type="number" min="1" max="65535" inputmode="numeric" aria-label="Kimi Web 端口" class="setting-number-input" value="' + escapeHtml(String(val)) + '" onchange="setSetting(\'' + item.key + '\', parseInt(this.value,10) || 5494)"><span class="setting-number-unit">端口</span></div>';
         }
         if (item.type === 'dashboard_port') {
             var dashboardPort = settings.dashboard_port || SETTINGS_DEFAULTS.dashboard_port;
-            return '<input type="number" min="1" max="65535" class="search-box" style="width:100px" value="' + escapeHtml(String(dashboardPort)) + '" onchange="saveDashboardPort(this.value)">';
+            return '<div class="setting-number-control"><input type="number" min="1" max="65535" inputmode="numeric" aria-label="Dashboard 服务端口" class="setting-number-input" value="' + escapeHtml(String(dashboardPort)) + '" onchange="saveDashboardPort(this.value)"><span class="setting-number-unit">端口</span></div>';
         }
         if (item.type === 'startup_toggle') {
             if (!startupServiceState.loaded) {
@@ -2782,14 +3795,42 @@ function renderSettings() {
         return '<div class="public-url-tags" style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-top:0.5rem;">' + tags + '</div>';
     }
 
-    function renderItem(item) {
+    function renderItem(item, nested) {
         // 本机模式下隐藏外网专属设置
         if (isLocal && item.key === 'kw_public_urls') return '';
+        var titleAutoEnabled = settings.session_title_auto_generate === true;
+        var isTitleDependent = item.type === 'session_title_interval' || item.type === 'session_title_model';
+        if (!nested && isTitleDependent) return '';
 
         var infoHtml = '<div class="settings-info">' +
             '<div class="config-item-title">' + escapeHtml(item.label) + '</div>' +
             '<div class="config-item-meta">' + escapeHtml(item.desc) + '</div>' +
         '</div>';
+
+        if (item.type === 'session_title_auto_generate') {
+            var titleDetails = '';
+            if (titleAutoEnabled) {
+                var titleInterval = Number(settings.session_title_every_exchanges);
+                if (isNaN(titleInterval)) titleInterval = 10;
+                var titleCadence = titleInterval > 0 ? '首轮生成 · 每隔 ' + titleInterval + ' 轮对话更新' : '首轮生成一次 · 后续不自动更新';
+                var titleItems = SETTINGS_GROUPS[0].items.filter(function(config) {
+                    return config.type === 'session_title_interval' || config.type === 'session_title_model';
+                });
+                titleDetails = '<div class="settings-title-feature-details">' +
+                    '<div class="settings-title-summary"><span>当前规则</span><strong>' + escapeHtml(titleCadence) + '</strong></div>' +
+                    titleItems.map(function(config) { return renderItem(config, true); }).join('') +
+                '</div>';
+            } else {
+                titleDetails = '<div class="settings-title-feature-collapsed"><strong>自动标题已关闭</strong><span>打开后，新会话会在首轮回答完成时生成标题；关闭时仍可在会话详情里手动点击“AI 重命名”。</span></div>';
+            }
+            return '<div class="settings-title-feature ' + (titleAutoEnabled ? 'is-enabled' : 'is-disabled') + '">' +
+                '<div class="settings-item settings-item-row settings-title-feature-main">' +
+                    infoHtml +
+                    '<div class="settings-control">' + buildControl(item) + '</div>' +
+                '</div>' +
+                titleDetails +
+            '</div>';
+        }
 
         // 自定义访问 URL：标签在左，输入框在右，已添加 URL 在描述下方跨行显示
         if (item.type === 'public_urls') {
@@ -2815,7 +3856,9 @@ function renderSettings() {
         // 水平布局：标签在左，控件在右
         if (item.row) {
             var wideCls = item.wide ? ' wide' : '';
-            return '<div class="settings-item settings-item-row' + wideCls + '">' +
+            var commandCls = item.type === 'kimi_web_commands' ? ' kimi-web-command-row' : '';
+            var nestedCls = nested ? ' settings-title-dependent-row' : '';
+            return '<div class="settings-item settings-item-row' + wideCls + commandCls + nestedCls + '">' +
                 infoHtml +
                 '<div class="settings-control">' + buildControl(item) + '</div>' +
             '</div>';
@@ -2833,25 +3876,40 @@ function renderSettings() {
         '</div>';
     }
 
-    var html = SETTINGS_GROUPS.map(function(group) {
-        var itemsHtml = group.items.map(renderItem).join('');
-        if (!itemsHtml) return '';  // 整组为空则跳过
-        return '<div class="settings-group">' +
-            '<div class="settings-group-header">' +
-                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + group.icon + '</svg>' +
-                '<span class="settings-group-title">' + escapeHtml(group.title) + '</span>' +
-                '<span class="settings-group-desc">' + escapeHtml(group.desc) + '</span>' +
+    var navHtml = [];
+    var sectionsHtml = [];
+    SETTINGS_GROUPS.forEach(function(group, groupIndex) {
+        var itemsHtml = group.items.map(function(item) { return renderItem(item, false); }).join('');
+        if (!itemsHtml) return;
+        var sectionId = 'settings-section-' + groupIndex;
+        navHtml.push('<button type="button" class="settings-nav-item' + (groupIndex === 0 ? ' active' : '') + '" data-settings-target="' + sectionId + '" onclick="scrollToSettingsSection(\'' + sectionId + '\')">' +
+            '<span class="settings-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + group.icon + '</svg></span>' +
+            '<span><strong>' + escapeHtml(group.title) + '</strong><small>' + escapeHtml(group.desc) + '</small></span>' +
+        '</button>');
+        sectionsHtml.push('<section id="' + sectionId + '" class="settings-section">' +
+            '<div class="settings-section-header">' +
+                '<div><span class="settings-section-kicker">设置区 ' + String(groupIndex + 1).padStart(2, '0') + '</span><h3>' + escapeHtml(group.title) + '</h3><p>' + escapeHtml(group.desc) + '</p></div>' +
+                '<svg class="settings-section-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + group.icon + '</svg>' +
             '</div>' +
-            '<div class="settings-group-body">' + itemsHtml + '</div>' +
-        '</div>';
-    }).join('');
+            '<div class="settings-section-body">' + itemsHtml + '</div>' +
+        '</section>');
+    });
 
-    html += '<div class="config-form-actions" style="margin-top:1rem">' +
-        '<button class="btn-task" onclick="resetSettings()">恢复默认</button>' +
+    var html = '<div class="settings-shell">' +
+        '<nav class="settings-nav" aria-label="设置区域">' +
+            '<div class="settings-nav-label">快速跳转</div>' + navHtml.join('') +
+        '</nav>' +
+        '<div class="settings-sections">' + sectionsHtml.join('') + '</div>' +
+    '</div>';
+
+    html += '<div class="settings-actions">' +
+        '<button class="btn-task btn-secondary" onclick="resetSettings()">恢复界面默认</button>' +
     '</div>';
     document.getElementById('settingsList').innerHTML = html;
-    // 异步加载图床配置表单
+    setupSettingsScrollSpy();
+    // 异步加载图床配置表单和 Kimi Web 命令预览
     loadImageBedConfig();
+    loadKimiWebCommands();
 }
 
 // === 自定义访问 URL 管理（必须为全局函数，供 HTML onclick 调用）===
